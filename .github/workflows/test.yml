@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
       - name: install yjs and lib0
