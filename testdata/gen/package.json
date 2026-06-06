@@ -10,7 +10,7 @@
   "dependencies": {
     "lib0": "0.2.93",
     "y-protocols": "1.0.6",
-    "yjs": "13.6.20"
+    "yjs": "13.6.31"
   },
   "engines": {
     "node": ">=20"
