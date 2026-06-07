@@ -1,9 +1,9 @@
 module github.com/Deln0r/ygo
 
-go 1.22
+go 1.23
 
 require (
-	github.com/coder/websocket v1.8.12
+	github.com/coder/websocket v1.8.14
 	modernc.org/sqlite v1.29.10
 )
 
