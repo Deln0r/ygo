@@ -26,7 +26,7 @@ jobs:
         run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
       - name: upload coverage
         if: matrix.go == '1.24'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.txt
