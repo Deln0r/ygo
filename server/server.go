@@ -118,6 +118,13 @@ type Options struct {
 	// (4096); a negative value disables the cap. New clients beyond
 	// the cap are dropped; already-tracked clients keep updating.
 	MaxAwarenessClients int
+
+	// ReadLimit sets the maximum WebSocket message size in bytes that
+	// the server will read from a single client frame. Defaults to
+	// coder/websocket's built-in 32 768-byte limit when zero. Raise
+	// this for large collaborative documents (e.g. 128 << 20 for
+	// 128 MiB). Set to -1 for unlimited.
+	ReadLimit int64
 }
 
 // Server is the http.Handler implementation. Construct with New
@@ -232,6 +239,9 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// websocket.Accept already wrote a response.
 		return
+	}
+	if s.opts.ReadLimit != 0 {
+		wsConn.SetReadLimit(s.opts.ReadLimit)
 	}
 
 	state, err := s.acquireDoc(r.Context(), docName)
