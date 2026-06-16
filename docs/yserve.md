@@ -49,6 +49,9 @@ addressed by URL path, y-websocket convention).
 | `-store` | (empty) | SQLite database path; empty = in-memory only |
 | `-version-interval` | `0` (off) | capture a version of each changed document at this interval; requires `-store` |
 | `-keep-versions` | `10` | keep at most N versions per document (0 = keep all) |
+| `-read-limit` | `0` (32 KiB) | max WebSocket frame the server reads per client; raise for large documents, `-1` = unlimited |
+| `-awareness-timeout` | `0` (30s) | evict a presence entry after it is silent this long |
+| `-max-awareness-clients` | `0` (4096) | cap distinct presence clients per room; `-1` = unlimited |
 
 ## Document history (versioning)
 

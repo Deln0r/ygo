@@ -12,6 +12,8 @@
 //
 //	yserve [-addr :8080] [-store path/to/ygo.db]
 //	       [-version-interval 10m] [-keep-versions 10]
+//	       [-read-limit BYTES] [-awareness-timeout 30s]
+//	       [-max-awareness-clients 4096]
 //
 // Without -store the server runs purely in-memory; documents are lost
 // when their last connection disconnects. With -store every applied
@@ -23,6 +25,12 @@
 // -keep-versions bounds the history per document (0 keeps everything).
 // Versions survive log compaction and can be listed, loaded, and
 // restored programmatically via the persist package.
+//
+// -read-limit raises the maximum WebSocket frame size the server will
+// read (default 32 KiB); raise it for large documents whose sync frame
+// exceeds the default, or pass -1 for unlimited. -awareness-timeout and
+// -max-awareness-clients tune the presence layer's silent-client
+// eviction window and per-room client cap.
 //
 // Mount point: documents are addressed by the URL path. A client
 // connecting to ws://host:8080/my-doc operates on docName "my-doc",
@@ -49,6 +57,9 @@ func main() {
 	storePath := flag.String("store", "", "SQLite database path for persistence (empty = in-memory)")
 	versionInterval := flag.Duration("version-interval", 0, "capture a version of each changed document at this interval (0 = off; requires -store)")
 	keepVersions := flag.Int("keep-versions", 10, "keep at most N versions per document when auto-versioning (0 = keep all)")
+	readLimit := flag.Int64("read-limit", 0, "max WebSocket message size in bytes per client frame (0 = 32768 default; -1 = unlimited)")
+	awarenessTimeout := flag.Duration("awareness-timeout", 0, "evict a presence entry after it is silent this long (0 = 30s default)")
+	maxAwarenessClients := flag.Int("max-awareness-clients", 0, "cap distinct presence clients per room (0 = 4096 default; -1 = unlimited)")
 	flag.Parse()
 
 	var store persist.Store
@@ -71,10 +82,13 @@ func main() {
 	}
 
 	srv := server.New(server.Options{
-		Store:           store,
-		OriginPatterns:  []string{"*"}, // dev-friendly; tighten in prod
-		VersionInterval: *versionInterval,
-		KeepVersions:    *keepVersions,
+		Store:               store,
+		OriginPatterns:      []string{"*"}, // dev-friendly; tighten in prod
+		VersionInterval:     *versionInterval,
+		KeepVersions:        *keepVersions,
+		ReadLimit:           *readLimit,
+		AwarenessTimeout:    *awarenessTimeout,
+		MaxAwarenessClients: *maxAwarenessClients,
 	})
 
 	httpSrv := &http.Server{
