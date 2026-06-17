@@ -40,11 +40,13 @@ type Client struct {
 	docName   string
 	storePath string
 
-	mu          sync.Mutex
-	listener    Listener
-	inner       *client.Client
-	store       *sqlite.Store
-	cancelWatch func()
+	mu             sync.Mutex
+	listener       Listener
+	inner          *client.Client
+	store          *sqlite.Store
+	cancelWatch    func()
+	presence       PresenceListener
+	cancelPresence func()
 }
 
 // NewClient prepares a sync client for the document. url is the
@@ -122,6 +124,9 @@ func (c *Client) Connect() error {
 			l.OnDocChanged()
 		})
 	}
+	if c.presence != nil {
+		c.cancelPresence = c.startPresence(inner, c.presence)
+	}
 	c.mu.Unlock()
 	return inner.Connect(context.Background())
 }
@@ -132,13 +137,18 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	inner := c.inner
 	cancelWatch := c.cancelWatch
+	cancelPresence := c.cancelPresence
 	store := c.store
 	c.inner = nil
 	c.cancelWatch = nil
+	c.cancelPresence = nil
 	c.store = nil
 	c.mu.Unlock()
 	if cancelWatch != nil {
 		cancelWatch()
+	}
+	if cancelPresence != nil {
+		cancelPresence()
 	}
 	if inner == nil {
 		return nil

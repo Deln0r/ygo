@@ -53,6 +53,44 @@ Implement `TextChangeListener` / `MapChangeListener` in Swift or Kotlin.
 Callbacks run on a background goroutine while the document lock is held;
 dispatch to the main thread before touching UI.
 
+## Collaborator presence and live cursors
+
+The sync `Client` carries an awareness (presence) channel for ephemeral
+per-user state — who is online, their name, their cursor. Publishing
+your own and observing everyone else's is the full round trip for
+rendering live remote cursors.
+
+**Publish** your state with `SetAwarenessState`, typically a small JSON
+object with your name and a cursor encoded from the text you are editing:
+
+```go
+cur, _ := doc.Text("note").EncodeCursor(index, 0) // anchor at a position
+state, _ := json.Marshal(map[string]any{
+    "name":   "ian",
+    "cursor": base64.StdEncoding.EncodeToString(cur),
+})
+client.SetAwarenessState(state)
+```
+
+**Observe** everyone else with `Client.ObservePresence`. The listener
+receives the whole room as a JSON object keyed by clientID, and fires on
+every change — a cursor move, a join, a leave:
+
+```go
+client.ObservePresence(listener) // listener.OnPresenceChange([]byte)
+// delivers e.g. {"42":{"name":"ian","cursor":"BASE64..."},"77":{"name":"sam"}}
+```
+
+For each peer, base64-decode its `cursor` and call `Text.ResolveCursor`
+to map it to a local index — the position stays correct even after
+concurrent edits shift the text. Skip your own entry with
+`Client.ClientID()`; call `Client.PresenceStates()` for the initial
+paint before the first change arrives. A peer that disconnects or calls
+`RemoveAwarenessState` drops out of the next snapshot.
+
+Implement `PresenceListener` in Swift or Kotlin. Callbacks run on a
+background goroutine; dispatch to the main thread before touching UI.
+
 ## Verified iOS xcframework build
 
 ```bash
