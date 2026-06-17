@@ -155,9 +155,18 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 		start := before[client]
 		clock := start
 		for clock < end {
-			it := store.GetItem(block.ID{Client: client, Clock: clock})
+			// Walk cell by cell (not clock by clock): a Skip block covers
+			// a huge range in one GC cell, and a malformed update can drive
+			// afterState arbitrarily high, so a per-clock scan would hang.
+			cell, ok := store.GetBlock(block.ID{Client: client, Clock: clock})
+			if !ok {
+				break
+			}
+			it := cell.AsItem()
 			if it == nil {
-				clock++
+				if !advanceClock(&clock, cell.ClockEnd()) {
+					break
+				}
 				continue
 			}
 			if um.itemInScope(it) {
@@ -177,7 +186,9 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 				}
 				si.Insertions.Insert(client, recStart, recEnd-recStart)
 			}
-			clock = it.ID.Clock + it.Len
+			if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
+				break
+			}
 		}
 	}
 
@@ -364,22 +375,30 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 	//     neighbours, so delete only this range's slice via the
 	//     split-aware DeleteRange (deleting the whole merged item would
 	//     remove adjacent edits that belong to other undo steps).
+	bs := txn.Store()
 	si.Insertions.Iterate(func(client uint64, ranges []encoding.Range) {
 		for _, r := range ranges {
 			clock := r.Start
 			for clock < r.End() {
-				it := txn.GetItem(block.ID{Client: client, Clock: clock})
+				cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
+				if !ok {
+					break
+				}
+				it := cell.AsItem()
 				if it == nil {
-					clock++
+					if !advanceClock(&clock, cell.ClockEnd()) {
+						break
+					}
 					continue
 				}
 				if it.Redone != nil {
-					advance := it.ID.Clock + it.Len
 					live := followRedone(txn, it)
 					if live != nil && !live.IsDeleted() {
 						txn.Delete(live)
 					}
-					clock = advance
+					if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
+						break
+					}
 					continue
 				}
 				end := r.End()
@@ -387,7 +406,9 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 					end = itEnd
 				}
 				txn.DeleteRange(client, clock, end)
-				clock = end
+				if !advanceClock(&clock, end-1) {
+					break
+				}
 			}
 		}
 	})
@@ -397,16 +418,40 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 		for _, r := range ranges {
 			clock := r.Start
 			for clock < r.End() {
-				it := txn.GetItem(block.ID{Client: client, Clock: clock})
+				cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
+				if !ok {
+					break
+				}
+				it := cell.AsItem()
 				if it == nil {
-					clock++
+					if !advanceClock(&clock, cell.ClockEnd()) {
+						break
+					}
 					continue
 				}
 				redoItem(txn, it)
-				clock = it.ID.Clock + it.Len
+				if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
+					break
+				}
 			}
 		}
 	})
+}
+
+// advanceClock moves *clock past lastInclusive (the inclusive upper
+// clock of the cell just processed) and reports whether it advanced. It
+// returns false WITHOUT moving when a step would not make progress: a
+// zero-length item (ID.Clock+Len-1 underflows below clock) or a
+// malformed Skip whose range reaches MaxUint64 (where +1 wraps to 0 and
+// would restart the scan from clock 0). Callers break rather than spin.
+// Well-formed updates always advance, so this never fires for valid
+// input.
+func advanceClock(clock *uint64, lastInclusive uint64) bool {
+	if lastInclusive < *clock || lastInclusive == ^uint64(0) {
+		return false
+	}
+	*clock = lastInclusive + 1
+	return true
 }
 
 // isTrackedOrigin reports whether origin is in trackedOrigins. The

@@ -381,7 +381,9 @@ func applyDeleteRange(txn *doc.TransactionMut, client, start, end uint64) (int, 
 		}
 		if cell.AsItem() == nil {
 			// GC cell — already tombstoned, just step past.
-			clock = cell.ClockEnd() + 1
+			if !advanceClock(&clock, cell.ClockEnd()) {
+				break
+			}
 			continue
 		}
 
@@ -393,7 +395,9 @@ func applyDeleteRange(txn *doc.TransactionMut, client, start, end uint64) (int, 
 		item := txn.MaterializeCleanStart(block.ID{Client: client, Clock: clock})
 		if item == nil {
 			// Shouldn't happen after GetBlock succeeded; defensive.
-			clock = cell.ClockEnd() + 1
+			if !advanceClock(&clock, cell.ClockEnd()) {
+				break
+			}
 			continue
 		}
 		if item.ID.Clock+item.Len-1 >= end {
@@ -411,7 +415,26 @@ func applyDeleteRange(txn *doc.TransactionMut, client, start, end uint64) (int, 
 			txn.Delete(item)
 			deleted++
 		}
-		clock = item.ID.Clock + item.Len
+		if !advanceClock(&clock, item.ID.Clock+item.Len-1) {
+			break
+		}
 	}
 	return deleted, Range{}
+}
+
+// advanceClock moves *clock past lastInclusive (the inclusive upper
+// clock of the cell just processed) and reports whether it advanced. It
+// returns false WITHOUT moving when stepping forward would not make
+// progress: either lastInclusive is below the current clock (a
+// zero-length item, whose ID.Clock+Len-1 underflows below clock) or it
+// is the very top of the uint64 space (a malformed Skip reaching
+// MaxUint64, where +1 wraps to 0 and would restart the scan). Callers
+// break instead of spinning or wrapping back to clock 0. Well-formed
+// updates always advance, so this never fires for valid input.
+func advanceClock(clock *uint64, lastInclusive uint64) bool {
+	if lastInclusive < *clock || lastInclusive == ^uint64(0) {
+		return false
+	}
+	*clock = lastInclusive + 1
+	return true
 }

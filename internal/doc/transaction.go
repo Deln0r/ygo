@@ -196,9 +196,21 @@ func (t *TransactionMut) trackSubdocs() {
 	for client, after := range t.afterState {
 		clock := t.beforeState[client]
 		for clock < after {
-			it := bs.GetItem(block.ID{Client: client, Clock: clock})
+			// Walk cell by cell, not clock by clock: a Skip block can
+			// cover a huge clock range in a single GC cell, and advancing
+			// one clock at a time over it (GetItem returns nil there) is
+			// O(range) — a malformed update with a multi-billion-clock
+			// Skip would hang here. GetBlock locates the covering cell so
+			// we jump past it in one step.
+			cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
+			if !ok {
+				break // no cell covers this clock; the contiguous run ended
+			}
+			it := cell.AsItem()
 			if it == nil {
-				clock++
+				if !advanceClock(&clock, cell.ClockEnd()) { // skip a GC / Skip cell whole
+					break
+				}
 				continue
 			}
 			if it.Content.Kind == block.KindDoc {
@@ -212,7 +224,9 @@ func (t *TransactionMut) trackSubdocs() {
 				// removed-scan below skips it symmetrically.
 				if it.IsDeleted() {
 					t.doc.RemoveSubdoc(guid)
-					clock = it.ID.Clock + it.Len
+					if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
+						break
+					}
 					continue
 				}
 				t.subdocsAdded = append(t.subdocsAdded, guid)
@@ -224,7 +238,9 @@ func (t *TransactionMut) trackSubdocs() {
 					t.subdocsLoaded = append(t.subdocsLoaded, guid)
 				}
 			}
-			clock = it.ID.Clock + it.Len
+			if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
+				break
+			}
 		}
 	}
 	for _, id := range t.deletedIDs {
@@ -415,12 +431,16 @@ func (t *TransactionMut) DeleteRange(client, start, end uint64) int {
 			return deleted // unseen tail
 		}
 		if cell.AsItem() == nil {
-			clock = cell.ClockEnd() + 1 // GC cell: already gone
+			if !advanceClock(&clock, cell.ClockEnd()) { // GC cell: already gone
+				break
+			}
 			continue
 		}
 		item := t.MaterializeCleanStart(block.ID{Client: client, Clock: clock})
 		if item == nil {
-			clock = cell.ClockEnd() + 1
+			if !advanceClock(&clock, cell.ClockEnd()) {
+				break
+			}
 			continue
 		}
 		if item.ID.Clock+item.Len-1 >= end {
@@ -434,9 +454,27 @@ func (t *TransactionMut) DeleteRange(client, start, end uint64) int {
 			t.Delete(item)
 			deleted++
 		}
-		clock = item.ID.Clock + item.Len
+		if !advanceClock(&clock, item.ID.Clock+item.Len-1) {
+			break
+		}
 	}
 	return deleted
+}
+
+// advanceClock moves *clock past lastInclusive (the inclusive upper
+// clock of the cell just processed) and reports whether it advanced. It
+// returns false WITHOUT moving when a step would not make progress —
+// lastInclusive below the current clock (a zero-length item underflows
+// ID.Clock+Len-1 below clock) or at the top of the uint64 space (a
+// malformed Skip reaching MaxUint64, where +1 wraps to 0). Callers stop
+// the scan rather than spinning or wrapping back to clock 0. Well-formed
+// updates always advance, so this never fires for valid input.
+func advanceClock(clock *uint64, lastInclusive uint64) bool {
+	if lastInclusive < *clock || lastInclusive == ^uint64(0) {
+		return false
+	}
+	*clock = lastInclusive + 1
+	return true
 }
 
 // BeforeState returns the per-client clock-head snapshot taken when

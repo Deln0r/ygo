@@ -116,6 +116,24 @@ func FuzzDecodeUpdateV2(f *testing.F) {
 	})
 }
 
+// FuzzApplyUpdateV2 drives the V2 decode+integrate entry on arbitrary
+// bytes. Like FuzzApplyUpdate it must never panic, hang, or OOM; it
+// shares the integrate path with V1, so it guards the same commit-time
+// scans against adversarial structure reached through the V2 codec.
+func FuzzApplyUpdateV2(f *testing.F) {
+	f.Add(EncodeStateAsUpdateV2(doc.NewDoc()))
+	f.Add(validV2Update())
+	f.Add(v2UpdateWithDeletes())
+	f.Add([]byte{})
+	f.Add([]byte{0x00})
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		d := doc.NewDoc()
+		_ = ApplyUpdateV2(d, data)
+	})
+}
+
 // validV2Update builds a real V2 update from a populated doc so the
 // seed corpus contains a fully-formed multi-column payload.
 func validV2Update() []byte {
