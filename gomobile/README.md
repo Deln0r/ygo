@@ -72,6 +72,42 @@ attributesJSON)` (bold a selection, `{"bold":null}` clears a key),
 `InsertEmbed(index, embedJSON)`. Pair these with `ObserveChanges` and a
 native editor renders and edits formatted text end to end.
 
+## Map, Array, and nested types
+
+Beyond `Text`, the SDK binds the full shared type set. Values cross the
+binding as JSON, so they carry numbers, booleans, strings, and plain
+arrays / objects — byte-compatible with JS Yjs:
+
+```go
+m := doc.Map("meta")
+m.SetJSON("count", []byte(`7`))      // typed scalar; GetJSON reads it back
+list := doc.Array("items")
+list.PushJSON([]byte(`{"id":1}`))    // InsertJSON / GetJSON / ToJSON / DeleteAt
+```
+
+Types nest. `Map.SetMap` / `SetArray` / `SetText` and `Array.InsertMap`
+/ `InsertArray` / `InsertText` create a child and return its handle;
+`GetMap` / `GetArray` / `GetText` read an existing one back (returning
+nil if the slot holds a different type), so an app builds and walks a
+tree of collaborative objects.
+
+## XML (ProseMirror / Tiptap)
+
+`Doc.XmlFragment` is the root of an XML document tree — the model
+ProseMirror and Tiptap map onto. `XmlElement` carries a node name,
+string attributes (`SetAttribute` / `GetAttribute` / `AttributesJSON`),
+and ordered children; `XmlText` is a rich-text leaf whose `Text()`
+handle exposes the full `ApplyDelta` / `Format` surface. `ToString`
+renders the subtree as HTML-like markup:
+
+```go
+frag := doc.XmlFragment("prose")
+p := frag.InsertElement(0, "paragraph")
+p.SetAttribute("align", "center")
+p.InsertText(0).Text().InsertAt(0, "hello")
+// frag.ToString() == `<paragraph align="center">hello</paragraph>`
+```
+
 ## Collaborator presence and live cursors
 
 The sync `Client` carries an awareness (presence) channel for ephemeral

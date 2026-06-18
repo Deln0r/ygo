@@ -28,6 +28,15 @@ type MapChangeListener interface {
 	OnMapChange(keysJSON []byte)
 }
 
+// ArrayChangeListener receives array change deltas. deltaJSON is a
+// Quill-style delta whose inserts are arrays of values, the shape a
+// collaborative list view applies directly:
+//
+//	[{"retain":2},{"insert":[42,true]},{"delete":1}]
+type ArrayChangeListener interface {
+	OnArrayChange(deltaJSON []byte)
+}
+
 // ObserveChanges registers a listener that fires after every
 // transaction changing this text, delivering the change as a Quill
 // delta. This is the fine-grained signal a native editor needs to
@@ -60,6 +69,42 @@ func (m *Map) ObserveChanges(l MapChangeListener) {
 	m.unobserve = m.inner.Observe(func(e *types.MapEvent) {
 		l.OnMapChange(marshalMapKeys(e.Keys))
 	})
+}
+
+// ObserveChanges registers a listener that fires after every
+// transaction changing this array, delivering the change as a delta.
+// Replaces any previously registered listener on this array.
+func (a *Array) ObserveChanges(l ArrayChangeListener) {
+	if a.unobserve != nil {
+		a.unobserve()
+		a.unobserve = nil
+	}
+	if l == nil {
+		return
+	}
+	a.unobserve = a.inner.Observe(func(e *types.ArrayEvent) {
+		l.OnArrayChange(marshalArrayDelta(e.Delta))
+	})
+}
+
+// marshalArrayDelta renders an array delta as Quill-style JSON, with
+// each insert op carrying a run of values.
+func marshalArrayDelta(delta []types.ArrayDeltaOp) []byte {
+	ops := make([]map[string]any, 0, len(delta))
+	for _, op := range delta {
+		m := map[string]any{}
+		switch {
+		case len(op.Insert) > 0:
+			m["insert"] = op.Insert
+		case op.Delete > 0:
+			m["delete"] = op.Delete
+		case op.Retain > 0:
+			m["retain"] = op.Retain
+		}
+		ops = append(ops, m)
+	}
+	b, _ := json.Marshal(ops)
+	return b
 }
 
 // marshalTextDelta renders a text delta in the standard Quill JSON
