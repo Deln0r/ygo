@@ -53,6 +53,25 @@ Implement `TextChangeListener` / `MapChangeListener` in Swift or Kotlin.
 Callbacks run on a background goroutine while the document lock is held;
 dispatch to the main thread before touching UI.
 
+## Rich text
+
+`Text.ApplyDelta` is the write side of the round trip — the same
+Quill-style delta `ObserveChanges` delivers, applied in one
+transaction. A native editor produces a delta on user input and hands
+it straight in:
+
+```go
+text.ApplyDelta([]byte(`[{"retain":3},{"insert":"hi","attributes":{"bold":true}}]`))
+```
+
+An insert value is a string (text) or a JSON object (an embed such as
+an image); indices and retain / delete counts are UTF-16 units. For
+discrete toolbar actions there are direct calls: `Format(index, length,
+attributesJSON)` (bold a selection, `{"bold":null}` clears a key),
+`InsertWithAttributes(index, text, attributesJSON)`, and
+`InsertEmbed(index, embedJSON)`. Pair these with `ObserveChanges` and a
+native editor renders and edits formatted text end to end.
+
 ## Collaborator presence and live cursors
 
 The sync `Client` carries an awareness (presence) channel for ephemeral
