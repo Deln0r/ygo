@@ -125,7 +125,19 @@ type Options struct {
 	// this for large collaborative documents (e.g. 128 << 20 for
 	// 128 MiB). Set to -1 for unlimited.
 	ReadLimit int64
+
+	// WriteTimeout bounds a single broadcast/fan-out write to one peer.
+	// Without it a slow or half-open consumer (full TCP send buffer, no
+	// FIN) blocks the write forever, freezing the originating read loop
+	// and the global awareness sweep for every other document. On
+	// timeout the offending peer is closed and dropped. Zero selects a
+	// safe default (10s).
+	WriteTimeout time.Duration
 }
+
+// defaultWriteTimeout bounds a per-peer broadcast write when
+// Options.WriteTimeout is unset.
+const defaultWriteTimeout = 10 * time.Second
 
 // Server is the http.Handler implementation. Construct with New
 // and mount via Handler(). Safe for concurrent use.
@@ -330,14 +342,29 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 		return
 	}
 
+	// Evict atomically: under docsMu, confirm the registry still maps this
+	// exact docState (identity, not just name) and it still has no
+	// connections (rechecked under connsMu). In the window since we read
+	// remaining==0, a concurrent acquireDoc could have handed this state
+	// to a new connection (addConn) — deleting then would orphan a live
+	// document and split its clients onto divergent Docs that never
+	// converge. Lock order docsMu -> connsMu is not nested anywhere else.
+	evicted := false
 	s.docsMu.Lock()
-	delete(s.docs, state.name)
+	if cur, ok := s.docs[state.name]; ok && cur == state {
+		state.connsMu.Lock()
+		if len(state.conns) == 0 {
+			delete(s.docs, state.name)
+			evicted = true
+		}
+		state.connsMu.Unlock()
+	}
 	s.docsMu.Unlock()
 
-	if s.opts.Store != nil {
-		// Flush is best-effort — log via context cancellation if
-		// the server is shutting down. We do not block on errors;
-		// the document log is intact in the Store either way.
+	if evicted && s.opts.Store != nil {
+		// Flush is best-effort; the document log is intact in the Store
+		// either way. Only the evicting releaser flushes, so a re-acquired
+		// live doc is never flushed out from under its connections.
 		_ = s.opts.Store.Flush(ctx, state.name)
 	}
 }
@@ -396,13 +423,33 @@ func (s *Server) newConn(state *docState, ws *websocket.Conn) *conn {
 	return c
 }
 
-// send writes one envelope to the underlying WS. The writeMu
-// serializes concurrent writes (a broadcast on a peer's goroutine
-// can race with a Send on this conn's read goroutine).
+// send writes one envelope to the underlying WS under a bounded
+// deadline. The writeMu serializes concurrent writes (a broadcast on a
+// peer's goroutine can race with a Send on this conn's read goroutine).
+//
+// A slow or half-open peer would otherwise block the write forever and
+// back-pressure the whole fan-out (and the global sweep). On timeout we
+// close the peer so its read loop unblocks and releaseConn evicts it,
+// and subsequent broadcasts skip it.
 func (c *conn) send(envelope []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return c.ws.Write(context.Background(), websocket.MessageBinary, envelope)
+	ctx, cancel := context.WithTimeout(context.Background(), c.writeTimeout())
+	defer cancel()
+	if err := c.ws.Write(ctx, websocket.MessageBinary, envelope); err != nil {
+		_ = c.ws.Close(websocket.StatusPolicyViolation, "write timeout")
+		return err
+	}
+	return nil
+}
+
+// writeTimeout resolves the per-write deadline from the server options,
+// falling back to defaultWriteTimeout.
+func (c *conn) writeTimeout() time.Duration {
+	if c.server != nil && c.server.opts.WriteTimeout > 0 {
+		return c.server.opts.WriteTimeout
+	}
+	return defaultWriteTimeout
 }
 
 // broadcast fans an envelope to every connection on the same doc.

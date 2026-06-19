@@ -172,19 +172,23 @@ func (c *Client) Synced() bool {
 // an error.
 func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return errors.New("client: closed")
+	}
 	if c.cancel != nil {
 		c.mu.Unlock()
 		return errors.New("client: already connected")
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	c.cancel = cancel
-	c.done = make(chan struct{})
 	c.mu.Unlock()
+
+	runCtx, cancel := context.WithCancel(ctx)
 
 	// Offline-first: load the persisted document state BEFORE installing
 	// the observer (so the replay does not re-persist) and before the
 	// first dial (so the handshake state vector already covers any edits
-	// made while offline, sending them up to the server).
+	// made while offline, sending them up to the server). Done outside
+	// c.mu because loadLocal may invoke the user's OnError callback.
 	if c.opts.LocalStore != nil {
 		c.loadLocal(runCtx)
 	}
@@ -193,7 +197,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	// persisted locally (local edits AND applied remote updates), so the
 	// on-device copy stays current. Only LOCAL edits (Origin != c) mark
 	// the doc dirty for broadcast; remote applies must not echo back.
-	c.unsubscribe = c.doc.OnAfterTransaction(func(t *doc.TransactionMut) {
+	unsubscribe := c.doc.OnAfterTransaction(func(t *doc.TransactionMut) {
 		if !txnChanged(t) {
 			return
 		}
@@ -212,11 +216,34 @@ func (c *Client) Connect(ctx context.Context) error {
 		}
 	})
 
+	// Publish every lifecycle handle and start the loops atomically under
+	// c.mu, so a concurrent Close cannot interleave between installing the
+	// observer and starting the goroutines that close done/persistDone —
+	// which would race the fields and leak the observer + goroutines. If
+	// Close (or a second Connect) won the race during the setup above,
+	// undo what we built and abort.
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		unsubscribe()
+		cancel()
+		return errors.New("client: closed")
+	}
+	if c.cancel != nil {
+		c.mu.Unlock()
+		unsubscribe()
+		cancel()
+		return errors.New("client: already connected")
+	}
+	c.cancel = cancel
+	c.done = make(chan struct{})
+	c.unsubscribe = unsubscribe
 	if c.opts.LocalStore != nil {
 		c.persistDone = make(chan struct{})
 		go c.persistLoop(runCtx)
 	}
 	go c.run(runCtx)
+	c.mu.Unlock()
 	return nil
 }
 
@@ -225,7 +252,7 @@ func (c *Client) Connect(ctx context.Context) error {
 // goroutines; the teardown runs exactly once.
 func (c *Client) Close() error {
 	c.mu.Lock()
-	if c.closed || c.cancel == nil {
+	if c.closed {
 		c.mu.Unlock()
 		return nil
 	}
@@ -236,6 +263,13 @@ func (c *Client) Close() error {
 	unsubscribe := c.unsubscribe
 	c.unsubscribe = nil
 	c.mu.Unlock()
+
+	if cancel == nil {
+		// Close arrived before Connect published its handles. closed is now
+		// latched, so Connect's atomic publish will see it and abort; there
+		// is nothing started here to tear down.
+		return nil
+	}
 
 	// Remove the observer first so no late edit signals a stopped
 	// persist loop; the loop's final persistNow reads live committed
