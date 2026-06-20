@@ -68,6 +68,10 @@ type Options struct {
 
 	// OnError observes non-fatal connection errors (dial failures,
 	// dropped connections). The client keeps reconnecting regardless.
+	//
+	// OnError and OnSynced may be invoked concurrently from different
+	// goroutines (e.g. a local-store write failure overlapping a dial
+	// failure), so a callback that mutates shared state must guard it.
 	OnError func(err error)
 
 	// MinBackoff / MaxBackoff bound the reconnect backoff. Defaults:
@@ -315,6 +319,14 @@ func (c *Client) run(ctx context.Context) {
 	backoff := c.opts.MinBackoff
 	for {
 		err := c.session(ctx)
+		// Reset the backoff when the session that just ended actually
+		// completed a handshake: a transient drop after healthy
+		// connectivity should redial fast, not at the grown backoff left
+		// over from earlier dial failures. Checked before setSynced(false)
+		// clears the flag.
+		if c.Synced() {
+			backoff = c.opts.MinBackoff
+		}
 		c.setSynced(false)
 		if ctx.Err() != nil {
 			return
@@ -352,6 +364,15 @@ func (c *Client) session(ctx context.Context) error {
 	c.conn = conn
 	c.connCtx = sessCtx
 	c.mu.Unlock()
+	// Clear the per-session conn when the session ends, so a stale closed
+	// conn is never visible between sessions (write() then guards
+	// conn==nil as "not connected").
+	defer func() {
+		c.mu.Lock()
+		c.conn = nil
+		c.connCtx = nil
+		c.mu.Unlock()
+	}()
 
 	// Client side of the y-protocols handshake: announce our state
 	// vector, ask for awareness, and push our awareness state.
@@ -364,16 +385,18 @@ func (c *Client) session(ctx context.Context) error {
 	writeErr := make(chan error, 1)
 	go func() { writeErr <- c.writePump(sessCtx) }()
 
-	readErr := c.readPump(sessCtx)
+	readErr := c.readPump(sessCtx, conn)
 	sessCancel()
 	<-writeErr
 	return readErr
 }
 
-// readPump applies inbound frames until the connection drops.
-func (c *Client) readPump(ctx context.Context) error {
+// readPump applies inbound frames until the connection drops. conn is
+// passed explicitly (not read from c.conn) so the read path never
+// touches the lock-guarded field without the lock.
+func (c *Client) readPump(ctx context.Context, conn *websocket.Conn) error {
 	for {
-		_, raw, err := c.conn.Read(ctx)
+		_, raw, err := conn.Read(ctx)
 		if err != nil {
 			return fmt.Errorf("client: read: %w", err)
 		}

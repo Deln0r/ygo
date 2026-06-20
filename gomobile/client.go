@@ -85,9 +85,15 @@ func (c *Client) SetListener(l Listener) {
 // relay, reconnect with exponential backoff). Returns an error when
 // already connected or the configuration is invalid.
 func (c *Client) Connect() error {
+	// Hold c.mu across the whole setup, including inner.Connect(), so a
+	// concurrent Close cannot interleave between publishing c.inner and
+	// starting the inner client — which would leak its goroutines and run
+	// loadLocal against a store that Close has concurrently closed. Close
+	// blocks on c.mu until this returns, then tears down a fully-started
+	// inner; a sequential Close-then-Connect (reconnect) still works.
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.inner != nil {
-		c.mu.Unlock()
 		return errAlreadyConnected
 	}
 	l := c.listener
@@ -103,7 +109,6 @@ func (c *Client) Connect() error {
 	if c.storePath != "" {
 		st, err := sqlite.Open(c.storePath)
 		if err != nil {
-			c.mu.Unlock()
 			return err
 		}
 		c.store = st
@@ -115,7 +120,6 @@ func (c *Client) Connect() error {
 			_ = c.store.Close()
 			c.store = nil
 		}
-		c.mu.Unlock()
 		return err
 	}
 	c.inner = inner
@@ -127,7 +131,6 @@ func (c *Client) Connect() error {
 	if c.presence != nil {
 		c.cancelPresence = c.startPresence(inner, c.presence)
 	}
-	c.mu.Unlock()
 	return inner.Connect(context.Background())
 }
 

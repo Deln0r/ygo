@@ -99,15 +99,21 @@ func parseQuillDelta(b []byte) ([]types.DeltaOp, error) {
 		var op types.DeltaOp
 		switch {
 		case m["insert"] != nil:
-			var s string
-			if json.Unmarshal(m["insert"], &s) == nil {
-				op.Insert = s
-			} else {
-				var embed any
-				if err := json.Unmarshal(m["insert"], &embed); err != nil {
-					return nil, fmt.Errorf("gomobile: delta op[%d] insert: %w", i, err)
-				}
-				op.Embed = embed
+			// Decode once into any, then classify: a JSON string is a text
+			// insert, a JSON object/array/number is an embed. JSON null is
+			// malformed (JS Yjs never emits it) and is surfaced rather than
+			// silently swallowed as an empty insert.
+			var v any
+			if err := json.Unmarshal(m["insert"], &v); err != nil {
+				return nil, fmt.Errorf("gomobile: delta op[%d] insert: %w", i, err)
+			}
+			switch val := v.(type) {
+			case string:
+				op.Insert = val
+			case nil:
+				return nil, fmt.Errorf("gomobile: delta op[%d] insert is null", i)
+			default:
+				op.Embed = val
 			}
 		case m["retain"] != nil:
 			n, err := parseCount(m["retain"])

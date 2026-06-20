@@ -58,6 +58,9 @@ func (f *XmlFragment) InsertText(index int) *XmlText {
 // GetElement returns the child element at index, or nil if it is not
 // an element.
 func (f *XmlFragment) GetElement(index int) *XmlElement {
+	if index < 0 {
+		return nil
+	}
 	rtxn := f.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if e, ok := f.inner.Get(uint64(index)).(*types.XmlElement); ok {
@@ -68,6 +71,9 @@ func (f *XmlFragment) GetElement(index int) *XmlElement {
 
 // GetText returns the child text node at index, or nil if not text.
 func (f *XmlFragment) GetText(index int) *XmlText {
+	if index < 0 {
+		return nil
+	}
 	rtxn := f.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if x, ok := f.inner.Get(uint64(index)).(*types.XmlText); ok {
@@ -78,6 +84,9 @@ func (f *XmlFragment) GetText(index int) *XmlText {
 
 // DeleteAt removes length children starting at index.
 func (f *XmlFragment) DeleteAt(index, length int) {
+	if index < 0 || length < 0 {
+		return
+	}
 	txn := f.d.inner.WriteTxn()
 	defer txn.Commit()
 	f.inner.Delete(txn, uint64(index), uint64(length))
@@ -158,6 +167,9 @@ func (e *XmlElement) InsertText(index int) *XmlText {
 
 // GetElement returns the child element at index, or nil if not an element.
 func (e *XmlElement) GetElement(index int) *XmlElement {
+	if index < 0 {
+		return nil
+	}
 	rtxn := e.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if c, ok := e.inner.Get(uint64(index)).(*types.XmlElement); ok {
@@ -168,6 +180,9 @@ func (e *XmlElement) GetElement(index int) *XmlElement {
 
 // GetText returns the child text node at index, or nil if not text.
 func (e *XmlElement) GetText(index int) *XmlText {
+	if index < 0 {
+		return nil
+	}
 	rtxn := e.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if x, ok := e.inner.Get(uint64(index)).(*types.XmlText); ok {
@@ -178,6 +193,9 @@ func (e *XmlElement) GetText(index int) *XmlText {
 
 // DeleteAt removes length children starting at index.
 func (e *XmlElement) DeleteAt(index, length int) {
+	if index < 0 || length < 0 {
+		return
+	}
 	txn := e.d.inner.WriteTxn()
 	defer txn.Commit()
 	e.inner.Delete(txn, uint64(index), uint64(length))

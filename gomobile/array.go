@@ -120,6 +120,9 @@ func (a *Array) InsertArray(index int) *Array {
 // GetText returns the nested Text at index, or nil if the element is
 // not a Text.
 func (a *Array) GetText(index int) *Text {
+	if index < 0 {
+		return nil
+	}
 	rtxn := a.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if t, ok := a.inner.Get(uint64(index)).(*types.Text); ok {
@@ -130,6 +133,9 @@ func (a *Array) GetText(index int) *Text {
 
 // GetMap returns the nested Map at index, or nil if not a Map.
 func (a *Array) GetMap(index int) *Map {
+	if index < 0 {
+		return nil
+	}
 	rtxn := a.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if m, ok := a.inner.Get(uint64(index)).(*types.Map); ok {
@@ -140,6 +146,9 @@ func (a *Array) GetMap(index int) *Map {
 
 // GetArray returns the nested Array at index, or nil if not an Array.
 func (a *Array) GetArray(index int) *Array {
+	if index < 0 {
+		return nil
+	}
 	rtxn := a.d.inner.ReadTxn()
 	defer rtxn.Close()
 	if arr, ok := a.inner.Get(uint64(index)).(*types.Array); ok {

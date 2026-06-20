@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -17,6 +18,12 @@ const flushEvery = 64
 // persistRetryDelay paces re-tries after a failed store write so a
 // persistent failure (disk full) does not spin the persist loop.
 const persistRetryDelay = time.Second
+
+// shutdownFlushTimeout bounds the final persist + compaction run during
+// Close. Close blocks on persistDone, which the persist loop only
+// closes after this final flush, so an uncancellable write to a wedged
+// store (locked file, full disk) would otherwise pin Close forever.
+const shutdownFlushTimeout = 5 * time.Second
 
 // minUpdateLen is the byte length of an empty V1 update (zero clients,
 // empty delete set). A diff this short carries no new content and is
@@ -66,11 +73,19 @@ func (c *Client) persistLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			c.persistNow(true) // final attempt; capture pre-cancel edits
-			c.flushStore()
+			// Final attempt; capture pre-cancel edits. The loop ctx is
+			// already cancelled, so use a fresh bounded deadline — Close
+			// waits on persistDone and a wedged store must not pin it.
+			flushCtx, cancel := context.WithTimeout(context.Background(), shutdownFlushTimeout)
+			c.persistNow(flushCtx, true)
+			c.flushStore(flushCtx)
+			cancel()
 			return
 		case <-c.dirtyPersist:
-			c.persistNow(false)
+			// Mid-session writes use the loop ctx so Close (which cancels
+			// it) can interrupt an in-flight write; the final flush above
+			// then recaptures anything that aborted.
+			c.persistNow(ctx, false)
 		}
 	}
 }
@@ -83,7 +98,7 @@ func (c *Client) persistLoop(ctx context.Context) {
 //
 // final marks the shutdown flush: it does not schedule a retry (the
 // loop is exiting) but still reports any failure.
-func (c *Client) persistNow(final bool) {
+func (c *Client) persistNow(ctx context.Context, final bool) {
 	c.mu.Lock()
 	since := c.lastPersisted
 	c.mu.Unlock()
@@ -100,7 +115,7 @@ func (c *Client) persistNow(final bool) {
 		return
 	}
 
-	if err := c.opts.LocalStore.StoreUpdate(context.Background(), c.opts.DocName, diff); err != nil {
+	if err := c.opts.LocalStore.StoreUpdate(ctx, c.opts.DocName, diff); err != nil {
 		// The watermark stays unmoved, but the consumed dirtyPersist
 		// token is gone, so a future edit is not guaranteed. Report the
 		// failure (always observable, even without a Listener) and, mid-
@@ -118,7 +133,7 @@ func (c *Client) persistNow(final bool) {
 	count := c.persistCount
 	c.mu.Unlock()
 	if count%flushEvery == 0 {
-		c.flushStore()
+		c.flushStore(ctx)
 	}
 }
 
@@ -126,6 +141,12 @@ func (c *Client) persistNow(final bool) {
 // and always logs it so a write failure is never completely silent
 // (the gomobile binding wires OnError only when a Listener is set).
 func (c *Client) reportError(err error) {
+	// context.Canceled means Close interrupted an in-flight write; the
+	// shutdown flush recaptures it, so it is not an actionable failure.
+	// A wedged-store DeadlineExceeded on the final flush IS reported.
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	if c.opts.OnError != nil {
 		c.opts.OnError(err)
 	} else {
@@ -148,10 +169,8 @@ func (c *Client) scheduleRetry() {
 }
 
 // flushStore compacts the local update log into a single snapshot.
-func (c *Client) flushStore() {
-	if err := c.opts.LocalStore.Flush(context.Background(), c.opts.DocName); err != nil {
-		if c.opts.OnError != nil {
-			c.opts.OnError(err)
-		}
+func (c *Client) flushStore(ctx context.Context) {
+	if err := c.opts.LocalStore.Flush(ctx, c.opts.DocName); err != nil {
+		c.reportError(err)
 	}
 }
