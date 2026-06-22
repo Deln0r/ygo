@@ -134,6 +134,83 @@ func FuzzApplyUpdateV2(f *testing.F) {
 	})
 }
 
+// FuzzDecodeStateVector feeds arbitrary bytes to the state-vector
+// decoder. A peer reaches this surface directly through SyncStep1, so
+// it must never panic or OOM on a hostile vector; a malformed input
+// returns an error, and a successful decode reports a tail no longer
+// than the input.
+func FuzzDecodeStateVector(f *testing.F) {
+	f.Add(EncodeStateVector(store.StateVector{}, nil))
+	f.Add(EncodeStateVector(store.StateVector{1: 5, 2: 9, 7: 100}, nil))
+	f.Add([]byte{})
+	f.Add([]byte{0x00})
+	// Huge leading client count -> the count-driven prealloc guard.
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, tail, err := DecodeStateVector(data)
+		if err != nil {
+			return
+		}
+		if len(tail) > len(data) {
+			t.Fatalf("tail longer than input: %d > %d", len(tail), len(data))
+		}
+	})
+}
+
+// FuzzDecodeAny feeds arbitrary bytes to the lib0-Any value decoder.
+// Any payloads carry attacker-controlled length prefixes (strings,
+// byte buffers, and recursive array/object counts), so this guards the
+// amplification surface directly instead of only through a full update.
+// No panic, hang, or OOM; an error is the expected outcome for
+// malformed bytes.
+func FuzzDecodeAny(f *testing.F) {
+	f.Add(EncodeAny(nil, nil))
+	f.Add(EncodeAny(nil, "hello"))
+	f.Add(EncodeAny(nil, int64(42)))
+	f.Add(EncodeAny(nil, true))
+	f.Add(EncodeAny(nil, []byte{1, 2, 3, 4}))
+	f.Add(EncodeAny(nil, []any{"a", int64(1), false}))
+	f.Add(EncodeAny(nil, map[string]any{"k": "v", "n": int64(3)}))
+	f.Add([]byte{})
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, tail, err := DecodeAny(data)
+		if err != nil {
+			return
+		}
+		if len(tail) > len(data) {
+			t.Fatalf("tail longer than input: %d > %d", len(tail), len(data))
+		}
+	})
+}
+
+// FuzzDecodeIdSet feeds arbitrary bytes to the delete-set decoder. An
+// IdSet carries per-client range counts (length-prefixed), the same
+// amplification class fixed in the update path; this exercises it
+// directly. No panic/OOM; malformed input surfaces as an error.
+func FuzzDecodeIdSet(f *testing.F) {
+	f.Add(NewIdSet().Encode(nil))
+	ds := NewIdSet()
+	ds.Insert(1, 0, 5)
+	ds.Insert(2, 10, 3)
+	f.Add(ds.Encode(nil))
+	f.Add([]byte{})
+	f.Add([]byte{0x00})
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, tail, err := DecodeIdSet(data)
+		if err != nil {
+			return
+		}
+		if len(tail) > len(data) {
+			t.Fatalf("tail longer than input: %d > %d", len(tail), len(data))
+		}
+	})
+}
+
 // validV2Update builds a real V2 update from a populated doc so the
 // seed corpus contains a fully-formed multi-column payload.
 func validV2Update() []byte {

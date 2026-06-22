@@ -1,10 +1,17 @@
 name: fuzz
 
 # Continuous fuzzing of the untrusted-input decode paths (update apply,
-# awareness presence, sync frames, lib0 primitives). The committed seed
-# corpus already runs as regression tests in the main `test` job; this
-# job does NEW exploration: a long nightly burst plus a short smoke
-# burst on any change to a decode path, so a regression fails fast.
+# state vector, delete set, Any values, awareness presence, sync frames,
+# lib0 primitives). The committed seed corpus already runs as regression
+# tests in the main `test` job; this workflow does NEW exploration.
+#
+# A `discover` job enumerates every FuzzXxx target and emits a matrix, so
+# the target list never has to be maintained by hand. The `fuzz` job then
+# runs one matrix leg per target IN PARALLEL: a long burst on the nightly
+# schedule, a short smoke burst on any change to a decode path. Running
+# legs in parallel (rather than one serial loop) lets each target get a
+# much longer nightly budget at a sane wall-clock, isolates a crasher to
+# its own leg (fail-fast is off), and uploads a per-target crasher corpus.
 on:
   schedule:
     - cron: "0 6 * * *" # daily 06:00 UTC
@@ -16,6 +23,8 @@ on:
       - "internal/awareness/**"
       - "internal/sync/**"
       - "internal/block/**"
+      - "internal/types/**"
+      - "internal/undo/**"
       - ".github/workflows/fuzz.yml"
   pull_request:
     branches: [main]
@@ -25,17 +34,41 @@ on:
       - "internal/awareness/**"
       - "internal/sync/**"
       - "internal/block/**"
+      - "internal/types/**"
+      - "internal/undo/**"
   workflow_dispatch:
 
 jobs:
-  fuzz:
-    name: fuzz
+  discover:
+    name: discover targets
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: list
+        name: enumerate fuzz targets
+        run: |
+          set -euo pipefail
+          entries=$(grep -rl '^func Fuzz' --include='*_test.go' . | while IFS= read -r f; do
+            dir=$(dirname "$f")
+            grep -oE '^func (Fuzz[A-Za-z0-9_]+)' "$f" \
+              | awk -v d="${dir#./}" '{printf "{\"pkg\":\"%s\",\"func\":\"%s\"}\n", d, $2}'
+          done | paste -sd, -)
+          echo "matrix={\"include\":[$entries]}" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    name: fuzz ${{ matrix.func }}
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     env:
       # Long continuous run on the nightly schedule; a quick burst on
-      # push / PR. go test fuzzes ONE target per invocation, so we
-      # discover every FuzzXxx and run them in turn.
-      FUZZTIME: ${{ github.event_name == 'schedule' && '180s' || '40s' }}
+      # push / PR. Legs run in parallel, so the nightly budget is per
+      # target, not summed across them.
+      FUZZTIME: ${{ github.event_name == 'schedule' && '600s' || '40s' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -43,25 +76,12 @@ jobs:
           go-version: "1.24"
       - name: go mod download
         run: go mod download
-      - name: fuzz every target
-        run: |
-          set -uo pipefail
-          status=0
-          while IFS= read -r f; do
-            dir=$(dirname "$f")
-            while IFS= read -r fn; do
-              echo "::group::fuzz ${dir} ${fn} (${FUZZTIME})"
-              if ! go test -run='^$' -fuzz="^${fn}$" -fuzztime="${FUZZTIME}" "./${dir#./}"; then
-                status=1
-              fi
-              echo "::endgroup::"
-            done < <(grep -oE '^func (Fuzz[A-Za-z0-9_]+)' "$f" | awk '{print $2}')
-          done < <(grep -rl '^func Fuzz' --include='*_test.go' .)
-          exit $status
+      - name: fuzz ${{ matrix.func }} (${{ env.FUZZTIME }})
+        run: go test -run='^$' -fuzz="^${{ matrix.func }}$" -fuzztime="${FUZZTIME}" "./${{ matrix.pkg }}"
       - name: upload crashers
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-crashers
-          path: "**/testdata/fuzz/**"
+          name: fuzz-crashers-${{ matrix.func }}
+          path: "${{ matrix.pkg }}/testdata/fuzz/**"
           if-no-files-found: ignore
