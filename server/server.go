@@ -133,6 +133,16 @@ type Options struct {
 	// timeout the offending peer is closed and dropped. Zero selects a
 	// safe default (10s).
 	WriteTimeout time.Duration
+
+	// MaxConnsPerDoc bounds the number of simultaneous WebSocket
+	// connections to a single document, capping the goroutines and
+	// memory one peer can pin by opening many sockets to the same room.
+	// Zero selects a safe default (4096); a negative value disables the
+	// cap. A connection beyond the cap is rejected at the upgrade with
+	// websocket.StatusPolicyViolation; connections already in the room
+	// keep working. The newest socket is the one refused, so an
+	// established collaborator is never displaced by a flood.
+	MaxConnsPerDoc int
 }
 
 // defaultWriteTimeout bounds a per-peer broadcast write when
@@ -168,6 +178,7 @@ type Server struct {
 const (
 	defaultAwarenessTimeout    = 30 * time.Second
 	defaultMaxAwarenessClients = 4096
+	defaultMaxConnsPerDoc      = 4096
 )
 
 // New returns a Server with the given options. The returned Server
@@ -229,6 +240,22 @@ func (s *Server) Close(ctx context.Context) error {
 	return firstErr
 }
 
+// maxConnsPerDoc resolves the per-document connection cap from options:
+// zero selects the default, a negative option disables the cap
+// (returned as -1, which addConn treats as unlimited). Resolved lazily
+// per call rather than normalized in New, so Options stays a faithful
+// record of caller input and the -1 unlimited sentinel is preserved.
+func (s *Server) maxConnsPerDoc() int {
+	switch {
+	case s.opts.MaxConnsPerDoc == 0:
+		return defaultMaxConnsPerDoc
+	case s.opts.MaxConnsPerDoc < 0:
+		return -1
+	default:
+		return s.opts.MaxConnsPerDoc
+	}
+}
+
 // defaultDocName implements the y-websocket path-strip convention.
 func defaultDocName(r *http.Request) string {
 	p := strings.TrimPrefix(r.URL.Path, "/")
@@ -264,7 +291,15 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := s.newConn(state, wsConn)
-	state.addConn(c)
+	if !state.addConn(c, s.maxConnsPerDoc()) {
+		// Room is at its connection cap. Refuse the newest socket and
+		// leave the established ones untouched. The resolved cap is
+		// always >= 1 (or negative = unlimited), so a rejection means
+		// the room already holds a live connection — acquireDoc's
+		// docState is never orphaned on this path.
+		_ = wsConn.Close(websocket.StatusPolicyViolation, "document connection limit reached")
+		return
+	}
 	defer s.releaseConn(r.Context(), state, c)
 
 	if err := c.handler.SendInitialSync(); err != nil {
@@ -289,7 +324,11 @@ type docState struct {
 // acquireDoc returns the docState for docName, creating it (and
 // loading from Store, if configured) on first request. The caller
 // is responsible for calling releaseConn after the connection
-// closes — this is the reference-count "increment" half.
+// closes — this is the reference-count "increment" half. The one
+// exception is serveWS's over-cap reject path, which acquires without
+// a matching releaseConn; that is safe because a rejection implies the
+// room already holds a live connection whose own releaseConn evicts the
+// docState, so no zero-conn entry is orphaned.
 func (s *Server) acquireDoc(ctx context.Context, docName string) (*docState, error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
@@ -369,12 +408,18 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	}
 }
 
-// addConn registers a connection in the docState's set. The
-// connection's broadcast callback fan-outs to this set.
-func (s *docState) addConn(c *conn) {
+// addConn registers a connection in the docState's set, enforcing the
+// per-document cap atomically under connsMu. It returns false without
+// adding when the room is already at limit; a negative limit means
+// unlimited. The connection's broadcast callback fan-outs to this set.
+func (s *docState) addConn(c *conn, limit int) bool {
 	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	if limit >= 0 && len(s.conns) >= limit {
+		return false
+	}
 	s.conns[c] = struct{}{}
-	s.connsMu.Unlock()
+	return true
 }
 
 // snapshotConns returns a slice copy of current connections, safe

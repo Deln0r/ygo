@@ -60,6 +60,7 @@ func main() {
 	readLimit := flag.Int64("read-limit", 0, "max WebSocket message size in bytes per client frame (0 = 32768 default; -1 = unlimited)")
 	awarenessTimeout := flag.Duration("awareness-timeout", 0, "evict a presence entry after it is silent this long (0 = 30s default)")
 	maxAwarenessClients := flag.Int("max-awareness-clients", 0, "cap distinct presence clients per room (0 = 4096 default; -1 = unlimited)")
+	maxConnsPerDoc := flag.Int("max-conns-per-doc", 0, "cap simultaneous WebSocket connections per document (0 = 4096 default; -1 = unlimited)")
 	flag.Parse()
 
 	var store persist.Store
@@ -89,6 +90,7 @@ func main() {
 		ReadLimit:           *readLimit,
 		AwarenessTimeout:    *awarenessTimeout,
 		MaxAwarenessClients: *maxAwarenessClients,
+		MaxConnsPerDoc:      *maxConnsPerDoc,
 	})
 
 	httpSrv := &http.Server{

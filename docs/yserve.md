@@ -52,6 +52,7 @@ addressed by URL path, y-websocket convention).
 | `-read-limit` | `0` (32 KiB) | max WebSocket frame the server reads per client; raise for large documents, `-1` = unlimited |
 | `-awareness-timeout` | `0` (30s) | evict a presence entry after it is silent this long |
 | `-max-awareness-clients` | `0` (4096) | cap distinct presence clients per room; `-1` = unlimited |
+| `-max-conns-per-doc` | `0` (4096) | cap simultaneous WebSocket connections per document; `-1` = unlimited. A previously uncapped deployment serving a room with more than 4096 concurrent connections must set `-1` to preserve that behavior after upgrade. |
 
 ## Document history (versioning)
 
