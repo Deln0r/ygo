@@ -40,3 +40,7 @@ testdata/scratch/
 # testdata/gen/fetch-b4-trace.mjs. Too big for the repo; the
 # B4 benchmark skips gracefully when absent.
 testdata/b4-trace.json
+
+# Local build artifacts (go build ./cmd/...)
+/yserve
+/ygo-server
