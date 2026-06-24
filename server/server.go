@@ -283,20 +283,18 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		wsConn.SetReadLimit(s.opts.ReadLimit)
 	}
 
-	state, err := s.acquireDoc(r.Context(), docName)
+	c, state, ok, err := s.admitConn(r.Context(), docName, wsConn)
 	if err != nil {
 		_ = wsConn.Close(websocket.StatusInternalError,
 			fmt.Sprintf("load doc: %v", err))
 		return
 	}
-
-	c := s.newConn(state, wsConn)
-	if !state.addConn(c, s.maxConnsPerDoc()) {
+	if !ok {
 		// Room is at its connection cap. Refuse the newest socket and
 		// leave the established ones untouched. The resolved cap is
 		// always >= 1 (or negative = unlimited), so a rejection means
-		// the room already holds a live connection — acquireDoc's
-		// docState is never orphaned on this path.
+		// the room already holds a live connection and its docState is
+		// never orphaned on this path.
 		_ = wsConn.Close(websocket.StatusPolicyViolation, "document connection limit reached")
 		return
 	}
@@ -310,8 +308,8 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // docState carries the Doc + Awareness + connection set for one
-// docName. Created lazily by acquireDoc; freed by releaseConn when
-// the last connection departs.
+// docName. Created lazily by getOrCreateDocLocked; freed by releaseConn
+// when the last connection departs.
 type docState struct {
 	name      string
 	doc       *doc.Doc
@@ -321,17 +319,12 @@ type docState struct {
 	conns   map[*conn]struct{}
 }
 
-// acquireDoc returns the docState for docName, creating it (and
-// loading from Store, if configured) on first request. The caller
-// is responsible for calling releaseConn after the connection
-// closes — this is the reference-count "increment" half. The one
-// exception is serveWS's over-cap reject path, which acquires without
-// a matching releaseConn; that is safe because a rejection implies the
-// room already holds a live connection whose own releaseConn evicts the
-// docState, so no zero-conn entry is orphaned.
-func (s *Server) acquireDoc(ctx context.Context, docName string) (*docState, error) {
-	s.docsMu.Lock()
-	defer s.docsMu.Unlock()
+// getOrCreateDocLocked returns the docState for docName, creating it
+// (and loading from Store, if configured) on first request. The caller
+// MUST hold s.docsMu. Holding docsMu across both this lookup/create and
+// the connection insert (see admitConn) is what makes admission atomic
+// with eviction: it is the mechanism that closes the split-room window.
+func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*docState, error) {
 	if state, ok := s.docs[docName]; ok {
 		return state, nil
 	}
@@ -359,6 +352,39 @@ func (s *Server) acquireDoc(ctx context.Context, docName string) (*docState, err
 	return state, nil
 }
 
+// admitConn finds or creates the docState for docName and registers a
+// new connection in it, enforcing the per-document cap — all under a
+// single s.docsMu hold. Holding docsMu across the find/create AND the
+// insert closes the split-room TOCTOU: releaseConn evicts a docState
+// only under docsMu, so a connection can never be admitted onto a state
+// that is being (or has just been) removed from the registry. Doing the
+// lookup (acquireDoc) and the insert (addConn) as two separate critical
+// sections left exactly that window open — between the lookup returning
+// and addConn running, the last existing connection could evict the
+// state, orphaning the new connection onto a doc no longer in s.docs and
+// splitting the room onto divergent Docs that never converge.
+//
+// Returns the admitted conn with its docState. When the room is at its
+// cap it returns ok=false (the caller closes the socket); the resolved
+// cap is always >= 1 or negative (unlimited), so a fresh zero-conn
+// docState is never rejected on its first connection, and the reject
+// path therefore never orphans a state. Lock order docsMu -> connsMu
+// (addConn takes connsMu) matches releaseConn's eviction and is not
+// inverted anywhere.
+func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
+	s.docsMu.Lock()
+	defer s.docsMu.Unlock()
+	state, err = s.getOrCreateDocLocked(ctx, docName)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	c = s.newConn(state, ws)
+	if !state.addConn(c, s.maxConnsPerDoc()) {
+		return nil, state, false, nil
+	}
+	return c, state, true, nil
+}
+
 // releaseConn removes a connection from the docState's set, calls
 // the sync handler's Disconnect (which tombstones controlled
 // awareness clients), and — when the connection set hits zero —
@@ -384,10 +410,12 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	// Evict atomically: under docsMu, confirm the registry still maps this
 	// exact docState (identity, not just name) and it still has no
 	// connections (rechecked under connsMu). In the window since we read
-	// remaining==0, a concurrent acquireDoc could have handed this state
-	// to a new connection (addConn) — deleting then would orphan a live
-	// document and split its clients onto divergent Docs that never
-	// converge. Lock order docsMu -> connsMu is not nested anywhere else.
+	// remaining==0, a concurrent admitConn (which holds docsMu across its
+	// own insert) could have admitted a new connection onto this state —
+	// deleting then would orphan a live document and split its clients
+	// onto divergent Docs that never converge. The connsMu recheck is what
+	// observes that insert and skips the delete. Lock order docsMu ->
+	// connsMu is not nested anywhere else.
 	evicted := false
 	s.docsMu.Lock()
 	if cur, ok := s.docs[state.name]; ok && cur == state {
