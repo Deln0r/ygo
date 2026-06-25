@@ -95,3 +95,31 @@ func expectAdmittedEventually(t *testing.T, wsURL, docName string) {
 	}
 	t.Fatal("never admitted after a slot was freed")
 }
+
+// TestServer_MaxDocs_RefusesNewRoom verifies the global document cap on
+// the wire: with the server at its cap, a connection to a new docName is
+// refused with WebSocket code 1013 (TryAgainLater), while a second
+// connection to an already-resident room is still admitted.
+func TestServer_MaxDocs_RefusesNewRoom(t *testing.T) {
+	wsURL, _ := startTestServer(t, server.Options{
+		OriginPatterns: []string{"*"},
+		MaxDocs:        1,
+	})
+
+	a := dialClient(t, wsURL, "room-a", 1)
+	defer a.close()
+	a.read(t) // registers room-a; server is now at MaxDocs=1
+
+	// A new docName is refused with transient-capacity status, distinct
+	// from the per-doc cap's policy-violation close.
+	if got := dialExpectClose(t, wsURL, "room-b"); got != websocket.StatusTryAgainLater {
+		t.Fatalf("new-room close status = %d, want %d (TryAgainLater)",
+			got, websocket.StatusTryAgainLater)
+	}
+
+	// A second connection to the resident room creates no new doc and is
+	// still admitted at the cap.
+	a2 := dialClient(t, wsURL, "room-a", 2)
+	defer a2.close()
+	a2.read(t)
+}

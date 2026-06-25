@@ -143,6 +143,20 @@ type Options struct {
 	// keep working. The newest socket is the one refused, so an
 	// established collaborator is never displaced by a flood.
 	MaxConnsPerDoc int
+
+	// MaxDocs bounds the number of distinct documents the server holds
+	// in memory at once, capping the docStates (and Store loads) a peer
+	// can force by connecting to many fabricated docNames. Unlike the
+	// per-room caps above, this defaults to UNLIMITED (zero or negative):
+	// a global document count scales with deployment size, so a default
+	// cap would silently break a large multi-tenant server. Operators
+	// fronting untrusted clients should set a positive bound. Documents
+	// evict when their last connection departs, so the cap tracks
+	// concurrently-active rooms, not lifetime document count. A
+	// connection that would create a document past the cap is refused at
+	// the upgrade with websocket.StatusTryAgainLater (1013); an already
+	// resident room is always admitted.
+	MaxDocs int
 }
 
 // defaultWriteTimeout bounds a per-peer broadcast write when
@@ -285,6 +299,13 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 
 	c, state, ok, err := s.admitConn(r.Context(), docName, wsConn)
 	if err != nil {
+		if errors.Is(err, errServerDocsFull) {
+			// Server is at its document cap. Signal transient capacity so
+			// a client can back off and retry, distinct from the per-doc
+			// connection cap's policy-violation close.
+			_ = wsConn.Close(websocket.StatusTryAgainLater, "server document limit reached")
+			return
+		}
 		_ = wsConn.Close(websocket.StatusInternalError,
 			fmt.Sprintf("load doc: %v", err))
 		return
@@ -319,6 +340,12 @@ type docState struct {
 	conns   map[*conn]struct{}
 }
 
+// errServerDocsFull is returned by getOrCreateDocLocked when admitting a
+// new document would exceed Options.MaxDocs. serveWS maps it to a
+// StatusTryAgainLater close so a client learns the rejection is
+// transient server capacity, not a per-document policy limit.
+var errServerDocsFull = errors.New("server: document limit reached")
+
 // getOrCreateDocLocked returns the docState for docName, creating it
 // (and loading from Store, if configured) on first request. The caller
 // MUST hold s.docsMu. Holding docsMu across both this lookup/create and
@@ -327,6 +354,14 @@ type docState struct {
 func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*docState, error) {
 	if state, ok := s.docs[docName]; ok {
 		return state, nil
+	}
+
+	// Creating a new room: enforce the global document cap before any
+	// (potentially expensive) Store load, so a peer at the cap cannot
+	// force loads it will not be allowed to keep. Existing rooms (the
+	// cache hit above) are never rejected.
+	if s.opts.MaxDocs > 0 && len(s.docs) >= s.opts.MaxDocs {
+		return nil, errServerDocsFull
 	}
 
 	var d *doc.Doc
