@@ -88,6 +88,29 @@ type Options struct {
 	// the doc regardless of whether the callback is set.
 	OnStateless syncpkg.StatelessHandler
 
+	// OnConnect, when set, is called once a connection has been admitted
+	// to its room (past the per-doc and global caps) but before the
+	// initial sync is sent. It receives a stable per-connection id
+	// (unique for the server's lifetime), the docName, and the original
+	// upgrade *http.Request, so an adopter can gate on headers, cookies,
+	// TLS state, or remote address — request context that the token-only
+	// OnAuthenticate does not see. Returning a non-nil error rejects the
+	// connection: it is torn down and the WS is closed with
+	// StatusPolicyViolation, and OnDisconnect does NOT fire for it. A
+	// panic inside OnConnect is also torn down cleanly (the room slot is
+	// released, no leak) and likewise does not fire OnDisconnect. This
+	// runs on the connection's serve goroutine (so it runs concurrently
+	// across connections); keep it fast.
+	OnConnect func(connID, docName string, r *http.Request) error
+
+	// OnDisconnect, when set, is called when a connection that OnConnect
+	// accepted (or any admitted connection, if OnConnect is nil) is
+	// released, with the same connID and docName passed to OnConnect.
+	// It pairs one-to-one with a successful admission, so an adopter can
+	// keep a balanced per-connection ledger. It runs on the connection's
+	// serve goroutine after the room teardown; keep it fast.
+	OnDisconnect func(connID, docName string)
+
 	// VersionInterval enables periodic auto-versioning: every
 	// interval, each document that received updates since the last
 	// sweep is captured as a named version ("auto") via
@@ -319,7 +342,29 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		_ = wsConn.Close(websocket.StatusPolicyViolation, "document connection limit reached")
 		return
 	}
-	defer s.releaseConn(r.Context(), state, c)
+	// Tear down on exit no matter what, including a panic inside the
+	// adopter's OnConnect: register the cleanup defer BEFORE calling
+	// OnConnect so releaseConn always runs and the room slot can never
+	// leak. OnDisconnect fires only for a connection OnConnect accepted
+	// (or any admitted connection when OnConnect is nil).
+	accepted := s.opts.OnConnect == nil
+	defer func() {
+		s.releaseConn(r.Context(), state, c)
+		if accepted && s.opts.OnDisconnect != nil {
+			s.opts.OnDisconnect(c.idForLog, docName)
+		}
+	}()
+
+	if s.opts.OnConnect != nil {
+		// Request-aware gate, before syncing starts. A rejection (or a
+		// panic) tears the connection back down via the defer above
+		// without firing OnDisconnect.
+		if err := s.opts.OnConnect(c.idForLog, docName, r); err != nil {
+			_ = wsConn.Close(websocket.StatusPolicyViolation, "connection rejected")
+			return
+		}
+		accepted = true
+	}
 
 	if err := c.handler.SendInitialSync(); err != nil {
 		return
