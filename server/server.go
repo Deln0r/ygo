@@ -248,6 +248,36 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(s.serveWS)
 }
 
+// Stats is a point-in-time snapshot of server load returned by Stats.
+type Stats struct {
+	// Documents is the number of documents resident in memory: rooms
+	// with at least one live connection (a document evicts when its last
+	// connection departs).
+	Documents int
+	// Connections is the total number of live WebSocket connections
+	// across all resident documents.
+	Connections int
+}
+
+// Stats returns a point-in-time snapshot of resident documents and live
+// connections. It is safe for concurrent use and cheap: it walks the
+// document registry under the registry lock, taking each document's
+// connection lock only briefly. Adopters typically poll it to feed their
+// own metrics, health, or capacity surfaces (pair it with the OnConnect
+// and OnDisconnect hooks for event-level accounting). Lock order
+// docsMu -> connsMu matches the rest of the server.
+func (s *Server) Stats() Stats {
+	s.docsMu.Lock()
+	defer s.docsMu.Unlock()
+	st := Stats{Documents: len(s.docs)}
+	for _, ds := range s.docs {
+		ds.connsMu.RLock()
+		st.Connections += len(ds.conns)
+		ds.connsMu.RUnlock()
+	}
+	return st
+}
+
 // Close evicts every in-memory document, calling Flush on the
 // configured Store. Pending in-flight WS reads will fail with
 // context cancellation; callers should drain via an http.Server
