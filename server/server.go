@@ -111,6 +111,16 @@ type Options struct {
 	// serve goroutine after the room teardown; keep it fast.
 	OnDisconnect func(connID, docName string)
 
+	// ReadOnly, when set and it returns true for a connection, marks
+	// that connection read-only: the server drops any document update it
+	// sends (the update reaches neither the document nor other peers),
+	// while still delivering updates to it and accepting its awareness
+	// (presence). Decide from the request the way OnConnect gates
+	// admission (a JWT claim, header, or path). A read-only client
+	// should also disable editing in its UI; the server enforcement is
+	// the backstop. Nil means every connection is read-write.
+	ReadOnly func(docName string, r *http.Request) bool
+
 	// VersionInterval enables periodic auto-versioning: every
 	// interval, each document that received updates since the last
 	// sweep is captured as a named version ("auto") via
@@ -394,6 +404,12 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		accepted = true
+	}
+
+	// Resolve read-only status before the read loop starts, so the
+	// handler (read on its own goroutine) sees a settled flag.
+	if s.opts.ReadOnly != nil {
+		c.handler.ReadOnly = s.opts.ReadOnly(docName, r)
 	}
 
 	if err := c.handler.SendInitialSync(); err != nil {

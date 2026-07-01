@@ -86,6 +86,15 @@ type Conn struct {
 	OnAuthenticate AuthHandler
 	OnStateless    StatelessHandler
 
+	// ReadOnly, when true, makes this connection reject inbound
+	// document mutations (SyncStep2 / SyncUpdate): they are neither
+	// applied to the Doc nor broadcast to peers. The connection still
+	// receives updates and may still publish awareness (presence), so a
+	// viewer sees edits and shows a cursor but cannot write to the
+	// shared document. The transport sets this before the read loop
+	// starts; it is read only on the connection's own read goroutine.
+	ReadOnly bool
+
 	// AuthFailed reports whether this conn was rejected by the
 	// AuthHandler. The transport layer should check after each
 	// HandleFrame call and tear down the WS with code 4401 when
@@ -240,10 +249,18 @@ func (c *Conn) handleSync(frame *Frame) error {
 		return c.Send(EncodeSyncStep2(diff))
 
 	case SyncStep2, SyncUpdate:
-		// Peer is delivering content. Apply (which queues missing
-		// deps in encoding.Pending) and broadcast as a SyncUpdate
-		// to all peers including self. Self-echo is safe because
-		// V1 updates are idempotent — see port-note gotcha 6.
+		// Peer is delivering content. A read-only connection may not
+		// mutate the shared document: drop the update entirely (no
+		// apply, no broadcast) so it reaches neither the Doc nor peers.
+		// The client still receives others' updates and its awareness
+		// still flows; only its document writes are refused.
+		if c.ReadOnly {
+			return nil
+		}
+		// Apply (which queues missing deps in encoding.Pending) and
+		// broadcast as a SyncUpdate to all peers including self.
+		// Self-echo is safe because V1 updates are idempotent — see
+		// port-note gotcha 6.
 		if err := encoding.ApplyUpdate(c.Doc, frame.Payload); err != nil {
 			return fmt.Errorf("apply Sync%s update: %w", subTypeName(frame.SyncSub), err)
 		}

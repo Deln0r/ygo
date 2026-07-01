@@ -128,6 +128,29 @@ This is the deployment shape a sidecar process cannot give you: the
 sync server lives inside your existing Go monolith, sharing its
 lifecycle, metrics, and auth.
 
+### Read-only connections
+
+`Options.ReadOnly` grants viewer access from the upgrade request. When
+it returns true for a connection, the server drops that connection's
+document updates (they reach neither the document nor other peers),
+while still delivering updates to it and still accepting its awareness
+(so a viewer sees edits and shows a cursor):
+
+```go
+srv := server.New(server.Options{
+    ReadOnly: func(docName string, r *http.Request) bool {
+        return r.URL.Query().Get("mode") == "view" // or a JWT claim, header, ...
+    },
+})
+```
+
+It is library-only by design: a per-request predicate cannot be a CLI
+flag, so yserve exposes no equivalent option. A rejected edit is dropped
+silently, so it remains in the client's local document; a read-only
+client should disable editing in its UI (and reload or re-sync if it
+edited anyway) to avoid diverging from the server. Server-side
+enforcement is the backstop, not the client's only guard.
+
 ## Operational notes
 
 - **Single-writer storage.** SQLite serializes writes at the file

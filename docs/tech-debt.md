@@ -236,7 +236,8 @@
   - `internal/sync/handler.go` adds `OnAuthenticate(docName, token) error` and `OnStateless(docName, payload)` hooks plus `AuthFailed` flag. Auth handler decodes Token sub-type, invokes the callback; on deny sends AuthPermissionDenied + Close and sets AuthFailed. Stateless invokes the callback (no reply). BroadcastStateless also fans out via Broadcast. Close and SyncStatus accepted silently.
   - `server/server.go` exposes `Options.OnAuthenticate` and `Options.OnStateless`. The readLoop checks `AuthFailed` after each HandleFrame and tears down the WS with `CloseStatusUnauthorized` (4401) when set.
   - 7 unit tests in `internal/sync/hocuspocus_test.go` plus 3 E2E tests in `server/server_test.go` (deny → 4401 close, accept → Authenticated reply, broadcast-stateless fans out across two clients).
-- **Remaining gaps:** Hocuspocus's `Authentication` extension also supports per-document-permission scoping (`readonly` vs `readwrite`). Our `OnAuthenticate` returns only nil/error; richer permission model can be added when an adopter asks. Tracked separately if it surfaces.
+- **Connection-level read-only (resolved):** `server.Options.ReadOnly func(docName, r) bool` marks a connection read-only; the sync handler then drops inbound document mutations (SyncStep2 / SyncUpdate: no apply, no broadcast) while still serving reads (SyncStep1) and still accepting awareness. Enforced in `internal/sync/handler.go` via `Conn.ReadOnly`.
+- **Remaining gaps:** finer-grained scoping tied to the auth token specifically (per-document / per-field permissions decided inside `OnAuthenticate` rather than from the request) is still absent; the connection-level `Options.ReadOnly` predicate covers the common viewer-vs-editor case. Add the token-scoped model when an adopter asks.
 
 ### Cross-language y-websocket / Hocuspocus fixture (resolved)
 

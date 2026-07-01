@@ -51,6 +51,98 @@ func decodeOrFail(t *testing.T, b []byte) *syncpkg.Frame {
 	return f
 }
 
+func TestHandler_ReadOnly_DropsInboundUpdate(t *testing.T) {
+	// An update that adds one item to "items".
+	src := doc.NewDocWithOptions(doc.Options{ClientID: 7})
+	sa := types.NewArray(src.Branch("items"))
+	stxn := src.WriteTxn()
+	sa.Push(stxn, "edit")
+	stxn.Commit()
+	update := encoding.EncodeStateAsUpdate(src)
+
+	// Read-only connection: the update is neither applied nor broadcast.
+	server := doc.NewDocWithOptions(doc.Options{ClientID: 100})
+	conn, tr := newTestConn(t, server, awareness.New(100), "viewer")
+	conn.ReadOnly = true
+	if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeSyncUpdate(update))); err != nil {
+		t.Fatalf("HandleFrame (read-only): %v", err)
+	}
+	if got := types.NewArray(server.Branch("items")).Len(); got != 0 {
+		t.Errorf("read-only doc len = %d, want 0 (update must be dropped)", got)
+	}
+	if len(tr.Broadcast) != 0 {
+		t.Errorf("read-only broadcast count = %d, want 0", len(tr.Broadcast))
+	}
+
+	// Control: a read-write connection applies and broadcasts the same
+	// update, confirming the drop above is the read-only flag's doing.
+	rw := doc.NewDocWithOptions(doc.Options{ClientID: 101})
+	conn2, tr2 := newTestConn(t, rw, awareness.New(101), "editor")
+	if err := conn2.HandleFrame(decodeOrFail(t, syncpkg.EncodeSyncUpdate(update))); err != nil {
+		t.Fatalf("HandleFrame (read-write): %v", err)
+	}
+	if got := types.NewArray(rw.Branch("items")).Len(); got != 1 {
+		t.Errorf("read-write doc len = %d, want 1", got)
+	}
+	if len(tr2.Broadcast) != 1 {
+		t.Errorf("read-write broadcast count = %d, want 1", len(tr2.Broadcast))
+	}
+}
+
+func TestHandler_ReadOnly_ServesReadsAndAwareness(t *testing.T) {
+	// A read-only conn still serves SyncStep1 (state out) and still
+	// broadcasts inbound awareness (presence), but still drops a
+	// SyncStep2-delivered update (the other doc-mutating sub-type).
+	server := doc.NewDocWithOptions(doc.Options{ClientID: 100})
+	m := types.NewMap(server.Branch("settings"))
+	txn := server.WriteTxn()
+	m.Set(txn, "k", "v")
+	txn.Commit()
+
+	conn, tr := newTestConn(t, server, awareness.New(100), "viewer")
+	conn.ReadOnly = true
+
+	// SyncStep1 in must still be answered with SyncStep2 out: reads are
+	// allowed for a read-only connection.
+	emptySV := encoding.EncodeStateVector(map[uint64]uint64{}, nil)
+	if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeSyncStep1(emptySV))); err != nil {
+		t.Fatalf("HandleFrame SyncStep1: %v", err)
+	}
+	if len(tr.Sent) != 1 {
+		t.Fatalf("read-only Sent count = %d, want 1 (SyncStep2 reply)", len(tr.Sent))
+	}
+	if reply := decodeOrFail(t, tr.Sent[0]); reply.Type != syncpkg.MessageSync || reply.SyncSub != syncpkg.SyncStep2 {
+		t.Errorf("read-only SyncStep1 reply = %d/%d, want MessageSync/SyncStep2", reply.Type, reply.SyncSub)
+	}
+
+	// Awareness in must still be broadcast: presence flows for viewers.
+	remoteAw := awareness.New(500)
+	remoteAw.SetLocalState([]byte(`{"cursor":1}`))
+	if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeAwareness(remoteAw.Encode(nil)))); err != nil {
+		t.Fatalf("HandleFrame Awareness: %v", err)
+	}
+	if len(tr.Broadcast) != 1 {
+		t.Errorf("read-only awareness broadcast = %d, want 1 (presence must flow)", len(tr.Broadcast))
+	}
+
+	// A SyncStep2-delivered update (the other mutating sub-type) is also
+	// dropped: not applied, not broadcast.
+	src := doc.NewDocWithOptions(doc.Options{ClientID: 7})
+	sa := types.NewArray(src.Branch("items"))
+	stxn := src.WriteTxn()
+	sa.Push(stxn, "edit")
+	stxn.Commit()
+	if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeSyncStep2(encoding.EncodeStateAsUpdate(src)))); err != nil {
+		t.Fatalf("HandleFrame SyncStep2: %v", err)
+	}
+	if got := types.NewArray(server.Branch("items")).Len(); got != 0 {
+		t.Errorf("read-only doc len after SyncStep2 = %d, want 0 (dropped)", got)
+	}
+	if len(tr.Broadcast) != 1 {
+		t.Errorf("read-only broadcast after SyncStep2 = %d, want 1 (unchanged; update dropped)", len(tr.Broadcast))
+	}
+}
+
 func TestHandler_SyncStep1_RepliesWithSyncStep2(t *testing.T) {
 	// Server has one item in the map; client sends an empty SV
 	// (knows nothing); server must reply with SyncStep2 carrying
