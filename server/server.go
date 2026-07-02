@@ -121,6 +121,23 @@ type Options struct {
 	// the backstop. Nil means every connection is read-write.
 	ReadOnly func(docName string, r *http.Request) bool
 
+	// OnChange, when set, is called after a document update is applied
+	// and broadcast, with the docName and the V1 update bytes that were
+	// applied. Use it for side effects on edits (search indexing,
+	// webhooks, audit, external persistence). It fires for every accepted
+	// document mutation whether or not a Store is configured, and NOT for
+	// an update a read-only connection sent (that is dropped before
+	// broadcast) nor for awareness or handshake frames. It runs
+	// synchronously on the originating connection's read goroutine, so
+	// keep it fast and dispatch long-running work elsewhere; a panic
+	// tears down that connection. When a Store is also configured,
+	// OnChange runs after the StoreUpdate attempt and fires even if that
+	// StoreUpdate failed (the document already changed in memory and on
+	// peers; the failure is logged), so do not treat an OnChange call as
+	// confirmation of durable persistence. Treat the update slice as
+	// valid only for the duration of the call; copy it if you retain it.
+	OnChange func(docName string, update []byte)
+
 	// VersionInterval enables periodic auto-versioning: every
 	// interval, each document that received updates since the last
 	// sweep is captured as a named version ("auto") via
@@ -660,13 +677,13 @@ func (c *conn) broadcast(envelope []byte) {
 	for _, peer := range c.state.snapshotConns() {
 		_ = peer.send(envelope)
 	}
-	// Persist sync updates to the store, if configured. We dispatch
-	// here rather than inside the sync handler so the persistence
-	// concern stays in the transport layer.
+	// Persist and notify on applied document updates. We dispatch here
+	// rather than inside the sync handler so the persistence and
+	// side-effect concerns stay in the transport layer.
 	if c.server == nil {
 		return
 	}
-	c.maybePersist(envelope)
+	c.onAppliedUpdate(envelope)
 }
 
 // broadcastAwarenessRemovals fans out tombstone envelopes for the
@@ -688,12 +705,15 @@ func (s *docState) broadcastAwarenessRemovals(ids []uint64) {
 	}
 }
 
-// maybePersist appends a SyncUpdate's inner update bytes to the
-// store. Awareness frames and SyncStep1 are not persisted (they
-// are ephemeral / handshake-only). SyncStep2 IS persisted because
-// it carries content the server didn't have before this connect.
-func (c *conn) maybePersist(envelope []byte) {
-	if c.server.opts.Store == nil {
+// onAppliedUpdate handles a broadcast envelope that carries a real
+// document change: it persists the update to the Store (if configured)
+// and invokes OnChange (if configured). Awareness frames and SyncStep1
+// carry no document mutation and are ignored; SyncStep2 IS handled
+// because it delivers content the server did not have before. A
+// read-only connection's update never reaches here — the handler drops
+// it before broadcast.
+func (c *conn) onAppliedUpdate(envelope []byte) {
+	if c.server.opts.Store == nil && c.server.opts.OnChange == nil {
 		return
 	}
 	frame, _, err := syncpkg.DecodeEnvelope(envelope)
@@ -709,14 +729,21 @@ func (c *conn) maybePersist(envelope []byte) {
 	if len(frame.Payload) == 0 {
 		return
 	}
-	if err := c.server.opts.Store.StoreUpdate(context.Background(), c.state.name, frame.Payload); err != nil {
-		// A failed persist must not be invisible, and must not mark the
-		// document dirty: auto-versioning would then capture in-memory
-		// state that was never durably stored. Log and skip.
-		log.Printf("server: persist update for %q: %v", c.state.name, err)
-		return
+	if c.server.opts.Store != nil {
+		if err := c.server.opts.Store.StoreUpdate(context.Background(), c.state.name, frame.Payload); err != nil {
+			// A failed persist must not be invisible, and must not mark
+			// the document dirty: auto-versioning would then capture
+			// in-memory state that was never durably stored. Log and skip
+			// the dirty mark, but still notify OnChange below — the
+			// document did change in memory and on peers.
+			log.Printf("server: persist update for %q: %v", c.state.name, err)
+		} else {
+			c.server.markVersionDirty(c.state.name)
+		}
 	}
-	c.server.markVersionDirty(c.state.name)
+	if c.server.opts.OnChange != nil {
+		c.server.opts.OnChange(c.state.name, frame.Payload)
+	}
 }
 
 // readLoop runs the per-connection message-receive loop until the
