@@ -99,7 +99,27 @@ var _ persist.Store = (*Store)(nil)
 // writes correctly, but they will not see each other's uncommitted
 // transactions. Prefer a single Store per database file per process.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	dsn := path
+	if path != memoryDSN {
+		// On-disk: run every pooled connection in WAL mode with a busy
+		// timeout. Without a busy timeout, concurrent writers contending
+		// on the file lock fail immediately with SQLITE_BUSY ("database
+		// is locked") and their updates are lost; the timeout makes them
+		// wait for the lock instead. WAL additionally lets readers run
+		// without blocking the writer. Both are set through the DSN so
+		// they apply to each connection database/sql opens in the pool
+		// (busy_timeout is a per-connection setting).
+		//
+		// The pragmas are appended as a query WITHOUT a "file:" prefix on
+		// purpose: a file: URI would reinterpret '#', '?' and '%' in the
+		// path and silently write to the wrong file, whereas a bare path
+		// stays a literal filename while the driver still applies the
+		// pragmas. WAL needs a local filesystem and a writable directory
+		// (for the -wal / -shm sidecar files); it is not suitable over a
+		// network filesystem such as NFS.
+		dsn = path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite.Open(%q): %w", path, err)
 	}
