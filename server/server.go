@@ -36,6 +36,7 @@ import (
 
 	"github.com/Deln0r/ygo/internal/awareness"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/encoding"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
 	"github.com/Deln0r/ygo/persist"
 )
@@ -137,6 +138,32 @@ type Options struct {
 	// confirmation of durable persistence. Treat the update slice as
 	// valid only for the duration of the call; copy it if you retain it.
 	OnChange func(docName string, update []byte)
+
+	// OnLoadDocument, when set, is called the first time a document is
+	// loaded into memory (a cache miss), after any Store history has been
+	// applied, with the docName. It lets an adopter seed or load initial
+	// content from a source other than the Store. A returned V1 update is
+	// applied to the fresh document; a returned error aborts the load and
+	// the connection is closed with StatusInternalError, leaving no
+	// document registered.
+	//
+	// The returned update is applied in memory and is not itself
+	// persisted, so it re-applies on every first load (including after an
+	// eviction). For that to be safe the seed MUST be deterministic with
+	// STABLE item IDs across calls — build it from a fixed reserved
+	// ClientID with fixed clocks, or return the same bytes each time. A
+	// seed built from a fresh/random ClientID each call (the default of
+	// doc.NewDoc) will, together with a Store, both duplicate its content
+	// on every reload and strand persisted client edits that referenced
+	// the seed (their origin never reappears). Prefer the Store for
+	// durable content; use this hook for stable, regenerable seeds.
+	//
+	// It runs synchronously under the internal document-registry lock, so
+	// it must be fast and MUST NOT call back into the Server (Stats,
+	// Close, or opening another connection) or it will deadlock. While it
+	// runs, all connection admission and document eviction across the
+	// server are stalled, not just this document's creation.
+	OnLoadDocument func(docName string) ([]byte, error)
 
 	// VersionInterval enables periodic auto-versioning: every
 	// interval, each document that received updates since the last
@@ -481,6 +508,21 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 		d = loaded
 	} else {
 		d = doc.NewDoc()
+	}
+
+	// OnLoadDocument seeds/loads initial content on first load, applied
+	// on top of any Store history. An error aborts before registration
+	// (no half-doc); a returned update is applied as V1 content.
+	if s.opts.OnLoadDocument != nil {
+		seed, err := s.opts.OnLoadDocument(docName)
+		if err != nil {
+			return nil, fmt.Errorf("OnLoadDocument(%q): %w", docName, err)
+		}
+		if len(seed) > 0 {
+			if err := encoding.ApplyUpdate(d, seed); err != nil {
+				return nil, fmt.Errorf("apply OnLoadDocument seed for %q: %w", docName, err)
+			}
+		}
 	}
 
 	aw := awareness.New(d.ClientID())
