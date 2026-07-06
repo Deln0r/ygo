@@ -44,3 +44,4 @@ testdata/b4-trace.json
 # Local build artifacts (go build ./cmd/...)
 /yserve
 /ygo-server
+/collab-server
