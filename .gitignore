@@ -45,3 +45,4 @@ testdata/b4-trace.json
 /yserve
 /ygo-server
 /collab-server
+/collab-client
