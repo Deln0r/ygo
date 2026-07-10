@@ -231,3 +231,40 @@ comparison via `benchstat`:
 go test -bench=. -benchtime=5x -count=5 -benchmem ./benchmarks/ | tee bench.txt
 benchstat bench.txt
 ```
+
+## Server transport (ygo-only)
+
+The WebSocket sync server (`server`) has its own benchmarks in
+`server/bench_test.go`. There is no yrs equivalent to compare against
+(yrs ships no server), so these are absolute ygo figures.
+
+Run:
+
+```
+go test -run='^$' -bench=BenchmarkServer_ -benchtime=1s -count=5 ./server/
+```
+
+Baseline (Apple M3, Go 1.26.3, loopback httptest server, coder/websocket):
+
+| Benchmark                    |   ns/op | derived |
+|------------------------------|--------:|---------|
+| Broadcast fan-out, 2 peers   |  28,400 | ~35,000 update round-trips/s |
+| Broadcast fan-out, 10 peers  |  60,000 | ~16,700 round-trips/s |
+| Broadcast fan-out, 50 peers  | 240,000 | ~4,200 round-trips/s |
+| Connect handshake            | 129,000 | ~7,700 connect+sync+close/s |
+
+*Broadcast fan-out* is one client sending a fixed `SyncUpdate` and reading
+its own broadcast echo while N-1 idle peers drain their copies. It
+isolates the server's apply + fan-out cost from client encoding (the
+payload is pre-built and constant). Cost scales roughly linearly with the
+room size, about 4.4 µs of marginal fan-out per additional peer on top of
+~24 µs of base round-trip, as expected for a per-peer serialized write.
+
+*Connect handshake* is a full dial + WebSocket upgrade + admission +
+initial-sync read + close, with the document kept resident by an anchor
+connection so the number reflects connection admission rather than
+document load/evict churn.
+
+These are loopback numbers: real deployments add network RTT and TLS, and
+a slow or half-open peer is bounded by `Options.WriteTimeout` rather than
+stalling the fan-out.
