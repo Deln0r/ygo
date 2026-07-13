@@ -248,6 +248,16 @@ Towards v1.0: benchmarks refresh · documentation site · external security audi
 
 Per-layer port notes live in [docs/yrs-port-notes/](docs/yrs-port-notes/). Items intentionally deferred or partial are tracked in [docs/tech-debt.md](docs/tech-debt.md). Detailed design decisions in [DESIGN.md](DESIGN.md).
 
+## Examples
+
+Runnable examples in [examples/](examples):
+
+- [collab-server](examples/collab-server) — embed the WebSocket sync server and wire its hooks (`OnConnect`, `ReadOnly`, `OnChange`, `OnLoadDocument`), resource caps, a SQLite store, and a `/stats` endpoint.
+- [collab-client](examples/collab-client) — a Go-native sync client: connect, observe remote changes, edit, converge.
+- [offline-first](examples/offline-first) — client-side offline persistence with a `LocalStore`: usable with no network, edits survive restarts and sync up on reconnect.
+
+The core CRDT API also has output-verified [runnable examples on pkg.go.dev](https://pkg.go.dev/github.com/Deln0r/ygo#pkg-examples) (Map, Array, Text, two-document sync, UndoManager).
+
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) — project design document
