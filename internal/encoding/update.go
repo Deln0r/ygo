@@ -335,6 +335,15 @@ func (b Block) length() uint64 {
 	return b.Len
 }
 
+// startClock is the block's first clock. For an Item the ID lives on the
+// parsed Item; GC / Skip records carry it on the Block directly.
+func (b Block) startClock() uint64 {
+	if b.Kind == WireBlockItem {
+		return b.Item.ID.Clock
+	}
+	return b.ID.Clock
+}
+
 // decodeBlock parses one block record at the given starting ID.
 //
 // Mirrors yrs Update::decode_block (update.rs:364-393).

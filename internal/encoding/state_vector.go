@@ -38,6 +38,44 @@ func EncodeStateVector(sv store.StateVector, buf []byte) []byte {
 	return buf
 }
 
+// EncodeStateVectorFromUpdate computes the state vector a V1 update
+// advances to, structurally from the update bytes, without reconstructing
+// a document.
+//
+// Per client it counts the CONTIGUOUS run of blocks starting at clock 0
+// and stops at the first Skip block or gap; a client whose blocks do not
+// start at clock 0 is omitted entirely. This mirrors yjs
+// encodeStateVectorFromUpdate exactly: the result is a safe remote state
+// vector for diffing, so a client whose earliest clocks are absent (a
+// diff, or a merge that emitted Skips for gaps) is not over-reported,
+// which would otherwise make a diff withhold blocks a peer still needs.
+//
+// Use it to index or diff stored updates server-side without loading the
+// full document.
+func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
+	u, _, err := DecodeUpdate(update)
+	if err != nil {
+		return nil, err
+	}
+	sv := store.StateVector{}
+	for client, blocks := range u.Blocks {
+		// Blocks are clock-ascending within a client. Count forward from
+		// clock 0 only while the run stays contiguous and Skip-free; the
+		// first Skip or gap (or a non-zero start) freezes the clock.
+		var curr uint64
+		for _, b := range blocks {
+			if b.Kind == WireBlockSkip || b.startClock() != curr {
+				break
+			}
+			curr = b.startClock() + b.length()
+		}
+		if curr != 0 {
+			sv[client] = curr
+		}
+	}
+	return EncodeStateVector(sv, nil), nil
+}
+
 // DecodeStateVector parses a V1 wire-encoded StateVector from buf and
 // returns the StateVector plus the unconsumed tail.
 //

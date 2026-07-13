@@ -476,3 +476,57 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 	wtxn.Commit()
 	return encoding.EncodeStateAsUpdate(d), nil
 }
+
+// MergeUpdatesV2 is the V2 counterpart of MergeUpdates: it coalesces V2
+// update blobs into a single equivalent V2 update. Returns nil for an
+// empty input. Like MergeUpdates it reconstructs then re-encodes, so
+// blocks whose causal dependencies are absent across the merged set are
+// dropped rather than preserved behind Skip blocks (as yjs
+// mergeUpdatesV2 would); ygo-produced full updates are self-contained and
+// unaffected.
+func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
+	if len(updates) == 0 {
+		return nil, nil
+	}
+	d := doc.NewDoc()
+	wtxn := d.WriteTxn()
+	for _, raw := range updates {
+		upd, err := encoding.DecodeUpdateV2(raw)
+		if err != nil {
+			wtxn.Commit()
+			return nil, err
+		}
+		if err := upd.Apply(wtxn); err != nil {
+			wtxn.Commit()
+			return nil, err
+		}
+	}
+	wtxn.Commit()
+	return encoding.EncodeStateAsUpdateV2(d), nil
+}
+
+// EncodeStateVectorFromUpdate computes the state vector a V1 update
+// advances to, directly from the update bytes without reconstructing a
+// document. Mirrors yjs encodeStateVectorFromUpdate: index or diff stored
+// updates server-side without loading the full document into memory.
+func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
+	return encoding.EncodeStateVectorFromUpdate(update)
+}
+
+// DiffUpdate returns the part of a V1 update that a peer identified by
+// remoteSV (a wire-encoded state vector, e.g. from EncodeStateVector or
+// EncodeStateVectorFromUpdate) is missing. Mirrors yjs diffUpdate: trim a
+// stored update before sending it to a peer that already has part of it.
+//
+// It reconstructs the update's state and diffs against remoteSV, emitting
+// whole blocks like EncodeDiff. A full update that ygo produces
+// (EncodeStateAsUpdate / MergeUpdates) is self-contained and fully
+// covered; a diff (from EncodeDiff) or a hand-crafted update whose block
+// dependencies are absent drops those unresolved blocks.
+func DiffUpdate(update, remoteSV []byte) ([]byte, error) {
+	d := NewDoc()
+	if err := ApplyUpdate(d, update); err != nil {
+		return nil, err
+	}
+	return EncodeDiff(d, remoteSV)
+}
