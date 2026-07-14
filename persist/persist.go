@@ -51,9 +51,13 @@ import (
 //   - Flush replaces all updates for docName with a single snapshot
 //     update equivalent to applying them all in order to a fresh
 //     Doc and re-encoding. Idempotent: calling on a doc with zero or
-//     one updates is a no-op. The snapshot is computed inside the
-//     storage transaction so concurrent StoreUpdate calls cannot
-//     interleave (they block until Flush commits).
+//     one updates is a no-op. Flush is atomic: a reader observes
+//     either the pre-flush log or the single post-flush blob, never a
+//     torn state, and no data is lost. A concurrent StoreUpdate is
+//     serialized against it — the writer blocks until Flush commits,
+//     bounded by any backend busy timeout, past which, under sustained
+//     write contention, Flush may return a transient error the caller
+//     can retry.
 //
 //   - DocumentExists reports whether docName has any stored updates.
 //

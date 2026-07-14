@@ -96,6 +96,37 @@ func expectAdmittedEventually(t *testing.T, wsURL, docName string) {
 	t.Fatal("never admitted after a slot was freed")
 }
 
+// TestServer_MaxConns_RefusesOverCapOnWire verifies the global connection
+// cap on the wire: with the server at MaxConns, a further connection (even
+// to a resident room) is refused with WebSocket code 1013 (TryAgainLater),
+// and a slot freed by a departing client is reusable.
+func TestServer_MaxConns_RefusesOverCapOnWire(t *testing.T) {
+	wsURL, _ := startTestServer(t, server.Options{
+		OriginPatterns: []string{"*"},
+		MaxConns:       2,
+	})
+
+	const docName = "room"
+	a := dialClient(t, wsURL, docName, 1)
+	defer a.close()
+	_ = a.read(t)
+	b := dialClient(t, wsURL, docName, 2)
+	defer b.close()
+	_ = b.read(t)
+
+	// At the global cap; a third connection is refused with transient
+	// capacity, the same status as the document cap.
+	if got := dialExpectClose(t, wsURL, docName); got != websocket.StatusTryAgainLater {
+		t.Fatalf("over-cap close status = %d, want %d (TryAgainLater)",
+			got, websocket.StatusTryAgainLater)
+	}
+
+	// Free a global slot; a fresh client must now be admitted once the
+	// server has processed b's departure.
+	b.close()
+	expectAdmittedEventually(t, wsURL, docName)
+}
+
 // TestServer_MaxDocs_RefusesNewRoom verifies the global document cap on
 // the wire: with the server at its cap, a connection to a new docName is
 // refused with WebSocket code 1013 (TryAgainLater), while a second

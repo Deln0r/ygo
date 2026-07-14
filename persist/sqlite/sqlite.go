@@ -181,25 +181,53 @@ func (s *Store) GetUpdates(ctx context.Context, docName string) ([][]byte, error
 }
 
 // Flush replaces all updates for docName with a single merged
-// snapshot. The read-merge-replace runs inside one SQLite transaction
-// so concurrent StoreUpdate calls either land before the snapshot
-// is taken (and get folded in) or after the replace commits (and
-// append to the now-shorter log). A torn intermediate state is not
-// observable.
+// snapshot. The read-merge-replace runs inside one write transaction
+// opened with BEGIN IMMEDIATE, so a concurrent StoreUpdate either
+// commits before Flush takes the write lock (and is folded into the
+// snapshot) or blocks on that lock until Flush commits and then appends
+// to the now-shorter log. A torn intermediate state is never observable.
+//
+// The transaction is IMMEDIATE, not the default deferred, on purpose. A
+// deferred transaction would take only a read snapshot for the SELECT and
+// then try to upgrade to a writer at the DELETE; on a WAL database a
+// StoreUpdate committing in that gap invalidates the snapshot and the
+// upgrade fails at once with SQLITE_BUSY_SNAPSHOT, which the busy_timeout
+// does NOT service, so Flush would fail a large fraction of the time on a
+// live document. Taking the write lock up front routes contention through
+// busy_timeout instead (a concurrent writer waits, bounded, rather than
+// failing the flush), which is what makes Flush reliable on a hot doc.
 //
 // Idempotent: no-op for documents with zero or one stored updates.
 // Returns the error from persist.MergeUpdates without touching the
 // database when the snapshot cannot be computed; the original log
-// stays canonical.
+// stays canonical. Under extreme, sustained write contention BEGIN
+// IMMEDIATE may itself exceed busy_timeout and return a transient busy
+// error; the log is untouched and the caller may retry.
 func (s *Store) Flush(ctx context.Context, docName string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	// A dedicated connection lets us drive BEGIN/COMMIT/ROLLBACK by hand so
+	// the transaction is IMMEDIATE (see the doc comment); database/sql's
+	// BeginTx opens a deferred transaction with no portable way to request
+	// IMMEDIATE across drivers.
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return fmt.Errorf("sqlite.Flush(%q) conn: %w", docName, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("sqlite.Flush(%q) begin: %w", docName, err)
 	}
-	// Rollback is a no-op after Commit succeeds; defer is safe.
-	defer func() { _ = tx.Rollback() }()
+	committed := false
+	// Roll back unless an explicit COMMIT was reached; a no-op afterward.
+	// Runs before conn.Close (deferred earlier, so it releases the lock
+	// before the connection returns to the pool).
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
 
-	rows, err := tx.QueryContext(ctx,
+	rows, err := conn.QueryContext(ctx,
 		`SELECT update_blob FROM ygo_updates WHERE doc_name = ? ORDER BY id ASC`,
 		docName)
 	if err != nil {
@@ -221,28 +249,36 @@ func (s *Store) Flush(ctx context.Context, docName string) error {
 	rows.Close()
 
 	if len(updates) < 2 {
-		// Zero or one update — already optimal. Commit the empty
-		// txn so the lock is released cleanly.
-		return tx.Commit()
+		// Zero or one update — already optimal. Commit the empty txn so
+		// the write lock is released cleanly.
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return fmt.Errorf("sqlite.Flush(%q) commit: %w", docName, err)
+		}
+		committed = true
+		return nil
 	}
 
 	snapshot, err := persist.MergeUpdates(updates)
 	if err != nil {
 		// Snapshot computation failed — leave the original log alone.
-		// Returning here triggers the deferred Rollback.
+		// Returning here triggers the deferred ROLLBACK.
 		return fmt.Errorf("sqlite.Flush(%q) merge: %w", docName, err)
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	if _, err := conn.ExecContext(ctx,
 		`DELETE FROM ygo_updates WHERE doc_name = ?`, docName); err != nil {
 		return fmt.Errorf("sqlite.Flush(%q) delete: %w", docName, err)
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO ygo_updates (doc_name, update_blob) VALUES (?, ?)`,
 		docName, snapshot); err != nil {
 		return fmt.Errorf("sqlite.Flush(%q) insert: %w", docName, err)
 	}
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("sqlite.Flush(%q) commit: %w", docName, err)
+	}
+	committed = true
+	return nil
 }
 
 // DocumentExists reports whether docName has any stored updates.

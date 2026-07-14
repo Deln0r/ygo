@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -234,6 +235,22 @@ type Options struct {
 	// the upgrade with websocket.StatusTryAgainLater (1013); an already
 	// resident room is always admitted.
 	MaxDocs int
+
+	// MaxConns bounds the total number of simultaneous WebSocket
+	// connections the server holds across all documents at once: a
+	// server-wide ceiling that complements the per-room MaxConnsPerDoc.
+	// Like MaxDocs, it defaults to UNLIMITED (zero or negative), because a
+	// total-connection count scales with deployment size and a default cap
+	// would silently break a large server. Operators fronting untrusted
+	// clients should set a positive bound sized to their memory and
+	// file-descriptor budget. A connection that would exceed the cap is
+	// refused at the upgrade with websocket.StatusTryAgainLater (1013)
+	// before its room is created or loaded, so a rejected connection
+	// neither orphans a fresh document nor forces a Store load; connections
+	// already established keep working and the newest socket is the one
+	// refused. The count is of admitted connections and drops as they
+	// depart, so the cap tracks live load, not lifetime connections.
+	MaxConns int
 }
 
 // defaultWriteTimeout bounds a per-peer broadcast write when
@@ -247,6 +264,13 @@ type Server struct {
 
 	docsMu sync.Mutex
 	docs   map[string]*docState
+
+	// totalConns counts admitted WebSocket connections across all
+	// documents, backing the global Options.MaxConns cap. It is bumped
+	// under docsMu in admitConn (so admissions serialize against the cap
+	// check and cannot overshoot) and dropped in releaseConn; an atomic so
+	// the decrement, which runs outside docsMu, is safe.
+	totalConns atomic.Int64
 
 	// Auto-versioning state (see versioning.go). versionDirty holds
 	// the docNames updated since the last sweep; the stop/done pair
@@ -311,25 +335,66 @@ type Stats struct {
 	// Connections is the total number of live WebSocket connections
 	// across all resident documents.
 	Connections int
+	// Docs is the per-document breakdown, one entry per resident document,
+	// sorted by Name for a stable read. Documents is len(Docs) and
+	// Connections is the sum of their Connections. Ranging over it lets an
+	// adopter surface hot rooms without its own accounting.
+	Docs []DocStat
+}
+
+// DocStat is the per-document line of a Stats snapshot.
+type DocStat struct {
+	// Name is the docName of a resident document.
+	Name string
+	// Connections is the number of live WebSocket connections on it.
+	Connections int
 }
 
 // Stats returns a point-in-time snapshot of resident documents and live
-// connections. It is safe for concurrent use and cheap: it walks the
-// document registry under the registry lock, taking each document's
-// connection lock only briefly. Adopters typically poll it to feed their
-// own metrics, health, or capacity surfaces (pair it with the OnConnect
-// and OnDisconnect hooks for event-level accounting). Lock order
-// docsMu -> connsMu matches the rest of the server.
+// connections, including a per-document breakdown (Stats.Docs). It is safe
+// for concurrent use and cheap: it walks the document registry under the
+// registry lock, taking each document's connection lock only briefly.
+// Adopters typically poll it to feed their own metrics, health, or
+// capacity surfaces (pair it with the OnConnect and OnDisconnect hooks for
+// event-level accounting). Lock order docsMu -> connsMu matches the rest
+// of the server.
 func (s *Server) Stats() Stats {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
-	st := Stats{Documents: len(s.docs)}
-	for _, ds := range s.docs {
+	st := Stats{Documents: len(s.docs), Docs: make([]DocStat, 0, len(s.docs))}
+	for name, ds := range s.docs {
 		ds.connsMu.RLock()
-		st.Connections += len(ds.conns)
+		n := len(ds.conns)
 		ds.connsMu.RUnlock()
+		st.Connections += n
+		st.Docs = append(st.Docs, DocStat{Name: name, Connections: n})
 	}
+	sort.Slice(st.Docs, func(i, j int) bool { return st.Docs[i].Name < st.Docs[j].Name })
 	return st
+}
+
+// Flush compacts docName's persisted update log into a single snapshot
+// through the configured Store, forcing a durable checkpoint on demand
+// without evicting the document or disturbing its live connections. It is
+// the explicit form of the compaction the server already performs when a
+// document is evicted or the server closes.
+//
+// Every applied update is persisted incrementally as it arrives, so Flush
+// does not push unsaved in-memory state; it consolidates what is already
+// stored, keeping the log compact and the next load fast. Call it before a
+// backup, or on a schedule for hot documents.
+//
+// With no Store configured it is a no-op returning nil, as is a docName
+// the Store has never seen. It is safe to call on a live document: a
+// concurrent edit that commits mid-flush never loses data, though under
+// heavy concurrent writes to the same document Flush may return a
+// transient store error, in which case retry. It takes no server lock, so
+// it never blocks connection admission or eviction.
+func (s *Server) Flush(ctx context.Context, docName string) error {
+	if s.opts.Store == nil {
+		return nil
+	}
+	return s.opts.Store.Flush(ctx, docName)
 }
 
 // Close evicts every in-memory document, calling Flush on the
@@ -377,6 +442,18 @@ func (s *Server) maxConnsPerDoc() int {
 	}
 }
 
+// maxConns resolves the global connection cap from options: zero or
+// negative means unlimited (returned as -1), mirroring MaxDocs, because a
+// server-wide connection count scales with deployment size. A positive
+// value is the cap. Resolved lazily per call so Options stays a faithful
+// record of caller input.
+func (s *Server) maxConns() int {
+	if s.opts.MaxConns <= 0 {
+		return -1
+	}
+	return s.opts.MaxConns
+}
+
 // defaultDocName implements the y-websocket path-strip convention.
 func defaultDocName(r *http.Request) string {
 	p := strings.TrimPrefix(r.URL.Path, "/")
@@ -411,6 +488,12 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			// a client can back off and retry, distinct from the per-doc
 			// connection cap's policy-violation close.
 			_ = wsConn.Close(websocket.StatusTryAgainLater, "server document limit reached")
+			return
+		}
+		if errors.Is(err, errServerConnsFull) {
+			// Server is at its global connection cap. Transient capacity,
+			// same close code as the document cap; the reason distinguishes.
+			_ = wsConn.Close(websocket.StatusTryAgainLater, "server connection limit reached")
 			return
 		}
 		_ = wsConn.Close(websocket.StatusInternalError,
@@ -480,6 +563,12 @@ type docState struct {
 // StatusTryAgainLater close so a client learns the rejection is
 // transient server capacity, not a per-document policy limit.
 var errServerDocsFull = errors.New("server: document limit reached")
+
+// errServerConnsFull is returned by admitConn when admitting another
+// connection would exceed Options.MaxConns, the global connection cap.
+// serveWS maps it, like errServerDocsFull, to a StatusTryAgainLater close
+// so a client learns the rejection is transient server capacity.
+var errServerConnsFull = errors.New("server: connection limit reached")
 
 // getOrCreateDocLocked returns the docState for docName, creating it
 // (and loading from Store, if configured) on first request. The caller
@@ -559,6 +648,15 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
+	// Global connection cap: refuse before creating or loading a room so a
+	// rejected connection neither orphans a fresh docState nor forces a
+	// Store load. The check here and the matching increment below both run
+	// under docsMu, so admissions serialize against the cap and can never
+	// overshoot it; concurrent releases only decrement totalConns, making
+	// this check at worst conservative, never permissive.
+	if lim := s.maxConns(); lim > 0 && int(s.totalConns.Load()) >= lim {
+		return nil, nil, false, errServerConnsFull
+	}
 	state, err = s.getOrCreateDocLocked(ctx, docName)
 	if err != nil {
 		return nil, nil, false, err
@@ -567,6 +665,7 @@ func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Co
 	if !state.addConn(c, s.maxConnsPerDoc()) {
 		return nil, state, false, nil
 	}
+	s.totalConns.Add(1)
 	return c, state, true, nil
 }
 
@@ -580,6 +679,13 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	delete(state.conns, c)
 	remaining := len(state.conns)
 	state.connsMu.Unlock()
+
+	// Drop the global connection count. releaseConn runs exactly once per
+	// admitted connection (serveWS defers it only past a successful
+	// admission, and the white-box callers release only admitConn results
+	// with ok==true), so this pairs one-to-one with the increment in
+	// admitConn and the count never drifts.
+	s.totalConns.Add(-1)
 
 	tombstoned := c.handler.Disconnect()
 	if len(tombstoned) > 0 {

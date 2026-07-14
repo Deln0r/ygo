@@ -62,6 +62,7 @@ func main() {
 	maxAwarenessClients := flag.Int("max-awareness-clients", 0, "cap distinct presence clients per room (0 = 4096 default; -1 = unlimited)")
 	maxConnsPerDoc := flag.Int("max-conns-per-doc", 0, "cap simultaneous WebSocket connections per document (0 = 4096 default; -1 = unlimited)")
 	maxDocs := flag.Int("max-docs", 0, "cap distinct documents held in memory at once (0 = unlimited; guards against many fabricated docNames)")
+	maxConns := flag.Int("max-conns", 0, "cap total simultaneous WebSocket connections across all documents (0 = unlimited)")
 	flag.Parse()
 
 	var store persist.Store
@@ -93,6 +94,7 @@ func main() {
 		MaxAwarenessClients: *maxAwarenessClients,
 		MaxConnsPerDoc:      *maxConnsPerDoc,
 		MaxDocs:             *maxDocs,
+		MaxConns:            *maxConns,
 	})
 
 	httpSrv := &http.Server{

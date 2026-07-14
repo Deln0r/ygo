@@ -54,6 +54,7 @@ addressed by URL path, y-websocket convention).
 | `-max-awareness-clients` | `0` (4096) | cap distinct presence clients per room; `-1` = unlimited |
 | `-max-conns-per-doc` | `0` (4096) | cap simultaneous WebSocket connections per document; `-1` = unlimited. A previously uncapped deployment serving a room with more than 4096 concurrent connections must set `-1` to preserve that behavior after upgrade. |
 | `-max-docs` | `0` (unlimited) | cap distinct documents held in memory at once; guards against a peer opening many fabricated docNames. Defaults to unlimited because a global cap can break a large multi-tenant server. A connection that would exceed it is refused with WebSocket code 1013 (try again later); already-resident rooms are always admitted. |
+| `-max-conns` | `0` (unlimited) | cap the total simultaneous WebSocket connections across all documents; a server-wide ceiling complementing `-max-conns-per-doc`. Defaults to unlimited (a total-connection count scales with deployment size). A connection that would exceed it is refused with WebSocket code 1013 (try again later) before its room is created; established connections keep working. |
 
 ## Document history (versioning)
 

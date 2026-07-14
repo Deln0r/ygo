@@ -34,6 +34,34 @@ func TestServer_Stats_CountsDocsAndConns(t *testing.T) {
 	}
 }
 
+// TestServer_Stats_PerDocBreakdown checks Stats.Docs: one entry per
+// resident room, sorted by name (not insertion order), each carrying that
+// room's connection count, with the aggregates equal to their sum.
+func TestServer_Stats_PerDocBreakdown(t *testing.T) {
+	s := &Server{docs: map[string]*docState{}}
+	ctx := context.Background()
+
+	// Admit "b" before "a" so a sorted result proves the output order is
+	// by name, not by insertion. "a" gets two conns, "b" one.
+	_, _, _, _ = s.admitConn(ctx, "b", nil)
+	_, _, _, _ = s.admitConn(ctx, "a", nil)
+	_, _, _, _ = s.admitConn(ctx, "a", nil)
+
+	st := s.Stats()
+	want := []DocStat{{Name: "a", Connections: 2}, {Name: "b", Connections: 1}}
+	if len(st.Docs) != len(want) {
+		t.Fatalf("Docs = %+v, want %+v", st.Docs, want)
+	}
+	for i, ds := range st.Docs {
+		if ds != want[i] {
+			t.Fatalf("Docs[%d] = %+v, want %+v", i, ds, want[i])
+		}
+	}
+	if st.Documents != 2 || st.Connections != 3 {
+		t.Fatalf("aggregates = {%d %d}, want {2 3}", st.Documents, st.Connections)
+	}
+}
+
 // TestServer_Stats_ConcurrentWithChurn calls Stats concurrently with
 // admit/release churn across a few rooms under the race detector. It must
 // not race or deadlock, and once the churn settles every room has evicted
