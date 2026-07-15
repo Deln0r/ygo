@@ -40,6 +40,7 @@ import (
 	"github.com/Deln0r/ygo/internal/encoding"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
 	"github.com/Deln0r/ygo/persist"
+	"github.com/Deln0r/ygo/server/backplane"
 )
 
 // Options configures a Server. The zero value is valid: in-memory
@@ -251,6 +252,43 @@ type Options struct {
 	// refused. The count is of admitted connections and drops as they
 	// depart, so the cap tracks live load, not lifetime connections.
 	MaxConns int
+
+	// Backplane, when set, fans document updates between this server and
+	// other instances that share it, so a horizontally-scaled deployment
+	// (several servers behind a load balancer) converges on the same
+	// document. For every document a server holds resident it Subscribes to
+	// foreign updates (applying them to its in-memory copy and
+	// re-broadcasting to its own clients) and Publishes each update its own
+	// clients apply. Nil means single-instance: updates reach only the
+	// clients connected to this server (plus the shared Store, if any).
+	//
+	// A foreign update is applied and re-broadcast locally but is NOT
+	// re-persisted (the originating instance already persisted it to the
+	// shared Store), does NOT fire OnChange (that fires once, on the
+	// instance whose client made the edit), and is NOT re-published (which
+	// would echo). Presence/awareness is per-instance and is not carried
+	// over the backplane: clients see the cursors of peers on their own
+	// server only.
+	//
+	// SHARED STORE REQUIRED. Because a foreign update is applied only in
+	// memory and never re-persisted by the receiving instance, every
+	// instance sharing a document MUST be backed by the SAME Store (one
+	// database, not a per-instance file). The backplane carries live deltas;
+	// the shared Store is the source of truth an instance loads from when a
+	// document first becomes resident (and reloads after an eviction). With
+	// per-instance Stores a document silently loses every cross-instance
+	// edit on the next eviction+reload, and a newly-resident instance cannot
+	// obtain a document another instance already edited only in memory. Do
+	// not run multi-instance without a shared Store.
+	//
+	// BACKPRESSURE. Publish delivers to each peer instance in order and
+	// never drops an update (dropping a delta would diverge a peer). A peer
+	// whose local fan-out stalls (a slow or half-open client, bounded by
+	// WriteTimeout) therefore applies backpressure to the publishing
+	// client's edit throughput until it drains; this is bounded and
+	// self-healing (the stalled client is closed on WriteTimeout) but couples
+	// edit latency across instances under a wedged consumer.
+	Backplane backplane.Backplane
 }
 
 // defaultWriteTimeout bounds a per-peer broadcast write when
@@ -398,13 +436,14 @@ func (s *Server) Flush(ctx context.Context, docName string) error {
 }
 
 // Close evicts every in-memory document, calling Flush on the
-// configured Store. Pending in-flight WS reads will fail with
-// context cancellation; callers should drain via an http.Server
-// Shutdown rather than Close in production.
+// configured Store, and closes the configured Backplane connection.
+// Pending in-flight WS reads will fail with context cancellation;
+// callers should drain via an http.Server Shutdown rather than Close
+// in production.
 //
-// Returns the first error encountered while flushing, but
-// continues attempting eviction past errors so partial failure
-// leaves no leaks.
+// Returns the first error encountered while flushing or closing the
+// backplane, but continues past errors so partial failure leaves no
+// leaks.
 func (s *Server) Close(ctx context.Context) error {
 	s.stopVersioning()
 	s.stopAwarenessSweep()
@@ -421,6 +460,16 @@ func (s *Server) Close(ctx context.Context) error {
 			if err := s.opts.Store.Flush(ctx, name); err != nil && firstErr == nil {
 				firstErr = fmt.Errorf("flush %q: %w", name, err)
 			}
+		}
+	}
+	// Close this server's backplane connection, stopping every subscription
+	// it still holds (a graceful conn drain would unsub each on eviction,
+	// but Close may run before that; closing the connection is idempotent
+	// and stops any that linger). The connection is this server's own; the
+	// shared hub or broker outlives it.
+	if s.opts.Backplane != nil {
+		if err := s.opts.Backplane.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("backplane close: %w", err)
 		}
 	}
 	return firstErr
@@ -554,6 +603,11 @@ type docState struct {
 	doc       *doc.Doc
 	awareness *awareness.Awareness
 
+	// backplaneUnsub stops this document's backplane subscription; nil when
+	// no Backplane is configured. Set under docsMu when the document
+	// becomes resident, called once when it is evicted.
+	backplaneUnsub func()
+
 	connsMu sync.RWMutex
 	conns   map[*conn]struct{}
 }
@@ -587,6 +641,31 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 	if s.opts.MaxDocs > 0 && len(s.docs) >= s.opts.MaxDocs {
 		return nil, errServerDocsFull
 	}
+
+	// Subscribe to foreign updates BEFORE loading the document. Loading first
+	// and subscribing after would leave a window in which an update another
+	// instance publishes during our load reaches neither the not-yet-live
+	// subscription nor the already-read copy, permanently diverging this
+	// instance (a missing causal dependency parks every later edit from that
+	// client). Subscribing first buffers any such update; it is drained into
+	// the doc once loaded. Until the docState is registered, any early return
+	// must release the subscription so it does not leak.
+	var buf *bufferedApply
+	var backplaneUnsub func()
+	if s.opts.Backplane != nil {
+		buf = &bufferedApply{}
+		unsub, err := s.opts.Backplane.Subscribe(docName, buf.onUpdate)
+		if err != nil {
+			return nil, fmt.Errorf("backplane subscribe for %q: %w", docName, err)
+		}
+		backplaneUnsub = unsub
+	}
+	registered := false
+	defer func() {
+		if !registered && backplaneUnsub != nil {
+			backplaneUnsub()
+		}
+	}()
 
 	var d *doc.Doc
 	if s.opts.Store != nil {
@@ -622,8 +701,61 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 		awareness: aw,
 		conns:     map[*conn]struct{}{},
 	}
+	state.backplaneUnsub = backplaneUnsub
+
+	// Activate the buffered subscription onto the live doc: drain any foreign
+	// updates that arrived during the load, then apply directly thereafter.
+	if buf != nil {
+		buf.activate(func(update []byte) { s.applyBackplaneUpdate(state, update) })
+	}
+
 	s.docs[docName] = state
+	registered = true
 	return state, nil
+}
+
+// bufferedApply bridges a backplane subscription that is created before its
+// docState's doc exists (subscribe-before-load): foreign updates arriving
+// during the load are buffered, then activate replays them into the live
+// apply function and switches to applying directly. It closes the
+// load-before-subscribe gap where an update published while this instance
+// was still loading would reach neither the not-yet-live subscription nor
+// the already-read doc, permanently diverging the instance.
+type bufferedApply struct {
+	mu       sync.Mutex
+	buffered [][]byte
+	live     func([]byte)
+}
+
+// onUpdate is the subscription handler: buffer until activated, then apply
+// live. The switch is atomic under mu, so every update is either buffered
+// (drained later) or applied live, never both and never dropped.
+func (b *bufferedApply) onUpdate(update []byte) {
+	b.mu.Lock()
+	if b.live == nil {
+		b.buffered = append(b.buffered, append([]byte(nil), update...))
+		b.mu.Unlock()
+		return
+	}
+	live := b.live
+	b.mu.Unlock()
+	live(update)
+}
+
+// activate installs the live apply function and drains whatever buffered
+// during the load. An update racing activate is either already buffered
+// (drained here) or sees live set (applied directly); order between the two
+// does not matter because Yjs integration re-drains its own pending queue,
+// so at-least-once delivery is all convergence needs.
+func (b *bufferedApply) activate(live func([]byte)) {
+	b.mu.Lock()
+	pending := b.buffered
+	b.buffered = nil
+	b.live = live
+	b.mu.Unlock()
+	for _, u := range pending {
+		live(u)
+	}
 }
 
 // admitConn finds or creates the docState for docName and registers a
@@ -719,11 +851,23 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	}
 	s.docsMu.Unlock()
 
-	if evicted && s.opts.Store != nil {
-		// Flush is best-effort; the document log is intact in the Store
-		// either way. Only the evicting releaser flushes, so a re-acquired
-		// live doc is never flushed out from under its connections.
-		_ = s.opts.Store.Flush(ctx, state.name)
+	if evicted {
+		// Stop the backplane subscription for the now-departed document, so
+		// its handler no longer applies foreign updates to a detached copy.
+		// Done outside docsMu (like the Flush below) to keep any broker I/O
+		// off the registry lock; the brief window in which a foreign update
+		// could still reach the detached doc is harmless (it has no
+		// connections, and a re-admit resubscribes on a fresh copy).
+		if state.backplaneUnsub != nil {
+			state.backplaneUnsub()
+		}
+		if s.opts.Store != nil {
+			// Flush is best-effort; the document log is intact in the Store
+			// either way. Only the evicting releaser flushes, so a
+			// re-acquired live doc is never flushed out from under its
+			// connections.
+			_ = s.opts.Store.Flush(ctx, state.name)
+		}
 	}
 }
 
@@ -853,6 +997,26 @@ func (s *docState) broadcastAwarenessRemovals(ids []uint64) {
 	}
 }
 
+// applyBackplaneUpdate applies a document update received from another
+// instance over the Backplane to this server's in-memory copy and
+// re-broadcasts it to the document's local connections. It deliberately
+// does NOT persist (the originating instance already did, to the shared
+// Store), does NOT fire OnChange (that fires once, on the instance whose
+// client made the edit), and does NOT re-publish (which would echo back
+// into the cluster). Runs on a backplane-owned goroutine; state.doc's own
+// locking makes the apply safe against concurrent client edits, and the
+// re-broadcast reuses the ordinary per-conn write path.
+func (s *Server) applyBackplaneUpdate(state *docState, update []byte) {
+	if err := encoding.ApplyUpdate(state.doc, update); err != nil {
+		log.Printf("server: backplane apply for %q: %v", state.name, err)
+		return
+	}
+	envelope := syncpkg.EncodeSyncUpdate(update)
+	for _, peer := range state.snapshotConns() {
+		_ = peer.send(envelope)
+	}
+}
+
 // onAppliedUpdate handles a broadcast envelope that carries a real
 // document change: it persists the update to the Store (if configured)
 // and invokes OnChange (if configured). Awareness frames and SyncStep1
@@ -861,7 +1025,7 @@ func (s *docState) broadcastAwarenessRemovals(ids []uint64) {
 // read-only connection's update never reaches here — the handler drops
 // it before broadcast.
 func (c *conn) onAppliedUpdate(envelope []byte) {
-	if c.server.opts.Store == nil && c.server.opts.OnChange == nil {
+	if c.server.opts.Store == nil && c.server.opts.OnChange == nil && c.server.opts.Backplane == nil {
 		return
 	}
 	frame, _, err := syncpkg.DecodeEnvelope(envelope)
@@ -891,6 +1055,16 @@ func (c *conn) onAppliedUpdate(envelope []byte) {
 	}
 	if c.server.opts.OnChange != nil {
 		c.server.opts.OnChange(c.state.name, frame.Payload)
+	}
+	if c.server.opts.Backplane != nil {
+		// Fan this locally-applied update out to the other instances. A
+		// failure is logged, not fatal: the update is already applied and
+		// broadcast to this instance's clients, and (if configured)
+		// persisted, so a dropped publish costs cross-instance convergence
+		// of this one delta, not local correctness.
+		if err := c.server.opts.Backplane.Publish(context.Background(), c.state.name, frame.Payload); err != nil {
+			log.Printf("server: backplane publish for %q: %v", c.state.name, err)
+		}
 	}
 }
 
