@@ -31,6 +31,34 @@ jobs:
           name: coverage
           path: coverage.txt
 
+  backplane-nats:
+    name: backplane-nats (nested module)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          # The NATS adapter is a separate opt-in module; nats.go pins a
+          # newer Go floor than the core, so it builds outside the core
+          # matrix. It resolves the core via a local replace directive.
+          go-version: "1.25"
+      - name: test the NATS backplane adapter
+        working-directory: server/backplane/nats
+        run: |
+          go mod download
+          go vet ./...
+          go test -race ./...
+      - name: build against the pinned core (drop replace) to catch interface drift
+        working-directory: server/backplane/nats
+        run: |
+          # The tests above build through the local replace (HEAD). This step
+          # builds the adapter against the exact core version external users
+          # resolve (the `require`), so a Backplane-interface change at HEAD
+          # that outpaces the pin fails CI instead of an adopter's build.
+          go mod edit -dropreplace github.com/Deln0r/ygo
+          go mod tidy
+          go build ./...
+
   lint:
     name: lint
     runs-on: ubuntu-latest

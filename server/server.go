@@ -1058,10 +1058,13 @@ func (c *conn) onAppliedUpdate(envelope []byte) {
 	}
 	if c.server.opts.Backplane != nil {
 		// Fan this locally-applied update out to the other instances. A
-		// failure is logged, not fatal: the update is already applied and
-		// broadcast to this instance's clients, and (if configured)
-		// persisted, so a dropped publish costs cross-instance convergence
-		// of this one delta, not local correctness.
+		// failure is logged, not fatal to THIS instance: the update is
+		// already applied, broadcast to local clients, and (if configured)
+		// persisted. But a dropped publish is a dropped causal dependency on
+		// a peer, not a single lost delta: a peer that misses it silently
+		// parks every later edit from that client until the document reloads
+		// from the shared Store (which only happens on eviction), so a
+		// backplane with at-most-once delivery trades this away by design.
 		if err := c.server.opts.Backplane.Publish(context.Background(), c.state.name, frame.Payload); err != nil {
 			log.Printf("server: backplane publish for %q: %v", c.state.name, err)
 		}
