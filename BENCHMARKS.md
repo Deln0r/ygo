@@ -268,3 +268,42 @@ document load/evict churn.
 These are loopback numbers: real deployments add network RTT and TLS, and
 a slow or half-open peer is bounded by `Options.WriteTimeout` rather than
 stalling the fan-out.
+
+## Load test (multi-client, full stack)
+
+`cmd/yload` is a load generator built on the public `client` package: every
+connection is a real sync client (full handshake), the first W connections
+of each room write a timestamp string every interval, and every connected
+client (including the writer, whose broadcast echoes back) records
+write-to-observe propagation latency. Zero-loss is checked by accounting:
+observations must equal writes x room size.
+
+```
+go build ./cmd/yload/
+./yload -url ws://127.0.0.1:8080 -rooms 50 -conns 30 -writers 2 \
+        -interval 400ms -duration 25s -connrate 200
+```
+
+Measured 2026-07-16 against `yserve` v1.14.0 with
+`-max-conns 2000 -max-conns-per-doc 500 -max-docs 1000` and a SQLite (WAL)
+store.
+
+Local (Apple M3, loopback):
+
+| Scenario | Clients | Result |
+|---|---|---|
+| 50 rooms x 30 conns, 100 writers total | 1,500 | all synced, 0 errors, 186,000/186,000 observed (no loss), p50 632 µs, p99 5.9 ms, max 54 ms |
+| 1 room x 200 conns, 20 writers @ 150 ms (~26,600 deliveries/s) | 200 | all synced, 532,000/532,000 observed (no loss), p50 4.2 ms, p99 468 ms |
+| Server RSS at 1,000 active conns | 1,000 | ~96 MB (~90 KB per connection) |
+
+Wide-area (same binary and flags on a 2-vCPU / 4 GB VPS behind Caddy TLS;
+load generated from ~220 ms RTT away):
+
+| Scenario | Clients | Result |
+|---|---|---|
+| 20 rooms x 30 conns | 600 | all synced, 0 errors, 84,000/84,000 observed (no loss), p50 227 ms (~RTT), p99 319 ms; server RSS 52 MB, load 0.17 |
+
+The WAN latencies are round-trip dominated; the loopback run isolates
+server cost. The single-crowded-room tail (p99 ~0.5 s at 200 clients in one
+document) is the expected worst-case shape: fan-out cost scales with room
+size, which is why the live demo spreads visitors across rooms.
