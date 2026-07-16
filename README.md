@@ -1,12 +1,11 @@
 # Ygo
 
+[![Official Yjs port](https://img.shields.io/badge/Yjs%20docs-official%20port-7c3aed.svg)](https://docs.yjs.dev/ecosystem/ports-to-other-languages)
 [![CI](https://github.com/Deln0r/ygo/actions/workflows/test.yml/badge.svg)](https://github.com/Deln0r/ygo/actions/workflows/test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Deln0r/ygo.svg)](https://pkg.go.dev/github.com/Deln0r/ygo)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Deln0r/ygo?cache=v1.2.0)](https://goreportcard.com/report/github.com/Deln0r/ygo)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.22%2B-00ADD8.svg)](go.mod)
 [![Yjs Protocol](https://img.shields.io/badge/Yjs%20protocol-V1%20%2B%20V2-7c3aed.svg)](https://github.com/yjs/yjs)
-[![Official Yjs port](https://img.shields.io/badge/Yjs%20docs-official%20port-7c3aed.svg)](https://docs.yjs.dev/ecosystem/ports-to-other-languages)
 [![Live Demo](https://img.shields.io/badge/live%20demo-ygo.deln0r.com-22c55e.svg)](https://ygo.deln0r.com)
 [![Codeberg Mirror](https://img.shields.io/badge/codeberg-mirror-2185d0?logo=codeberg&logoColor=white)](https://codeberg.org/Deln0r/ygo)
 
