@@ -6,10 +6,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.22%2B-00ADD8.svg)](go.mod)
 [![Yjs Protocol](https://img.shields.io/badge/Yjs%20protocol-V1%20%2B%20V2-7c3aed.svg)](https://github.com/yjs/yjs)
+[![Official Yjs port](https://img.shields.io/badge/Yjs%20docs-official%20port-7c3aed.svg)](https://docs.yjs.dev/ecosystem/ports-to-other-languages)
 [![Live Demo](https://img.shields.io/badge/live%20demo-ygo.deln0r.com-22c55e.svg)](https://ygo.deln0r.com)
 [![Codeberg Mirror](https://img.shields.io/badge/codeberg-mirror-2185d0?logo=codeberg&logoColor=white)](https://codeberg.org/Deln0r/ygo)
 
-Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications.
+Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications, [officially listed](https://docs.yjs.dev/ecosystem/ports-to-other-languages) in the Yjs documentation's ports page.
 
 Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients running `yjs@13.x` synchronize directly with Go servers and vice versa, with both directions verified through **158 cross-language fixture scenarios** generated from `yjs@13.6.31`. The bundled WebSocket server is Hocuspocus-compatible. No CGO; `gomobile bind` produces an iOS xcframework and Android AAR (manually verified, not run in CI).
 
