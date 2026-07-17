@@ -105,23 +105,38 @@ func (s *Store) DeleteVersion(ctx context.Context, docName string, versionID int
 }
 
 // RestoreVersion replaces docName's live update log with the version's
-// state blob, inside one SQLite transaction: concurrent readers and
-// writers see either the old log or the restored single-blob log,
-// never a torn intermediate state.
+// state blob, inside one write transaction opened with BEGIN IMMEDIATE:
+// concurrent readers and writers see either the old log or the restored
+// single-blob log, never a torn intermediate state, and a concurrent
+// StoreUpdate blocks (bounded by busy_timeout) rather than failing the
+// restore. Like Flush, a deferred transaction here would take only a read
+// snapshot for the SELECT and then fail the DELETE's writer upgrade with
+// SQLITE_BUSY_SNAPSHOT — which busy_timeout does not service — whenever a
+// write committed in the gap.
 //
 // The restored log starts a new history for connected clients: the
 // document's state vector regresses to the version's, so live sync
 // sessions must resynchronize from scratch. Intended for
 // administrative restore, not for use mid-session.
 func (s *Store) RestoreVersion(ctx context.Context, docName string, versionID int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return fmt.Errorf("sqlite.RestoreVersion(%q, %d) conn: %w", docName, versionID, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("sqlite.RestoreVersion(%q, %d) begin: %w", docName, versionID, err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
 
 	var state []byte
-	row := tx.QueryRowContext(ctx,
+	row := conn.QueryRowContext(ctx,
 		`SELECT state FROM ygo_versions WHERE doc_name = ? AND id = ?`,
 		docName, versionID)
 	err = row.Scan(&state)
@@ -132,14 +147,18 @@ func (s *Store) RestoreVersion(ctx context.Context, docName string, versionID in
 		return fmt.Errorf("sqlite.RestoreVersion(%q, %d) read: %w", docName, versionID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	if _, err := conn.ExecContext(ctx,
 		`DELETE FROM ygo_updates WHERE doc_name = ?`, docName); err != nil {
 		return fmt.Errorf("sqlite.RestoreVersion(%q, %d) clear: %w", docName, versionID, err)
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO ygo_updates (doc_name, update_blob) VALUES (?, ?)`,
 		docName, state); err != nil {
 		return fmt.Errorf("sqlite.RestoreVersion(%q, %d) insert: %w", docName, versionID, err)
 	}
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("sqlite.RestoreVersion(%q, %d) commit: %w", docName, versionID, err)
+	}
+	committed = true
+	return nil
 }
