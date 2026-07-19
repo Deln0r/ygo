@@ -146,6 +146,91 @@ func containsAll(got []any, want ...string) bool {
 	return true
 }
 
+// awaitAwareness reads MessageAwareness frames on the client, applying each
+// to its local awareness, until clientID is present with a non-nil state;
+// returns that state.
+func awaitAwareness(t *testing.T, c *wsClient, clientID uint64) []byte {
+	t.Helper()
+	for i := 0; i < 10; i++ {
+		f := c.readUntil(t, func(f *syncpkg.Frame) bool { return f.Type == syncpkg.MessageAwareness })
+		if _, err := c.awareness.Apply(f.Payload, "test"); err != nil {
+			t.Fatal(err)
+		}
+		if st, ok := c.awareness.States()[clientID]; ok && st != nil {
+			return st
+		}
+	}
+	t.Fatalf("client never received awareness for %d", clientID)
+	return nil
+}
+
+// awaitAwarenessGone reads MessageAwareness frames until clientID is no
+// longer present (States omits null-state / tombstoned entries).
+func awaitAwarenessGone(t *testing.T, c *wsClient, clientID uint64) {
+	t.Helper()
+	for i := 0; i < 10; i++ {
+		f := c.readUntil(t, func(f *syncpkg.Frame) bool { return f.Type == syncpkg.MessageAwareness })
+		if _, err := c.awareness.Apply(f.Payload, "test"); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := c.awareness.States()[clientID]; !ok {
+			return
+		}
+	}
+	t.Fatalf("client %d was never removed", clientID)
+}
+
+// TestServer_Backplane_AwarenessConvergesAcrossInstances: a presence update
+// on a client of one server reaches a client of the other, so clustered
+// users see each other's cursors.
+func TestServer_Backplane_AwarenessConvergesAcrossInstances(t *testing.T) {
+	hub := backplane.NewMemory()
+	t.Cleanup(func() { _ = hub.Close() })
+
+	wsA, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: hub.Conn()})
+	wsB, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: hub.Conn()})
+
+	const docName = "shared"
+	a := dialClient(t, wsA, docName, 300)
+	defer a.close()
+	a.read(t)
+	b := dialClient(t, wsB, docName, 400)
+	defer b.close()
+	b.read(t)
+
+	a.awareness.SetLocalState([]byte(`{"name":"Alice"}`))
+	a.write(t, syncpkg.EncodeAwareness(a.awareness.Encode([]uint64{300})))
+
+	if got := awaitAwareness(t, b, 300); string(got) != `{"name":"Alice"}` {
+		t.Fatalf("B's view of A's presence = %s, want Alice", got)
+	}
+}
+
+// TestServer_Backplane_AwarenessTombstonePropagates: a clean disconnect on one
+// server removes the departing client's cursor on the other server promptly,
+// without waiting for the timeout sweep.
+func TestServer_Backplane_AwarenessTombstonePropagates(t *testing.T) {
+	hub := backplane.NewMemory()
+	t.Cleanup(func() { _ = hub.Close() })
+
+	wsA, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: hub.Conn()})
+	wsB, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: hub.Conn()})
+
+	const docName = "shared"
+	a := dialClient(t, wsA, docName, 300)
+	a.read(t)
+	b := dialClient(t, wsB, docName, 400)
+	defer b.close()
+	b.read(t)
+
+	a.awareness.SetLocalState([]byte(`{"name":"Alice"}`))
+	a.write(t, syncpkg.EncodeAwareness(a.awareness.Encode([]uint64{300})))
+	awaitAwareness(t, b, 300) // B sees Alice
+
+	a.close() // clean disconnect on server A
+	awaitAwarenessGone(t, b, 300)
+}
+
 // orderBackplane and orderStore record the call order of Subscribe vs the
 // Store load, so a test can assert getOrCreateDocLocked subscribes BEFORE it
 // loads (closing the window where an update published during the load would

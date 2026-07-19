@@ -266,9 +266,27 @@ type Options struct {
 	// re-persisted (the originating instance already persisted it to the
 	// shared Store), does NOT fire OnChange (that fires once, on the
 	// instance whose client made the edit), and is NOT re-published (which
-	// would echo). Presence/awareness is per-instance and is not carried
-	// over the backplane: clients see the cursors of peers on their own
-	// server only.
+	// would echo).
+	//
+	// Presence/awareness is also carried, so clients see the cursors of
+	// peers on other instances: a presence update is relayed to every
+	// instance holding the document, and a clean disconnect propagates an
+	// explicit tombstone. Presence is best-effort (the underlying protocol
+	// is lossy): a foreign entry stays alive while the owning client's
+	// heartbeats keep propagating and is otherwise evicted by each
+	// instance's own timeout sweep, so a dropped heartbeat can briefly show
+	// a stale or missing cursor until the next one lands. All instances in a
+	// cluster must run a matching ygo version (already implied by the shared
+	// Store) — the backplane framing is not version-negotiated.
+	//
+	// Carrying presence widens the reach of a presence flood: because foreign
+	// presence shares the per-room MaxAwarenessClients cap with local clients,
+	// a client flooding fabricated presence IDs on one instance can fill the
+	// cap on every instance holding the document, denying newly-connecting
+	// local clients a presence slot until the flood ages out (documents and
+	// already-connected clients are unaffected, and it self-heals when the
+	// flooder departs). Front untrusted clients with your own presence
+	// validation, or lower MaxAwarenessClients, if this matters.
 	//
 	// SHARED STORE REQUIRED. Because a foreign update is applied only in
 	// memory and never re-persisted by the receiving instance, every
@@ -706,7 +724,7 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 	// Activate the buffered subscription onto the live doc: drain any foreign
 	// updates that arrived during the load, then apply directly thereafter.
 	if buf != nil {
-		buf.activate(func(update []byte) { s.applyBackplaneUpdate(state, update) })
+		buf.activate(func(update []byte) { s.applyBackplaneMessage(state, update) })
 	}
 
 	s.docs[docName] = state
@@ -821,9 +839,23 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 
 	tombstoned := c.handler.Disconnect()
 	if len(tombstoned) > 0 {
-		// Broadcast the resulting awareness removals to remaining
-		// peers so they learn this peer's clients departed.
-		state.broadcastAwarenessRemovals(tombstoned)
+		// Encode the tombstone once, then both fan it to remaining local
+		// peers and (with a Backplane) propagate it to other instances, so a
+		// clean disconnect removes the cursor promptly cluster-wide instead
+		// of waiting up to AwarenessTimeout for each peer instance's sweep.
+		//
+		// Best-effort: presence ownership is per-connection with no refcount,
+		// so a same-clientID reconnect that races this teardown can briefly
+		// tombstone a still-live cursor cluster-wide; it re-converges within a
+		// heartbeat. The bounded context keeps a wedged peer from stalling
+		// this teardown (and OnDisconnect) over a best-effort tombstone.
+		wire := state.awareness.Encode(tombstoned)
+		state.broadcastAwarenessWire(wire)
+		if s.opts.Backplane != nil {
+			pctx, cancel := context.WithTimeout(context.Background(), backplanePresenceTimeout)
+			c.publishBackplane(pctx, backplaneKindAwareness, wire)
+			cancel()
+		}
 	}
 
 	if remaining > 0 {
@@ -990,23 +1022,67 @@ func (s *docState) broadcastAwarenessRemovals(ids []uint64) {
 	// Encode the now-removed entries (the underlying ClientState
 	// retained the clock after RemoveState / SweepOutdated, so Encode
 	// emits a proper "null" sentinel for each).
-	wire := s.awareness.Encode(ids)
+	s.broadcastAwarenessWire(s.awareness.Encode(ids))
+}
+
+// broadcastAwarenessWire fans a pre-encoded awareness wire update to every
+// local connection. Split out so a caller that also publishes the same wire
+// to the Backplane (see releaseConn) encodes it once.
+func (s *docState) broadcastAwarenessWire(wire []byte) {
 	envelope := syncpkg.EncodeAwareness(wire)
 	for _, peer := range s.snapshotConns() {
 		_ = peer.send(envelope)
 	}
 }
 
-// applyBackplaneUpdate applies a document update received from another
-// instance over the Backplane to this server's in-memory copy and
-// re-broadcasts it to the document's local connections. It deliberately
-// does NOT persist (the originating instance already did, to the shared
-// Store), does NOT fire OnChange (that fires once, on the instance whose
-// client made the edit), and does NOT re-publish (which would echo back
-// into the cluster). Runs on a backplane-owned goroutine; state.doc's own
-// locking makes the apply safe against concurrent client edits, and the
-// re-broadcast reuses the ordinary per-conn write path.
-func (s *Server) applyBackplaneUpdate(state *docState, update []byte) {
+// Backplane payloads carry a one-byte kind prefix so document updates and
+// presence updates share the per-document channel. All instances in a
+// cluster must run a matching ygo version (already implied by the shared
+// Store), so this framing need not be version-negotiated.
+const (
+	backplaneKindDoc       byte = 0 // a V1 document update
+	backplaneKindAwareness byte = 1 // an awareness (presence) wire update
+)
+
+// backplanePresenceTimeout bounds a presence publish over the Backplane.
+// Presence is best-effort and lossy (a dropped update self-heals on the next
+// heartbeat), so unlike a document update it must NOT block the read loop or
+// connection teardown on a wedged peer: it fails fast after this deadline.
+const backplanePresenceTimeout = 5 * time.Second
+
+// backplaneOrigin tags awareness applied from the backplane, distinguishing
+// it from a local connection's origin in Awareness callbacks.
+type backplaneOriginT struct{}
+
+var backplaneOrigin = backplaneOriginT{}
+
+// applyBackplaneMessage dispatches a payload received from another instance
+// over the Backplane by its kind prefix. It runs on a backplane-owned
+// goroutine.
+func (s *Server) applyBackplaneMessage(state *docState, msg []byte) {
+	if len(msg) == 0 {
+		return
+	}
+	kind, payload := msg[0], msg[1:]
+	switch kind {
+	case backplaneKindDoc:
+		s.applyBackplaneDoc(state, payload)
+	case backplaneKindAwareness:
+		s.applyBackplaneAwareness(state, payload)
+	default:
+		log.Printf("server: backplane message for %q: unknown kind %d", state.name, kind)
+	}
+}
+
+// applyBackplaneDoc applies a foreign document update to this server's
+// in-memory copy and re-broadcasts it to the document's local connections.
+// It deliberately does NOT persist (the originating instance already did, to
+// the shared Store), does NOT fire OnChange (that fires once, on the instance
+// whose client made the edit), and does NOT re-publish (which would echo back
+// into the cluster). state.doc's own locking makes the apply safe against
+// concurrent client edits, and the re-broadcast reuses the ordinary per-conn
+// write path.
+func (s *Server) applyBackplaneDoc(state *docState, update []byte) {
 	if err := encoding.ApplyUpdate(state.doc, update); err != nil {
 		log.Printf("server: backplane apply for %q: %v", state.name, err)
 		return
@@ -1017,13 +1093,48 @@ func (s *Server) applyBackplaneUpdate(state *docState, update []byte) {
 	}
 }
 
-// onAppliedUpdate handles a broadcast envelope that carries a real
-// document change: it persists the update to the Store (if configured)
-// and invokes OnChange (if configured). Awareness frames and SyncStep1
-// carry no document mutation and are ignored; SyncStep2 IS handled
-// because it delivers content the server did not have before. A
-// read-only connection's update never reaches here — the handler drops
-// it before broadcast.
+// applyBackplaneAwareness applies a foreign presence update to this
+// document's Awareness and re-broadcasts the accepted entries to local
+// connections, so a client sees the cursors of peers on other instances.
+// It re-encodes the accepted set (like the local handler) rather than
+// relaying the raw payload. It does NOT re-publish (no echo). A foreign entry
+// stays alive on this instance as long as the owning client's heartbeats
+// keep propagating; if they stop, this instance's own sweep evicts it, and a
+// clean disconnect propagates an explicit tombstone (see releaseConn).
+//
+// The per-room MaxAwarenessClients cap bounds MEMORY here (Apply drops new
+// clientIDs past the cap), but it is NOT partitioned by origin: foreign
+// presence shares the cap with local clients, so a sustained presence flood
+// on one instance can fill the cap on every instance holding the document and
+// deny new local clients a presence slot until it ages out. See the
+// Options.Backplane note; a foreign sub-cap is a planned hardening.
+func (s *Server) applyBackplaneAwareness(state *docState, awUpdate []byte) {
+	summary, err := state.awareness.Apply(awUpdate, backplaneOrigin)
+	if err != nil {
+		log.Printf("server: backplane awareness for %q: %v", state.name, err)
+		return
+	}
+	accepted := make([]uint64, 0, len(summary.Added)+len(summary.Updated)+len(summary.Removed))
+	accepted = append(accepted, summary.Added...)
+	accepted = append(accepted, summary.Updated...)
+	accepted = append(accepted, summary.Removed...)
+	if len(accepted) == 0 {
+		return
+	}
+	envelope := syncpkg.EncodeAwareness(state.awareness.Encode(accepted))
+	for _, peer := range state.snapshotConns() {
+		_ = peer.send(envelope)
+	}
+}
+
+// onAppliedUpdate handles a broadcast envelope after it has been fanned to
+// local connections: it persists document updates to the Store (if
+// configured), invokes OnChange (if configured), and publishes both document
+// and presence updates to the Backplane (if configured) so other instances
+// converge. SyncStep1 and other handshake frames carry nothing to persist or
+// relay and are ignored; SyncStep2 IS a document update (content this server
+// did not have before). A read-only connection's document update never
+// reaches here — the handler drops it before broadcast.
 func (c *conn) onAppliedUpdate(envelope []byte) {
 	if c.server.opts.Store == nil && c.server.opts.OnChange == nil && c.server.opts.Backplane == nil {
 		return
@@ -1032,42 +1143,64 @@ func (c *conn) onAppliedUpdate(envelope []byte) {
 	if err != nil {
 		return
 	}
-	if frame.Type != syncpkg.MessageSync {
-		return
-	}
-	if frame.SyncSub != syncpkg.SyncStep2 && frame.SyncSub != syncpkg.SyncUpdate {
-		return
-	}
-	if len(frame.Payload) == 0 {
-		return
-	}
-	if c.server.opts.Store != nil {
-		if err := c.server.opts.Store.StoreUpdate(context.Background(), c.state.name, frame.Payload); err != nil {
-			// A failed persist must not be invisible, and must not mark
-			// the document dirty: auto-versioning would then capture
-			// in-memory state that was never durably stored. Log and skip
-			// the dirty mark, but still notify OnChange below — the
-			// document did change in memory and on peers.
-			log.Printf("server: persist update for %q: %v", c.state.name, err)
-		} else {
-			c.server.markVersionDirty(c.state.name)
+
+	switch {
+	case frame.Type == syncpkg.MessageSync &&
+		(frame.SyncSub == syncpkg.SyncStep2 || frame.SyncSub == syncpkg.SyncUpdate) &&
+		len(frame.Payload) > 0:
+		// A document update.
+		if c.server.opts.Store != nil {
+			if err := c.server.opts.Store.StoreUpdate(context.Background(), c.state.name, frame.Payload); err != nil {
+				// A failed persist must not be invisible, and must not mark
+				// the document dirty: auto-versioning would then capture
+				// in-memory state that was never durably stored. Log and skip
+				// the dirty mark, but still notify OnChange below — the
+				// document did change in memory and on peers.
+				log.Printf("server: persist update for %q: %v", c.state.name, err)
+			} else {
+				c.server.markVersionDirty(c.state.name)
+			}
 		}
-	}
-	if c.server.opts.OnChange != nil {
-		c.server.opts.OnChange(c.state.name, frame.Payload)
-	}
-	if c.server.opts.Backplane != nil {
-		// Fan this locally-applied update out to the other instances. A
-		// failure is logged, not fatal to THIS instance: the update is
-		// already applied, broadcast to local clients, and (if configured)
-		// persisted. But a dropped publish is a dropped causal dependency on
-		// a peer, not a single lost delta: a peer that misses it silently
-		// parks every later edit from that client until the document reloads
-		// from the shared Store (which only happens on eviction), so a
-		// backplane with at-most-once delivery trades this away by design.
-		if err := c.server.opts.Backplane.Publish(context.Background(), c.state.name, frame.Payload); err != nil {
-			log.Printf("server: backplane publish for %q: %v", c.state.name, err)
+		if c.server.opts.OnChange != nil {
+			c.server.opts.OnChange(c.state.name, frame.Payload)
 		}
+		if c.server.opts.Backplane != nil {
+			// Fan this locally-applied update out to the other instances. A
+			// failure is logged, not fatal to THIS instance: the update is
+			// already applied, broadcast to local clients, and (if configured)
+			// persisted. But a dropped publish is a dropped causal dependency
+			// on a peer, not a single lost delta: a peer that misses it
+			// silently parks every later edit from that client until the
+			// document reloads from the shared Store (which only happens on
+			// eviction), so a backplane with at-most-once delivery trades this
+			// away by design.
+			c.publishBackplane(context.Background(), backplaneKindDoc, frame.Payload)
+		}
+
+	case frame.Type == syncpkg.MessageAwareness && len(frame.Payload) > 0 && c.server.opts.Backplane != nil:
+		// A presence update. Relayed to other instances but never persisted
+		// or surfaced via OnChange (presence is ephemeral, not document state).
+		// A bounded deadline keeps a wedged peer from stalling this client's
+		// read loop over best-effort presence; a dropped update self-heals on
+		// the next heartbeat.
+		ctx, cancel := context.WithTimeout(context.Background(), backplanePresenceTimeout)
+		c.publishBackplane(ctx, backplaneKindAwareness, frame.Payload)
+		cancel()
+	}
+}
+
+// publishBackplane publishes a kind-tagged payload to the Backplane, logging
+// (not failing) on error. The caller has already applied and broadcast the
+// change locally. ctx bounds the publish: document updates pass a background
+// context (a dropped delta would diverge a peer, so the no-drop backpressure
+// is intentional), while presence updates pass a deadline-bounded context so
+// a wedged peer cannot stall the read loop or teardown over best-effort data.
+func (c *conn) publishBackplane(ctx context.Context, kind byte, payload []byte) {
+	msg := make([]byte, 0, len(payload)+1)
+	msg = append(msg, kind)
+	msg = append(msg, payload...)
+	if err := c.server.opts.Backplane.Publish(ctx, c.state.name, msg); err != nil {
+		log.Printf("server: backplane publish for %q: %v", c.state.name, err)
 	}
 }
 
