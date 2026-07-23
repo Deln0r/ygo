@@ -198,6 +198,28 @@ type Options struct {
 	// the cap are dropped; already-tracked clients keep updating.
 	MaxAwarenessClients int
 
+	// MaxForeignAwarenessClients partitions the MaxAwarenessClients budget
+	// by origin: it bounds how many of a room's presence slots relayed
+	// presence (cursors of clients on OTHER instances, carried over the
+	// Backplane) may occupy, reserving the remainder for this instance's
+	// local clients. Once relayed presence fills this many slots, further
+	// brand-new foreign clientIDs are dropped while local clients keep
+	// being admitted up to MaxAwarenessClients, so a presence flood arriving
+	// over the Backplane cannot starve new local clients of a slot. The
+	// local floor is MaxAwarenessClients minus this value (it is zero only
+	// when this value is set at or above MaxAwarenessClients, see below).
+	//
+	// Zero selects a default that reserves about 1/8 of the (bounded) cap for
+	// local clients (foreign may use the rest), always leaving at least one
+	// local slot when the cap has room for one. A negative value disables the
+	// partition, so relayed presence again shares the full cap with local
+	// clients. A value at or above MaxAwarenessClients is clamped to it, which
+	// leaves no local reservation. A positive value is still honored when
+	// MaxAwarenessClients is unlimited (it bounds relayed presence while local
+	// presence stays unbounded); the zero default imposes no sub-cap in that
+	// case. Ignored without a Backplane (there is no relayed presence).
+	MaxForeignAwarenessClients int
+
 	// ReadLimit sets the maximum WebSocket message size in bytes that
 	// the server will read from a single client frame. Defaults to
 	// coder/websocket's built-in 32 768-byte limit when zero. Raise
@@ -279,14 +301,17 @@ type Options struct {
 	// cluster must run a matching ygo version (already implied by the shared
 	// Store) — the backplane framing is not version-negotiated.
 	//
-	// Carrying presence widens the reach of a presence flood: because foreign
-	// presence shares the per-room MaxAwarenessClients cap with local clients,
-	// a client flooding fabricated presence IDs on one instance can fill the
-	// cap on every instance holding the document, denying newly-connecting
-	// local clients a presence slot until the flood ages out (documents and
-	// already-connected clients are unaffected, and it self-heals when the
-	// flooder departs). Front untrusted clients with your own presence
-	// validation, or lower MaxAwarenessClients, if this matters.
+	// Carrying presence widens the reach of a presence flood — a client
+	// flooding fabricated presence IDs on one instance has them relayed to
+	// every instance holding the document — but relayed presence is admitted
+	// under a separate origin-partitioned sub-cap (MaxForeignAwarenessClients),
+	// so it occupies at most that many of each room's presence slots and, as
+	// long as that sub-cap leaves a local reservation (it is below
+	// MaxAwarenessClients, the default), cannot deny a newly-connecting LOCAL
+	// client its slot; the flood's fabricated IDs still consume foreign slots
+	// cluster-wide until they age out (self-healing when the flooder departs).
+	// Lower MaxForeignAwarenessClients to shrink a flood's foreign footprint, or
+	// front untrusted clients with your own presence validation, if this matters.
 	//
 	// SHARED STORE REQUIRED. Because a foreign update is applied only in
 	// memory and never re-persisted by the receiving instance, every
@@ -352,6 +377,48 @@ const (
 	defaultMaxConnsPerDoc      = 4096
 )
 
+// resolveForeignAwarenessCap turns the raw MaxForeignAwarenessClients option
+// into the foreign presence sub-cap the Awareness layer enforces (0 = no
+// sub-cap). maxClientsOpt is MaxAwarenessClients after its own zero-default has
+// been applied (negative still meaning unlimited).
+//
+//   - foreignOpt < 0 disables the partition (foreign shares the full cap).
+//   - foreignOpt == 0 (the default) reserves ~1/8 of a BOUNDED cap for local
+//     clients, but always leaves a floor of at least one local slot when the cap
+//     has room for one (effMax >= 2); a single-slot cap cannot reserve. Under an
+//     unbounded total cap the default imposes no sub-cap, since there is no
+//     memory bound to take a fraction of.
+//   - foreignOpt > 0 is honored verbatim, clamped to a bounded total cap. It is
+//     honored even under an unbounded total cap: bounding relayed presence while
+//     leaving local presence unbounded is a valid memory choice. A value at or
+//     above the total cap leaves no local reservation (the operator's choice).
+func resolveForeignAwarenessCap(maxClientsOpt, foreignOpt int) int {
+	effMax := maxClientsOpt
+	if effMax < 0 {
+		effMax = 0 // total presence unbounded
+	}
+	switch {
+	case foreignOpt < 0:
+		return 0 // partition disabled: foreign shares the full cap
+	case foreignOpt == 0:
+		if effMax <= 0 {
+			return 0 // unbounded total -> impose no foreign sub-cap
+		}
+		reserved := effMax - effMax/8 // reserve ~1/8 of the cap for local clients
+		if reserved >= effMax {
+			// The 1/8 rounded to zero (effMax < 8): still reserve one slot so
+			// the local floor is never zero when the cap can spare one.
+			reserved = effMax - 1
+		}
+		return reserved
+	default:
+		if effMax > 0 && foreignOpt > effMax {
+			return effMax
+		}
+		return foreignOpt
+	}
+}
+
 // New returns a Server with the given options. The returned Server
 // is ready to accept WS connections; call Handler() to obtain the
 // http.Handler that performs the upgrade.
@@ -365,6 +432,7 @@ func New(opts Options) *Server {
 	if opts.MaxAwarenessClients == 0 {
 		opts.MaxAwarenessClients = defaultMaxAwarenessClients
 	}
+	opts.MaxForeignAwarenessClients = resolveForeignAwarenessCap(opts.MaxAwarenessClients, opts.MaxForeignAwarenessClients)
 	s := &Server{
 		opts: opts,
 		docs: map[string]*docState{},
@@ -713,6 +781,7 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 
 	aw := awareness.New(d.ClientID())
 	aw.SetMaxClients(s.opts.MaxAwarenessClients)
+	aw.SetMaxForeignClients(s.opts.MaxForeignAwarenessClients)
 	state := &docState{
 		name:      docName,
 		doc:       d,
@@ -1102,14 +1171,14 @@ func (s *Server) applyBackplaneDoc(state *docState, update []byte) {
 // keep propagating; if they stop, this instance's own sweep evicts it, and a
 // clean disconnect propagates an explicit tombstone (see releaseConn).
 //
-// The per-room MaxAwarenessClients cap bounds MEMORY here (Apply drops new
-// clientIDs past the cap), but it is NOT partitioned by origin: foreign
-// presence shares the cap with local clients, so a sustained presence flood
-// on one instance can fill the cap on every instance holding the document and
-// deny new local clients a presence slot until it ages out. See the
-// Options.Backplane note; a foreign sub-cap is a planned hardening.
+// Relayed presence is admitted via ApplyForeign, so the per-room presence cap
+// is partitioned by origin (MaxForeignAwarenessClients): foreign presence may
+// occupy at most that many slots, and the remainder of MaxAwarenessClients is
+// reserved for local clients. As long as that reservation is non-zero (the
+// default), a sustained presence flood arriving over the Backplane therefore
+// cannot deny a new local client its presence slot.
 func (s *Server) applyBackplaneAwareness(state *docState, awUpdate []byte) {
-	summary, err := state.awareness.Apply(awUpdate, backplaneOrigin)
+	summary, err := state.awareness.ApplyForeign(awUpdate, backplaneOrigin)
 	if err != nil {
 		log.Printf("server: backplane awareness for %q: %v", state.name, err)
 		return

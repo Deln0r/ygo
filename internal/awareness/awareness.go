@@ -107,6 +107,16 @@ type Awareness struct {
 	// (live entries plus retained tombstones); 0 means unlimited.
 	// Guarded by mu. See SetMaxClients.
 	maxClients int
+	// maxForeignClients sub-bounds admissions made via ApplyForeign
+	// (presence relayed from another instance over a cluster backplane):
+	// a brand-new foreign clientID is admitted only while the tracked
+	// set holds fewer than maxForeignClients entries, so foreign
+	// presence can occupy at most maxForeignClients slots and can never
+	// consume the maxClients-maxForeignClients slots reserved for local
+	// clients. 0 means no sub-cap (foreign shares the full maxClients
+	// bound with local, the historical behavior). Guarded by mu. See
+	// SetMaxForeignClients.
+	maxForeignClients int
 
 	subMu       sync.Mutex
 	nextSubID   atomic.Uint64
@@ -153,6 +163,28 @@ func (a *Awareness) SetMaxClients(n int) {
 	}
 	a.mu.Lock()
 	a.maxClients = n
+	a.mu.Unlock()
+}
+
+// SetMaxForeignClients bounds how many tracked clientIDs an ApplyForeign
+// admission may fill, reserving the rest of the maxClients budget for local
+// clients. While the tracked set already holds at least n entries, ApplyForeign
+// refuses brand-new clientIDs (already-tracked foreign clients keep updating);
+// plain Apply is unaffected and keeps admitting up to maxClients. A non-positive
+// value disables the sub-cap, so foreign presence again shares the full
+// maxClients bound with local clients.
+//
+// This partitions the per-room presence cap by origin: because foreign
+// admissions stop once the tracked set reaches n, at most n slots are ever held
+// by relayed presence, so a sustained presence flood arriving over the backplane
+// cannot starve new local clients of a slot. Servers set n below MaxClients per
+// room; the local floor is MaxClients-n.
+func (a *Awareness) SetMaxForeignClients(n int) {
+	if n < 0 {
+		n = 0
+	}
+	a.mu.Lock()
+	a.maxForeignClients = n
 	a.mu.Unlock()
 }
 
@@ -456,7 +488,27 @@ var ErrInvalidUpdate = errors.New("awareness: invalid update bytes")
 //     local clock instead of removing.
 //   - Removal preserves the entry locally with Data = nil so the
 //     clock survives stale revivals.
+//
+// Brand-new clientIDs are admitted up to the full MaxClients bound. Use
+// ApplyForeign for presence relayed from another instance to hold it to the
+// foreign sub-cap instead.
 func (a *Awareness) Apply(update []byte, origin any) (Summary, error) {
+	return a.apply(update, origin, false)
+}
+
+// ApplyForeign is Apply for presence relayed from another instance over a
+// cluster backplane. It behaves identically except that a brand-new clientID is
+// held to the foreign sub-cap (SetMaxForeignClients) rather than the full
+// MaxClients bound, so relayed presence can never consume the slots reserved for
+// local clients. Already-tracked clientIDs keep updating regardless of origin.
+func (a *Awareness) ApplyForeign(update []byte, origin any) (Summary, error) {
+	return a.apply(update, origin, true)
+}
+
+// apply integrates a wire-encoded update. foreign selects the presence cap that
+// gates brand-new clientIDs: the foreign sub-cap when true, the full MaxClients
+// bound otherwise. See Apply and ApplyForeign.
+func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, error) {
 	entries, _, err := decodeUpdate(update)
 	if err != nil {
 		return Summary{}, fmt.Errorf("%w: %w", ErrInvalidUpdate, err)
@@ -503,9 +555,18 @@ func (a *Awareness) Apply(update []byte, origin any) (Summary, error) {
 		// set (live plus tombstoned) is full. The local client is
 		// exempt. Dropping the entry rather than erroring keeps a
 		// flood of fabricated IDs from voiding legitimate entries
-		// batched alongside it.
-		if !existed && a.maxClients > 0 && e.ClientID != a.clientID && len(a.states) >= a.maxClients {
-			continue
+		// batched alongside it. A foreign apply (relayed presence) is
+		// held to the tighter foreign sub-cap so it cannot fill the
+		// slots reserved for local clients; foreign admissions stop at
+		// maxForeignClients while local ones continue to maxClients.
+		if !existed && e.ClientID != a.clientID {
+			limit := a.maxClients
+			if foreign && a.maxForeignClients > 0 && (limit <= 0 || a.maxForeignClients < limit) {
+				limit = a.maxForeignClients
+			}
+			if limit > 0 && len(a.states) >= limit {
+				continue
+			}
 		}
 
 		now := a.now()
