@@ -4,8 +4,9 @@
 // It satisfies github.com/Deln0r/ygo/server/backplane.Backplane: point every
 // instance's server.Options.Backplane at one built from a shared NATS
 // connection and the instances converge on shared documents. As with any
-// backplane, a shared Store is still required (foreign updates are applied
-// in memory only, not re-persisted) and presence/awareness is not carried.
+// backplane, a shared Store is still required (foreign updates are applied in
+// memory only, not re-persisted). Payloads are opaque to the adapter, so both
+// document updates and presence/awareness are carried.
 //
 // Delivery follows core NATS semantics: at-most-once, fire-and-forget. A
 // dropped message is a dropped causal dependency, not just one lost edit: it
@@ -13,9 +14,13 @@
 // (the apply reports no error), and the shared Store heals it only when that
 // document is next (re)loaded — on eviction and reload. A continuously
 // resident document (always at least one client) never reloads, so for a hot
-// document a single dropped delta is not automatically healed. Use a
-// JetStream-backed backplane where a dropped delta is unacceptable; core NATS
-// matches the y-redis model.
+// document a single dropped delta is not automatically healed. Where that is
+// unacceptable, use the JetStream-backed backplane in this package
+// (NewJetStream): it publishes into a persistent stream and consumes with an
+// ordered consumer that resumes from the last delivered message across a
+// reconnect or server restart, so a transient outage does not silently lose
+// delivery (bounded by the stream's retention). Core NATS matches the y-redis
+// model.
 //
 // This is a separate Go module so the ygo core stays dependency-free;
 // adopters that want NATS clustering opt in by importing it.
@@ -101,11 +106,12 @@ func newOrigin() string {
 	return hex.EncodeToString(raw[:])
 }
 
-// subject maps a docName to a NATS subject token. docName is base64url-
-// encoded so arbitrary bytes — dots (which would split into sub-subjects),
-// spaces, and the '*'/'>' wildcards — cannot break subject routing or leak a
-// document's updates onto another's channel.
-func (b *Backplane) subject(docName string) string {
+// docSubject maps a docName to a NATS subject token under prefix. docName is
+// base64url-encoded so arbitrary bytes — dots (which would split into
+// sub-subjects), spaces, and the '*'/'>' wildcards — cannot break subject
+// routing or leak a document's updates onto another's channel. Shared by the
+// core-NATS and JetStream backplanes so both encode identically.
+func docSubject(prefix, docName string) string {
 	tok := base64.RawURLEncoding.EncodeToString([]byte(docName))
 	if tok == "" {
 		// Only the empty docName encodes to an empty token, which would form
@@ -114,8 +120,10 @@ func (b *Backplane) subject(docName string) string {
 		// one-char token cannot collide with any non-empty docName.
 		tok = "_"
 	}
-	return b.prefix + "." + tok
+	return prefix + "." + tok
 }
+
+func (b *Backplane) subject(docName string) string { return docSubject(b.prefix, docName) }
 
 // Publish sends update on docName's subject to every OTHER subscribed
 // instance, tagging it with this instance's origin so subscribers skip their
