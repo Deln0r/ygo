@@ -64,7 +64,8 @@ func main() {
 For a collaborative server backend, see [yserve](docs/yserve.md) — a stand-alone, Hocuspocus-compatible WebSocket server with SQLite persistence and document versioning, in one static binary:
 
 ```bash
-go run ./cmd/yserve -addr :1234 -store data.db -version-interval 10m
+go install github.com/Deln0r/ygo/cmd/yserve@latest
+yserve -addr :1234 -store data.db -version-interval 10m
 ```
 
 ### Undo / Redo
