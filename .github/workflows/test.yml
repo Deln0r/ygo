@@ -12,7 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: ["1.22", "1.23", "1.24"]
+        # The floor is go.mod's declared minimum (1.22); the top two are the
+        # Go releases upstream currently supports, which is what a new adopter
+        # actually runs. Keep both ends: dropping the floor would silently
+        # raise our minimum, and omitting the current releases means a
+        # toolchain or stdlib change lands on users before it lands on CI.
+        go: ["1.22", "1.23", "1.24", "1.25", "1.26"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -25,7 +30,7 @@ jobs:
       - name: go test
         run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
       - name: upload coverage
-        if: matrix.go == '1.24'
+        if: matrix.go == '1.26'
         uses: actions/upload-artifact@v7
         with:
           name: coverage
