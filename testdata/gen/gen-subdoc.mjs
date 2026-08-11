@@ -1,6 +1,6 @@
 // Generates testdata/subdoc-fixtures.json — V1 update wire-byte
 // fixtures for documents containing subdocuments (ContentDoc, ref 9),
-// captured from JS Yjs (yjs@13.6.31).
+// captured from JS Yjs (yjs@13.6.32).
 //
 // Each scenario nests one or more Y.Doc subdocuments and records the
 // parent document's encodeStateAsUpdate bytes plus the expected subdoc
@@ -66,7 +66,7 @@ scenarios.push({
 });
 
 const out = {
-  generator: "yjs@13.6.31 (ContentDoc V1)",
+  generator: "yjs@13.6.32 (ContentDoc V1)",
   scenarios: scenarios.map((s) => {
     const { doc, expect } = s.build();
     return {

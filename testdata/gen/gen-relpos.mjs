@@ -1,6 +1,6 @@
 // Generates testdata/relpos-fixtures.json — binary fixtures for
 // RelativePosition (Y.encodeRelativePosition wire form), captured from
-// JS Yjs (yjs@13.6.31).
+// JS Yjs (yjs@13.6.32).
 //
 // Each scenario builds a document, anchors a relative position with
 // createRelativePositionFromTypeIndex, records the encoded rpos bytes
@@ -249,7 +249,7 @@ for (const assoc of [0, -1]) {
 }
 
 const out = {
-  generator: "yjs@13.6.31 (RelativePosition)",
+  generator: "yjs@13.6.32 (RelativePosition)",
   scenarios,
 };
 

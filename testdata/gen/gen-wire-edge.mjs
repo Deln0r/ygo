@@ -1,5 +1,5 @@
 // Generates testdata/wire-edge-fixtures.json — V1 full-update wire-byte
-// fixtures from JS Yjs (yjs@13.6.31) that exercise two byte-exactness
+// fixtures from JS Yjs (yjs@13.6.32) that exercise two byte-exactness
 // edge cases the single-client fixtures never covered:
 //
 //   1. multi-client documents with deletes, which require the delete
@@ -91,7 +91,7 @@ scenarios.push({
 });
 
 const out = {
-  generator: "yjs@13.6.31 (wire edge V1)",
+  generator: "yjs@13.6.32 (wire edge V1)",
   scenarios: scenarios.map((s) => {
     const doc = s.build();
     const row = {

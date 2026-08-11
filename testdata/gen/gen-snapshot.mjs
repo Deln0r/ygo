@@ -1,5 +1,5 @@
 // Generates testdata/snapshot-fixtures.json — V1 Snapshot wire-byte
-// fixtures captured from JS Yjs (yjs@13.6.31).
+// fixtures captured from JS Yjs (yjs@13.6.32).
 //
 // A snapshot is encodeSnapshot(Y.snapshot(doc)) = writeDeleteSet(ds)
 // ++ writeStateVector(sv). The Go test in internal/encoding/
@@ -104,7 +104,7 @@ scenarios.push({
 });
 
 const out = {
-  generator: "yjs@13.6.31 (Snapshot V1)",
+  generator: "yjs@13.6.32 (Snapshot V1)",
   scenarios: scenarios.map((s) => {
     const doc = s.build();
     const snap = Y.snapshot(doc);

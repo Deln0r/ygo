@@ -1,5 +1,5 @@
 {
-  "generator": "yjs@13.6.31 (nested-type GC, V1)",
+  "generator": "yjs@13.6.32 (nested-type GC, V1)",
   "scenarios": [
     {
       "name": "map_in_map",

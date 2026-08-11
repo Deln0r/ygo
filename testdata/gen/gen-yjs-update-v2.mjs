@@ -1,5 +1,5 @@
 // Generates testdata/yjs-update-v2-fixtures.json — V2 Update wire-byte
-// fixtures captured from JS Yjs (yjs@13.6.31). Drives the V2 binary-
+// fixtures captured from JS Yjs (yjs@13.6.32). Drives the V2 binary-
 // protocol-compat proof in internal/encoding/v2_fixtures_test.go.
 //
 // Schema mirrors gen-yjs-update.mjs (V1) so the consuming Go test
@@ -252,7 +252,7 @@ const scenarios = [
 ];
 
 const out = {
-  generator: "yjs@13.6.31 (V2)",
+  generator: "yjs@13.6.32 (V2)",
   scenarios,
 };
 

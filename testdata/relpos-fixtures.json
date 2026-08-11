@@ -1,5 +1,5 @@
 {
-  "generator": "yjs@13.6.31 (RelativePosition)",
+  "generator": "yjs@13.6.32 (RelativePosition)",
   "scenarios": [
     {
       "description": "text mid anchor, assoc 0, insert before",

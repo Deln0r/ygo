@@ -72,7 +72,7 @@ const scenarios = [
 ];
 
 const out = {
-  generator: "yjs@13.6.31 (nested-type GC, V1)",
+  generator: "yjs@13.6.32 (nested-type GC, V1)",
   scenarios: scenarios.map((s) => {
     const d = new Y.Doc({ gc: true });
     d.clientID = s.clientID;

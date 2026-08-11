@@ -1,5 +1,5 @@
 {
-  "generator": "yjs@13.6.31 (wire edge V1)",
+  "generator": "yjs@13.6.32 (wire edge V1)",
   "scenarios": [
     {
       "description": "multi-client array with deletes",

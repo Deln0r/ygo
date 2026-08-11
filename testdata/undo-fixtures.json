@@ -1,5 +1,5 @@
 {
-  "generator": "yjs@13.6.31 (UndoManager)",
+  "generator": "yjs@13.6.32 (UndoManager)",
   "scenarios": [
     {
       "description": "map set then undo",

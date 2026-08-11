@@ -1,5 +1,5 @@
 {
-  "generator": "yjs@13.6.31 (V2)",
+  "generator": "yjs@13.6.32 (V2)",
   "scenarios": [
     {
       "description": "empty doc, no ops",
