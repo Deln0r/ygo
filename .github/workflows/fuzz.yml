@@ -45,7 +45,7 @@ jobs:
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - id: list
         name: enumerate fuzz targets
         run: |
@@ -70,8 +70,8 @@ jobs:
       # target, not summed across them.
       FUZZTIME: ${{ github.event_name == 'schedule' && '600s' || '40s' }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           # Fuzz on a currently-supported Go release: the runtime and the
           # fuzzing engine are part of what is under test here, so an old
