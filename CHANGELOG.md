@@ -13,7 +13,9 @@ The optional NATS backplane adapter lives in the nested module
 `server/backplane/nats` and is versioned independently; its releases are listed
 at the end of this file.
 
-## [Unreleased]
+## [1.16.0] - 2026-08-13
+
+Supported toolchain, current dependencies.
 
 **Upgrade impact** — the minimum Go version is now **1.25**, raised from 1.22.
 Go itself supports only its two most recent releases (1.25 and 1.26), so 1.22
@@ -618,6 +620,7 @@ Core NATS backplane adapter.
 - Delivery is core-NATS at-most-once. Where a dropped delta is unacceptable,
   use `NewJetStream` (v0.2.0) instead.
 
+[1.16.0]: https://github.com/Deln0r/ygo/releases/tag/v1.16.0
 [1.15.0]: https://github.com/Deln0r/ygo/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Deln0r/ygo/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Deln0r/ygo/releases/tag/v1.13.0
