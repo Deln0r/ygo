@@ -13,6 +13,31 @@ The optional NATS backplane adapter lives in the nested module
 `server/backplane/nats` and is versioned independently; its releases are listed
 at the end of this file.
 
+## [Unreleased]
+
+**Upgrade impact** — the minimum Go version is now **1.25**, raised from 1.22.
+Go itself supports only its two most recent releases (1.25 and 1.26), so 1.22
+through 1.24 no longer receive upstream fixes; building ygo now requires a
+supported toolchain. If you are pinned to an older Go, stay on v1.15.0. The
+raise is what allows the dependencies below to move: to keep the 1.22 floor,
+`modernc.org/sqlite` had been held at v1.29.10 (released May 2024) in the layer
+that stores your documents, along with four transitive pins and dependabot
+ignore rules.
+
+### Changed
+- Minimum Go version raised to 1.25; the CI matrix is now 1.25 and 1.26, the
+  releases upstream supports.
+- `modernc.org/sqlite` v1.29.10 → v1.56.0 and `coder/websocket` v1.8.12 →
+  v1.8.15, with every version pin and dependabot ignore rule removed so both
+  track upstream again. `modernc.org/gc/v3`, `hashicorp/golang-lru/v2`,
+  `modernc.org/strutil` and `modernc.org/token` leave the dependency graph
+  entirely. No API or wire-format change: the full suite, the persistence layer
+  at `-race -count=10`, and the cross-language fixtures all pass unchanged.
+
+### Fixed
+- Three decode errors in the `Any` codec no longer start with a capitalized
+  word, so they read correctly when wrapped by a caller.
+
 ## [1.15.0] - 2026-07-27
 
 Cross-cluster presence.

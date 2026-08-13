@@ -230,8 +230,8 @@ in service.
 
 `gomobile bind` requires `golang.org/x/mobile/bind` to be present
 in the module's dependency graph at build time. The main `go.mod`
-does NOT carry this dep (it would bump the `go` directive past
-1.22 and break our CI Go-version matrix). Adopters running their
-own `gomobile bind` should `go get golang.org/x/mobile/bind` in
+deliberately does NOT carry this dep, so adopters who never touch
+mobile pull nothing extra. Adopters running their own
+`gomobile bind` should `go get golang.org/x/mobile/bind` in
 their fresh checkout before the bind step (see commands above);
 the dep is build-time only, no runtime cost.

@@ -272,7 +272,7 @@ func NewXmlText(branch *block.Branch) *XmlText {
 
 // ToString returns the underlying text — alias for Text.String()
 // kept for parity with XmlElement/XmlFragment ToString.
-func (x *XmlText) ToString() string { return x.Text.String() }
+func (x *XmlText) ToString() string { return x.String() }
 
 // asArray and asMap are tiny adapters that let XML wrappers reuse
 // the Array and Map machinery on their own Branch. The XML

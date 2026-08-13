@@ -12,12 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # The floor is go.mod's declared minimum (1.22); the top two are the
-        # Go releases upstream currently supports, which is what a new adopter
-        # actually runs. Keep both ends: dropping the floor would silently
-        # raise our minimum, and omitting the current releases means a
-        # toolchain or stdlib change lands on users before it lands on CI.
-        go: ["1.22", "1.23", "1.24", "1.25", "1.26"]
+        # go.mod's floor (1.25) and the current release. These are exactly the
+        # two Go releases upstream still supports, so the matrix covers our
+        # declared minimum and what a new adopter actually runs, with nothing
+        # in between to go stale.
+        go: ["1.25", "1.26"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -43,10 +42,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          # The NATS adapter is a separate opt-in module; nats.go pins a
-          # newer Go floor than the core, so it builds outside the core
-          # matrix. It resolves the core via a local replace directive.
-          go-version: "1.25"
+          # The NATS adapter is a separate opt-in module built outside the
+          # core matrix; it resolves the core via a local replace directive.
+          go-version: "1.26"
       - name: test the NATS backplane adapter
         working-directory: server/backplane/nats
         run: |
@@ -67,23 +65,17 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
-    # golangci-lint-action@v6 ships a Node 20 runtime, which GitHub is
-    # deprecating. Opt into Node 24 now. We stay on v6 (not v7) on
-    # purpose: v7 forces golangci-lint v2, which is incompatible with
-    # our pinned v1 config (see docs/tech-debt.md).
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
-      - uses: golangci/golangci-lint-action@v6
+          go-version: "1.26"
+      - uses: golangci/golangci-lint-action@v7
         with:
           # Pinned (not "latest") so local installs of the same version
           # produce identical results. Bump deliberately. See
           # docs/tech-debt.md for the lint-not-enforced history.
-          version: v1.64.8
+          version: v2.12.2
 
   fixtures:
     name: fixtures (cross-language)
@@ -92,7 +84,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version: "1.26"
       - uses: actions/setup-node@v7
         with:
           node-version: "22"

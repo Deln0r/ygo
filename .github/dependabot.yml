@@ -12,13 +12,6 @@ updates:
     labels:
       - dependencies
       - go
-    ignore:
-      # sqlite 1.51+ requires Go 1.25; project floor is 1.22 (gomobile bind).
-      - dependency-name: "modernc.org/sqlite"
-        versions: [">=1.51.0"]
-      # coder/websocket 1.8.13+ requires Go 1.23; project floor is 1.22.
-      - dependency-name: "github.com/coder/websocket"
-        versions: [">=1.8.13"]
 
   - package-ecosystem: github-actions
     directory: "/"

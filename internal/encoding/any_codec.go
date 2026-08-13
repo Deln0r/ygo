@@ -210,7 +210,7 @@ func DecodeAny(buf []byte) (any, []byte, error) {
 		for i := uint64(0); i < count; i++ {
 			el, tail, err := DecodeAny(buf)
 			if err != nil {
-				return nil, buf, fmt.Errorf("Any array element %d: %w", i, err)
+				return nil, buf, fmt.Errorf("decode Any array element %d: %w", i, err)
 			}
 			arr[i] = el
 			buf = tail
@@ -229,12 +229,12 @@ func DecodeAny(buf []byte) (any, []byte, error) {
 		for i := uint64(0); i < count; i++ {
 			key, kn, err := lib0.ReadVarString(buf)
 			if err != nil {
-				return nil, buf, fmt.Errorf("Any object key %d: %w", i, err)
+				return nil, buf, fmt.Errorf("decode Any object key %d: %w", i, err)
 			}
 			buf = buf[kn:]
 			val, tail, err := DecodeAny(buf)
 			if err != nil {
-				return nil, buf, fmt.Errorf("Any object value for key %q: %w", key, err)
+				return nil, buf, fmt.Errorf("decode Any object value for key %q: %w", key, err)
 			}
 			m[key] = val
 			buf = tail

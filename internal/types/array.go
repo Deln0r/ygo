@@ -83,9 +83,7 @@ func (a *Array) InsertRange(txn *doc.TransactionMut, idx uint64, values []any) {
 	clock := txn.Store().GetClock(clientID)
 
 	anys := make([]block.Any, len(values))
-	for i, v := range values {
-		anys[i] = v
-	}
+	copy(anys, values)
 
 	item := &block.Item{
 		ID:          block.ID{Client: clientID, Clock: clock},
