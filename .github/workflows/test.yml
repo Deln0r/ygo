@@ -62,6 +62,43 @@ jobs:
           go mod tidy
           go build ./...
 
+  cross-compile:
+    name: cross-compile (the targets the README claims)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      # Build-only, no tests: this job exists so the portability claim on the
+      # README cannot rot silently. Nothing else in CI cross-compiles, which is
+      # how the wasm caveat below went unnoticed until someone tried it by hand.
+      - name: whole module
+        run: |
+          for t in android/arm64 linux/arm64 windows/amd64 darwin/arm64 freebsd/amd64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build ./...
+          done
+      - name: library packages only
+        run: |
+          # On these targets the cmd/ binaries need external (cgo) linking, so
+          # only the importable packages are built - which is all an adopter
+          # consumes there anyway.
+          for t in ios/arm64 android/amd64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist/... ./client ./server/... ./gomobile ./internal/...
+          done
+      - name: wasm, minus the SQLite store
+        run: |
+          # persist/sqlite is deliberately excluded: modernc.org/sqlite is
+          # transpiled C and modernc.org/libc has no wasm build. A browser
+          # adopter supplies its own persist.Store, so everything else must
+          # keep compiling for wasm.
+          for t in js/wasm wasip1/wasm; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist ./client ./server ./internal/...
+          done
+
   lint:
     name: lint
     runs-on: ubuntu-latest
