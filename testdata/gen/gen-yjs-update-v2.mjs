@@ -118,6 +118,23 @@ const scenarios = [
     m.set("k", "v2");
   }),
 
+  captureMap("GC structs from a deleted nested type precede later content", "x", 777, (m, doc) => {
+    // The reearth/ygo v1.49.1 data-loss class: with gc:true (the Y.Doc
+    // default), deleting a populated nested type collapses it into GC
+    // structs, and the V2 struct stream then carries those GC runs BEFORE
+    // the same client's later live items. A decoder that mis-advances on a
+    // GC struct silently drops everything after it. The surviving keys are
+    // the assertion.
+    doc.transact(() => {
+      const inner = new Y.Map();
+      inner.set("a", "1");
+      inner.set("b", "2");
+      m.set("child", inner);
+      m.set("keep0", "alive0");
+    });
+    doc.transact(() => { m.delete("child"); });
+    doc.transact(() => { m.set("keep1", "alive1"); m.set("keep2", "alive2"); });
+  }),
   captureMap("Map with unicode keys and values", "x", 107, (m) => {
     m.set("ключ", "значение");
     m.set("emoji", "ok");

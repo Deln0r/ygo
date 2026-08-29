@@ -199,6 +199,14 @@ func GetDiff(ctx context.Context, s Store, docName string, remoteSV []byte) ([]b
 // proceed with the destructive replace — the original updates are
 // still the canonical state. Returning the error preserves that
 // contract; the caller should abort the storage transaction.
+// ErrIncompleteLog reports that an update log contains updates whose causal
+// dependencies are absent from the same log, so compacting it now would
+// silently drop them. The log itself is intact and replays correctly (the
+// pending buffer holds such updates until their dependencies arrive); retry
+// the flush after more updates land. Callers that capture snapshots
+// (SaveVersion) propagate it rather than record an incomplete state.
+var ErrIncompleteLog = errors.New("persist: log has updates with unmet causal dependencies; compaction refused")
+
 func MergeUpdates(updates [][]byte) ([]byte, error) {
 	if len(updates) == 0 {
 		return nil, nil
@@ -217,5 +225,21 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 		}
 	}
 	wtxn.Commit()
+	// A dependent update whose causal ancestor is not in this log parks in
+	// the reconstruction doc's pending buffer, and EncodeStateAsUpdate emits
+	// only integrated state - so proceeding would DROP that update from the
+	// compacted snapshot while the destructive replace erases the original
+	// bytes: silent, permanent data loss. Reachable in the server: an update
+	// is applied and broadcast BEFORE it is persisted, so a fast peer's
+	// dependent edit can reach the Store first; a flush in that window sees
+	// exactly this log. Refuse instead - the un-compacted log is
+	// order-tolerant (replay re-parks and heals), so skipping compaction is
+	// always safe, and the next flush after the ancestor lands succeeds.
+	rtxn := d.ReadTxn()
+	pending := encoding.HasPending(rtxn)
+	rtxn.Close()
+	if pending {
+		return nil, ErrIncompleteLog
+	}
 	return encoding.EncodeStateAsUpdate(d), nil
 }

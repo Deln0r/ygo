@@ -76,6 +76,18 @@
       }
     },
     {
+      "description": "GC structs from a deleted nested type precede later content",
+      "js_client_id": 777,
+      "root_kind": "map",
+      "root_name": "x",
+      "update_hex": "000002890c00000521000000282118786368696c64786b65657030786b65657031786b65657032010501050105010501010004010241010105007706616c697665307706616c697665317706616c69766532018906010002",
+      "expected_map": {
+        "keep0": "alive0",
+        "keep1": "alive1",
+        "keep2": "alive2"
+      }
+    },
+    {
       "description": "Map with unicode keys and values",
       "js_client_id": 107,
       "root_kind": "map",
