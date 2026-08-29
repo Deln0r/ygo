@@ -80,7 +80,26 @@ jobs:
       - name: go mod download
         run: go mod download
       - name: fuzz ${{ matrix.func }} (${{ env.FUZZTIME }})
-        run: go test -run='^$' -fuzz="^${{ matrix.func }}$" -fuzztime="${FUZZTIME}" "./${{ matrix.pkg }}"
+        # Retried once, but ONLY when no crasher was written. The Go fuzz
+        # coordinator occasionally fails with a bare "context deadline
+        # exceeded" exactly at the -fuzztime boundary after a full, clean run
+        # (observed 2026-08-20/25/28 on three unrelated targets, tens of
+        # millions of execs, no failing input). A genuine finding always
+        # writes a NEW file under testdata/fuzz/<target>/ and would also
+        # re-fail deterministically, so a retry cannot mask it: we fail
+        # immediately if the corpus gained a file, and otherwise re-run.
+        run: |
+          run_fuzz() {
+            go test -run='^$' -fuzz="^${{ matrix.func }}$" -fuzztime="${FUZZTIME}" "./${{ matrix.pkg }}"
+          }
+          if run_fuzz; then exit 0; fi
+          if [ -n "$(git status --porcelain -- "${{ matrix.pkg }}/testdata/fuzz/")" ]; then
+            echo "::error::fuzz wrote a new crasher - genuine finding, not retrying"
+            git status --porcelain -- "${{ matrix.pkg }}/testdata/fuzz/"
+            exit 1
+          fi
+          echo "::warning::no crasher written - retrying once (coordinator deadline flake)"
+          run_fuzz
       - name: upload crashers
         if: failure()
         uses: actions/upload-artifact@v7
