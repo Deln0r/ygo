@@ -16,7 +16,8 @@
 //
 // Per-document state lives in a map keyed by docName (the last
 // path segment of the WS URL). Documents are loaded lazily on the
-// first connection and evicted after the last connection closes;
+// first connection and evicted after the last connection closes (or,
+// with Options.DocIdleTimeout, after the idle window lapses);
 // if a persist.Store is configured, every applied update is
 // persisted and a final snapshot is written at eviction time.
 package server
@@ -252,8 +253,10 @@ type Options struct {
 	// a global document count scales with deployment size, so a default
 	// cap would silently break a large multi-tenant server. Operators
 	// fronting untrusted clients should set a positive bound. Documents
-	// evict when their last connection departs, so the cap tracks
-	// concurrently-active rooms, not lifetime document count. A
+	// evict when their last connection departs (or, with DocIdleTimeout,
+	// when the idle window lapses), so the cap tracks concurrently
+	// resident rooms - active plus idle-warm - not lifetime document
+	// count. A
 	// connection that would create a document past the cap is refused at
 	// the upgrade with websocket.StatusTryAgainLater (1013); an already
 	// resident room is always admitted.
@@ -274,6 +277,33 @@ type Options struct {
 	// refused. The count is of admitted connections and drops as they
 	// depart, so the cap tracks live load, not lifetime connections.
 	MaxConns int
+
+	// DocIdleTimeout keeps a document resident in memory for this long after
+	// its last connection departs, instead of evicting it immediately. A
+	// reconnect inside the window reuses the live document — no Store reload,
+	// no backplane resubscribe — which turns the page-refresh reconnect from a
+	// full load into a map lookup. The document is flushed to the Store at the
+	// moment it goes idle, so durability is the same as eviction; with a
+	// Backplane, foreign updates keep applying while it is idle, so it stays
+	// warm AND current. Zero (the default) preserves the existing behaviour:
+	// evict as soon as the last connection leaves.
+	DocIdleTimeout time.Duration
+
+	// MaxIdleDocs bounds how many idle documents (kept resident by
+	// DocIdleTimeout) stay in memory at once. When a document goes idle past
+	// the bound, the least-recently-idle one is evicted immediately. Zero
+	// means unbounded (within DocIdleTimeout); ignored when DocIdleTimeout is
+	// zero. Note that idle documents still count toward MaxDocs — size the two
+	// caps together, or a burst of idle rooms can hold slots new rooms need.
+	MaxIdleDocs int
+
+	// FlushEvery compacts a document's persisted update log (Store.Flush)
+	// after every N successfully stored updates, bounding how long the
+	// per-update log grows between compactions. The flush runs synchronously
+	// on the read goroutine that stored the Nth update, once per N updates, so
+	// the cost amortizes. Zero (the default) disables automatic compaction;
+	// the log still compacts on idle, eviction and Close, exactly as before.
+	FlushEvery int
 
 	// Backplane, when set, fans document updates between this server and
 	// other instances that share it, so a horizontally-scaled deployment
@@ -345,6 +375,10 @@ type Server struct {
 
 	docsMu sync.Mutex
 	docs   map[string]*docState
+	// closed flips in Close under docsMu. releaseConn's park branch checks
+	// it so a disconnect racing (or arriving after) Close evicts instead of
+	// parking into a registry no sweeper will scan again.
+	closed bool
 
 	// totalConns counts admitted WebSocket connections across all
 	// documents, backing the global Options.MaxConns cap. It is bumped
@@ -365,6 +399,12 @@ type Server struct {
 	// pair manages the eviction ticker goroutine's lifecycle.
 	awarenessStop chan struct{}
 	awarenessDone chan struct{}
+
+	// Idle-doc sweep state (see idle_sweep.go); runs only when
+	// Options.DocIdleTimeout is positive.
+	idleStop   chan struct{}
+	idleDone   chan struct{}
+	idleCancel context.CancelFunc
 }
 
 // Default awareness-hardening parameters, applied to the zero value
@@ -439,6 +479,7 @@ func New(opts Options) *Server {
 	}
 	s.startVersioning()
 	s.startAwarenessSweep()
+	s.startIdleSweep()
 	return s
 }
 
@@ -452,10 +493,14 @@ func (s *Server) Handler() http.Handler {
 
 // Stats is a point-in-time snapshot of server load returned by Stats.
 type Stats struct {
-	// Documents is the number of documents resident in memory: rooms
-	// with at least one live connection (a document evicts when its last
-	// connection departs).
+	// Documents is the number of documents resident in memory: rooms with
+	// at least one live connection, plus rooms kept warm by DocIdleTimeout
+	// after their last connection departed.
 	Documents int
+	// IdleDocuments is how many of Documents are currently idle-resident
+	// (kept warm by DocIdleTimeout, zero connections). Always zero when
+	// idle keep-warm is off.
+	IdleDocuments int
 	// Connections is the total number of live WebSocket connections
 	// across all resident documents.
 	Connections int
@@ -491,6 +536,9 @@ func (s *Server) Stats() Stats {
 		n := len(ds.conns)
 		ds.connsMu.RUnlock()
 		st.Connections += n
+		if !ds.idleSince.IsZero() {
+			st.IdleDocuments++
+		}
 		st.Docs = append(st.Docs, DocStat{Name: name, Connections: n})
 	}
 	sort.Slice(st.Docs, func(i, j int) bool { return st.Docs[i].Name < st.Docs[j].Name })
@@ -510,7 +558,11 @@ func (s *Server) Stats() Stats {
 //
 // With no Store configured it is a no-op returning nil, as is a docName
 // the Store has never seen. It is safe to call on a live document: a
-// concurrent edit that commits mid-flush never loses data, though under
+// concurrent edit that commits mid-flush never loses data - when an
+// update's causal dependency has not itself been stored yet (normal for a
+// moment, because updates are applied and broadcast before they are
+// persisted), Flush refuses to compact and returns
+// persist.ErrIncompleteLog with the log untouched; retry shortly. Under
 // heavy concurrent writes to the same document Flush may return a
 // transient store error, in which case retry. It takes no server lock, so
 // it never blocks connection admission or eviction.
@@ -533,12 +585,33 @@ func (s *Server) Flush(ctx context.Context, docName string) error {
 func (s *Server) Close(ctx context.Context) error {
 	s.stopVersioning()
 	s.stopAwarenessSweep()
+	s.stopIdleSweep()
 	s.docsMu.Lock()
+	s.closed = true
 	names := make([]string, 0, len(s.docs))
-	for name := range s.docs {
+	var parked []*docState
+	for name, st := range s.docs {
 		names = append(names, name)
+		// Drain idle-parked documents now: with the sweeper stopped nothing
+		// else would ever evict them, and their backplane subscriptions must
+		// not outlive the server. Docs with live connections tear down via
+		// their own releaseConn as usual.
+		if !st.idleSince.IsZero() {
+			st.connsMu.Lock()
+			if len(st.conns) == 0 {
+				delete(s.docs, name)
+				parked = append(parked, st)
+			}
+			st.connsMu.Unlock()
+		}
 	}
 	s.docsMu.Unlock()
+	for _, st := range parked {
+		if st.backplaneUnsub != nil {
+			st.backplaneUnsub()
+		}
+		// The final flush for these names happens in the walk below.
+	}
 
 	var firstErr error
 	for _, name := range names {
@@ -683,7 +756,8 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 
 // docState carries the Doc + Awareness + connection set for one
 // docName. Created lazily by getOrCreateDocLocked; freed by releaseConn
-// when the last connection departs.
+// when the last connection departs, or - when DocIdleTimeout parks it
+// instead - by the idle sweep, the MaxIdleDocs bound, or Close.
 type docState struct {
 	name      string
 	doc       *doc.Doc
@@ -693,6 +767,25 @@ type docState struct {
 	// no Backplane is configured. Set under docsMu when the document
 	// becomes resident, called once when it is evicted.
 	backplaneUnsub func()
+
+	// idleSince is the instant the last connection departed while
+	// DocIdleTimeout keeps the document resident; the zero value means the
+	// document has connections (or idle keep-warm is off). Guarded by docsMu:
+	// set in releaseConn's park path, cleared in admitConn on a successful
+	// admission, read by the idle sweep — all under the registry lock.
+	idleSince time.Time
+
+	// persistsSinceFlush counts successfully stored updates, backing
+	// Options.FlushEvery. Atomic: read goroutines of concurrent connections
+	// increment it without shared locking.
+	persistsSinceFlush atomic.Int64
+
+	// flushFailStreak counts consecutive automatic-flush failures, backing
+	// the FlushEvery backoff: after k failures the next attempt waits
+	// every<<min(k,5) stored updates, so a persistently failing store is
+	// retried (and logged) geometrically less often instead of re-merging
+	// the whole log every N updates. Reset to zero on success.
+	flushFailStreak atomic.Int64
 
 	connsMu sync.RWMutex
 	conns   map[*conn]struct{}
@@ -884,6 +977,10 @@ func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Co
 	if !state.addConn(c, s.maxConnsPerDoc()) {
 		return nil, state, false, nil
 	}
+	// A successful admission un-idles the document. Under docsMu (we hold it
+	// across the whole admission), so the idle sweep can never observe a
+	// stale idleSince alongside a live connection.
+	state.idleSince = time.Time{}
 	s.totalConns.Add(1)
 	return c, state, true, nil
 }
@@ -938,37 +1035,59 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	// own insert) could have admitted a new connection onto this state —
 	// deleting then would orphan a live document and split its clients
 	// onto divergent Docs that never converge. The connsMu recheck is what
-	// observes that insert and skips the delete. Lock order docsMu ->
-	// connsMu is not nested anywhere else.
+	// observes that insert and skips the delete. Lock order is always
+	// docsMu -> connsMu (here, in admitConn, Stats and sweepIdle); never
+	// take docsMu while holding connsMu.
 	evicted := false
+	parked := false
+	var lruVictim *docState
 	s.docsMu.Lock()
 	if cur, ok := s.docs[state.name]; ok && cur == state {
 		state.connsMu.Lock()
 		if len(state.conns) == 0 {
-			delete(s.docs, state.name)
-			evicted = true
+			if s.opts.DocIdleTimeout > 0 && !s.closed {
+				// Park instead of evicting: the document stays resident (and,
+				// with a Backplane, keeps applying foreign updates) so a quick
+				// reconnect reuses it. The idle sweep or the MaxIdleDocs bound
+				// below performs the eventual eviction. Only the FIRST releaser
+				// to observe the empty room stamps idleSince: a releaser delayed
+				// across an admit/release cycle would otherwise restamp a
+				// fresher park, extending the idle window and corrupting LRU
+				// order (and re-running the park flush and LRU bound for a park
+				// that already happened).
+				if state.idleSince.IsZero() {
+					state.idleSince = time.Now()
+					parked = true
+				}
+			} else {
+				delete(s.docs, state.name)
+				evicted = true
+			}
 		}
 		state.connsMu.Unlock()
 	}
+	if parked && s.opts.MaxIdleDocs > 0 {
+		lruVictim = s.evictOldestIdleLocked(s.opts.MaxIdleDocs)
+	}
 	s.docsMu.Unlock()
 
-	if evicted {
-		// Stop the backplane subscription for the now-departed document, so
-		// its handler no longer applies foreign updates to a detached copy.
-		// Done outside docsMu (like the Flush below) to keep any broker I/O
-		// off the registry lock; the brief window in which a foreign update
-		// could still reach the detached doc is harmless (it has no
-		// connections, and a re-admit resubscribes on a fresh copy).
-		if state.backplaneUnsub != nil {
-			state.backplaneUnsub()
-		}
+	if parked {
 		if s.opts.Store != nil {
-			// Flush is best-effort; the document log is intact in the Store
-			// either way. Only the evicting releaser flushes, so a
-			// re-acquired live doc is never flushed out from under its
-			// connections.
+			// Durability on going idle matches eviction: the log is compacted
+			// now, so a crash while parked loses nothing, and the eventual
+			// eviction has nothing left to write.
 			_ = s.opts.Store.Flush(ctx, state.name)
 		}
+	}
+	if lruVictim != nil {
+		s.finishEviction(ctx, lruVictim)
+	}
+
+	if evicted {
+		// Backplane unsubscribe + final flush, off docsMu (see finishEviction).
+		// Only the evicting releaser gets here, so a re-acquired live doc is
+		// never flushed out from under its connections.
+		s.finishEviction(ctx, state)
 	}
 }
 
@@ -1228,6 +1347,36 @@ func (c *conn) onAppliedUpdate(envelope []byte) {
 				log.Printf("server: persist update for %q: %v", c.state.name, err)
 			} else {
 				c.server.markVersionDirty(c.state.name)
+				if every := c.server.opts.FlushEvery; every > 0 {
+					interval := int64(every)
+					if k := c.state.flushFailStreak.Load(); k > 0 {
+						if k > 5 {
+							k = 5
+						}
+						interval <<= k
+					}
+					if n := c.state.persistsSinceFlush.Add(1); n%interval == 0 {
+						// Amortized compaction: one synchronous Flush per interval,
+						// on the goroutine that crossed the threshold. A failure is
+						// logged, not fatal - the incremental log is intact - and
+						// backs the interval off geometrically (see flushFailStreak)
+						// so a persistently failing store is not re-merged and
+						// re-logged every N updates forever.
+						switch err := c.server.opts.Store.Flush(context.Background(), c.state.name); {
+						case err == nil:
+							c.state.flushFailStreak.Store(0)
+						case errors.Is(err, persist.ErrIncompleteLog):
+							// Not a store failure: a concurrently-arriving update's
+							// dependency has not been stored yet (applied-then-
+							// persisted ordering makes this window normal). The gap
+							// heals within moments; retry at the next threshold
+							// without logging or backing off.
+						default:
+							c.state.flushFailStreak.Add(1)
+							log.Printf("server: auto-flush %q: %v", c.state.name, err)
+						}
+					}
+				}
 			}
 		}
 		if c.server.opts.OnChange != nil {
