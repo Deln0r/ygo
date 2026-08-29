@@ -13,6 +13,56 @@ The optional NATS backplane adapter lives in the nested module
 `server/backplane/nats` and is versioned independently; its releases are listed
 at the end of this file.
 
+## [1.17.0] - 2026-08-29
+
+Compaction integrity, idle keep-warm, automatic log compaction.
+
+**Upgrade impact** — `Server.Flush`, `persist.MergeUpdates` and
+`persist.SaveVersion` can now return `persist.ErrIncompleteLog` instead of
+succeeding, when the update log momentarily contains an update whose causal
+ancestor has not been stored yet (normal for an instant on a busy document,
+because updates are applied and broadcast before they are persisted). Before
+this release that exact situation was worse than an error: Flush compacted the
+log into a snapshot that silently dropped the dangling update, and the
+destructive replace erased the original bytes — permanent loss of an
+applied-and-broadcast edit. Callers should treat `ErrIncompleteLog` as
+"retry shortly"; the log is intact and replays correctly. Code that only
+checked `err != nil` keeps working and simply retries later.
+
+### Fixed
+- Compacting a causally incomplete update log no longer loses the dangling
+  update: `persist.MergeUpdates` detects unintegrated updates after replaying
+  the log and refuses with `ErrIncompleteLog`, leaving the original bytes in
+  place. Reproduced with genuine yjs transaction updates (the exact shape
+  y-websocket clients broadcast) before fixing; the reproduction is the
+  regression test. Affected `Server.Flush` (since v1.14.0), `SaveVersion`
+  (a labelled version could silently omit content), and the new `FlushEvery`.
+- The nightly fuzz workflow retries once on the Go fuzz coordinator's
+  boundary-deadline flake (three occurrences across unrelated targets, tens
+  of millions of executions, never a failing input) — but refuses to retry
+  when the run wrote a new crasher, so a genuine finding still fails on the
+  first attempt.
+
+### Added
+- `Options.DocIdleTimeout` keeps a document resident and warm for a bounded
+  time after its last connection departs, so a quick reconnect (a page
+  refresh) reuses the live document instead of reloading from the Store. The
+  document is flushed at the moment it parks, durability matching eviction;
+  with a Backplane it keeps applying foreign updates while idle, so it stays
+  current. `Options.MaxIdleDocs` bounds how many idle documents stay resident,
+  evicting the least-recently-idle. Both default to zero (previous behaviour:
+  evict immediately). `Stats` gains `IdleDocuments`.
+- `Options.FlushEvery` compacts a document's persisted log after every N
+  stored updates, bounding log growth without adopter-side scheduling. A
+  store failure backs the retry interval off geometrically; a causally
+  incomplete log is skipped quietly and retried at the next threshold.
+- A cross-language fixture scenario locking V2 decode of GC structs that
+  precede later live content — the data-loss class reearth/ygo fixed in their
+  v1.49.1, which ygo was verified clean against.
+
+### Changed
+- `modernc.org/sqlite` v1.56.0 → v1.57.0.
+
 ## [1.16.0] - 2026-08-13
 
 Supported toolchain, current dependencies.
@@ -620,6 +670,7 @@ Core NATS backplane adapter.
 - Delivery is core-NATS at-most-once. Where a dropped delta is unacceptable,
   use `NewJetStream` (v0.2.0) instead.
 
+[1.17.0]: https://github.com/Deln0r/ygo/releases/tag/v1.17.0
 [1.16.0]: https://github.com/Deln0r/ygo/releases/tag/v1.16.0
 [1.15.0]: https://github.com/Deln0r/ygo/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Deln0r/ygo/releases/tag/v1.14.0
