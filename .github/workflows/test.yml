@@ -127,10 +127,18 @@ jobs:
           if go list -m all | grep -qiE 'mautrix|zerolog|tidwall'; then
             echo "core module now depends on the Matrix transport's tree"; exit 1
           fi
-      # NOTE: the sibling NATS job also builds against the pinned core with
-      # the replace dropped, to catch interface drift. Added here once
-      # v1.18.0 - the first core release carrying ygo.ValidateUpdate, which
-      # this module calls - is resolvable from the module proxy.
+      - name: build against the pinned core (drop replace) to catch interface drift
+        working-directory: integration/matrix
+        run: |
+          # The tests above build through the local replace (HEAD). This step
+          # builds against the exact core version an external user resolves
+          # (the `require`), so a core change at HEAD that outpaces the pin
+          # fails CI instead of an adopter's build. The module calls
+          # ygo.ValidateUpdate, so the pin must name a release that has it.
+          go mod edit -dropreplace github.com/Deln0r/ygo
+          go mod tidy
+          go build ./...
+          git checkout -- go.mod go.sum
       - name: converge two peers through a room
         working-directory: integration/matrix
         # Exits non-zero unless both peers agree AND both edits survived.
