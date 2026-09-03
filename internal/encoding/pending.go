@@ -213,6 +213,26 @@ func itemMissingDep(bs *store.BlockStore, it *block.Item) bool {
 	if it.Parent.Kind == block.ParentID && !bs.Contains(it.Parent.ID) {
 		return true
 	}
+	// A hole in the item's OWN client sequence is a missing dependency
+	// too, even when every explicit reference resolves. An item that
+	// starts above the clock we have for its client (a delta published
+	// against a state vector we never received, or simply an update
+	// delivered out of order) has an implicit dependency on the blocks
+	// filling that hole: yrs `Update::integrate` and yjs
+	// `integrateStructs` both hold such a struct back and record the
+	// gap in `missing`.
+	//
+	// Integrating it anyway pushes the store clock past the hole, and
+	// PushBlock's precondition (store.go: "item.ID.Clock ==
+	// s.GetClock(...)") is broken. The damage is silent and permanent:
+	// the blocks that would have filled the hole arrive later, read as
+	// clock-below-known, and are dropped as already-known. Measured
+	// against yjs 13.6.32 before the fix, one client editing two roots
+	// and publishing only the second delta lost the first root's text
+	// outright when the deltas arrived newest-first.
+	if it.ID.Clock > bs.GetClock(it.ID.Client) {
+		return true
+	}
 	return false
 }
 
@@ -279,6 +299,14 @@ func (p *Pending) Drain(txn *doc.TransactionMut) int {
 			switch b.Kind {
 			case WireBlockGC:
 				if bs.Contains(b.ID) {
+					continue
+				}
+				if b.ID.Clock > bs.GetClock(c) {
+					// Gap ahead of what we have for this client;
+					// PushGC has PushBlock's monotonicity
+					// precondition, so queue rather than punch a
+					// hole. Same reasoning as itemMissingDep.
+					remaining = append(remaining, b)
 					continue
 				}
 				bs.PushGC(c, b.ID.Clock, b.ID.Clock+b.Len-1)

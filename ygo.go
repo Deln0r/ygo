@@ -20,6 +20,7 @@ package ygo
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/Deln0r/ygo/internal/awareness"
 	"github.com/Deln0r/ygo/internal/block"
@@ -424,6 +425,34 @@ func ApplyUpdate(d *Doc, raw []byte) error {
 // transport metadata.
 func ApplyUpdateV2(d *Doc, raw []byte) error {
 	return encoding.ApplyUpdateV2(d, raw)
+}
+
+// ValidateUpdate reports whether raw is a well-formed V1 update that is
+// consumed in its entirety, WITHOUT integrating it into any document. Use it
+// on updates that arrive from somewhere you do not control.
+//
+// It is stricter than ApplyUpdate in the one way that matters for untrusted
+// input: ApplyUpdate decodes a single update and silently ignores whatever
+// bytes follow it. So `append(a, b...)` applies only a, loses b, and reports
+// no error anywhere - the reference implementation (yjs 13.6.32, measured)
+// behaves the same, which is why ApplyUpdate keeps that behaviour and this
+// separate check exists. Combine updates with MergeUpdates, never with
+// append.
+//
+// Validating costs a decode, not an integrate: it does not build a document,
+// so it is safe to run on input before deciding whether to accept it.
+//
+// V1 only. The V2 decoder does not report a trailing remainder, so there is
+// no equivalent strict check for V2 bytes.
+func ValidateUpdate(raw []byte) error {
+	_, rest, err := encoding.DecodeUpdate(raw)
+	if err != nil {
+		return fmt.Errorf("ygo: invalid update: %w", err)
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("ygo: invalid update: %d trailing byte(s) after one complete update (concatenated updates are not a valid update - use MergeUpdates)", len(rest))
+	}
+	return nil
 }
 
 // HasPending reports whether d has any queued items awaiting
