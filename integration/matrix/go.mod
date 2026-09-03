@@ -9,7 +9,7 @@ require (
 	// consumers, so this line is what an adopter actually resolves, and
 	// pinning anything older publishes a module that cannot compile
 	// (measured: `undefined: ygo.ValidateUpdate`).
-	github.com/Deln0r/ygo v1.18.0
+	github.com/Deln0r/ygo v1.18.1
 	maunium.net/go/mautrix v0.30.0
 )
 

@@ -218,9 +218,17 @@ type SyncResult struct {
 	Applied int
 	// Skipped counts events of our type that could not be used: a content
 	// that is not a JSON object, an unknown format, an oversized payload,
-	// undecodable base64, or an update the parser rejected. Room content is untrusted input; a bad event is skipped, not
-	// fatal, so one malformed publisher cannot deny the room to everyone
-	// else.
+	// undecodable base64, or an update the parser rejected. A bad event is
+	// skipped rather than fatal, so one malformed publisher cannot deny the
+	// READ PATH to everyone else.
+	//
+	// That is availability, not integrity, and the difference matters. Yjs
+	// updates do not authenticate deletes: anyone who can publish to the room
+	// can tombstone another peer's content or push a client's clock past its
+	// own writes, in a handful of legal bytes, exactly as they could by making
+	// an ordinary edit. The reference implementation behaves the same way
+	// (measured). A room carrying a ygo document is therefore as trusted as
+	// the document itself - invite accordingly.
 	Skipped int
 }
 

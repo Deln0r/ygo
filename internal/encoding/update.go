@@ -276,6 +276,31 @@ func checkDecodeCount(count uint64, remaining int) error {
 	return nil
 }
 
+// MaxClock is the largest clock this decoder accepts from the wire.
+//
+// It is Number.MAX_SAFE_INTEGER, because the reference implementation keeps
+// clocks in JavaScript numbers and cannot represent anything above it: a yjs
+// peer handed a larger value throws "Integer out of Range" (measured against
+// yjs 13.6.32). Accepting what the reference refuses buys nothing and lets a
+// sender push a client's clock space somewhere no honest peer can follow.
+//
+// This is a fidelity bound, not a safety guarantee. A clock range BELOW it is
+// still enough for a room member to silence another client or tombstone their
+// content - yjs behaves identically, measured both ways - because the Yjs
+// update format does not authenticate deletes. See the package documentation
+// on what that means for untrusted transports.
+const MaxClock = uint64(1)<<53 - 1
+
+// checkClockRange rejects a wire-supplied run that would place a clock beyond
+// what the reference implementation can represent. Overflow-safe: the sum is
+// checked without computing it.
+func checkClockRange(start, length uint64) error {
+	if start > MaxClock || length > MaxClock || start > MaxClock-length {
+		return fmt.Errorf("%w: clock range %d+%d exceeds the %d-clock space the wire format can represent", lib0.ErrTruncated, start, length, MaxClock)
+	}
+	return nil
+}
+
 func DecodeUpdate(buf []byte) (*Update, []byte, error) {
 	clientCount, n, err := lib0.ReadVarUint(buf)
 	if err != nil {
@@ -360,10 +385,16 @@ func decodeBlock(buf []byte, id block.ID) (Block, []byte, error) {
 		if err != nil {
 			return Block{}, buf, err
 		}
+		if err := checkClockRange(id.Clock, l); err != nil {
+			return Block{}, buf, err
+		}
 		return Block{Kind: WireBlockGC, ID: id, Len: l}, buf[n:], nil
 	case 10: // BLOCK_SKIP_REF_NUMBER
 		l, n, err := lib0.ReadVarUint(buf)
 		if err != nil {
+			return Block{}, buf, err
+		}
+		if err := checkClockRange(id.Clock, l); err != nil {
 			return Block{}, buf, err
 		}
 		return Block{Kind: WireBlockSkip, ID: id, Len: l}, buf[n:], nil

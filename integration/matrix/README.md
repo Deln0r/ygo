@@ -76,7 +76,9 @@ old events unreadable: a peer skips formats it does not know instead of failing
 the sync.
 
 Updates are validated **in both directions**, with `ygo.ValidateUpdate`, which
-parses without integrating:
+parses without integrating. This keeps malformed input from breaking a sync; it
+is not a defence against a hostile room member, who needs no malformed input at
+all — see the trust-model entry under Limits:
 
 - **On publish**, so a corrupt local export fails for the peer that produced it
   rather than becoming every reader's problem. This also catches two updates
@@ -176,6 +178,16 @@ instead once a document gets serious.
   not a permanent failure — but it is deliberately not swallowed, because the
   same error is what a wrong room ID produces, and a quiet empty success there
   is indistinguishable from a healthy document.
+- **Everyone who can publish is trusted with the content.** This is the one
+  limit that is not about being thin, and it is not fixable here. Yjs updates
+  do not authenticate deletes: any room member can tombstone another peer's
+  text or push a client's clock past its own writes, in a dozen legal bytes,
+  exactly as they could by making an ordinary edit — and the deletion
+  propagates to everyone. The reference implementation behaves identically,
+  measured in both directions. Validating and skipping bad events protects the
+  *read path* from one broken publisher; nothing here protects document
+  *content* from a room member who means harm. Treat room membership as write
+  access to the document, because that is what it is.
 - **Server-side denial is out of scope.** A member who can make a homeserver
   fail can deny the room; the `/messages` fallback above covers the case where
   `/sync` alone is broken, and nothing here covers a server that is down.

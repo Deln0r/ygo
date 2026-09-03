@@ -14,6 +14,43 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.18.1] - 2026-09-04
+
+Wire-format fidelity at the top of the clock space, and an honest note about
+what update validation does and does not buy.
+
+**Upgrade impact** - none for updates produced by ygo or yjs. The decoder now
+refuses a GC run, a Skip run or a delete range naming a clock above
+`Number.MAX_SAFE_INTEGER`. No yjs peer can emit one: handed such a value the
+reference implementation throws `Integer out of Range` (measured against yjs
+13.6.32), so this only closes the gap where ygo accepted what the reference
+refuses. Runs BELOW that limit are still accepted, because yjs accepts them and
+diverging in that direction would break interoperability.
+
+### Fixed
+
+- GC and Skip block lengths and delete-set ranges are bounded to the clock
+  space the wire format can represent. A hand-built update declaring a run of
+  2^64-1 was previously accepted, in twelve bytes, and pushed a client's clock
+  space to the end of the range.
+
+### Documented
+
+- **Yjs updates do not authenticate deletes, and no amount of input validation
+  changes that.** Anyone who can hand a document an update can tombstone
+  another client's content and stop that client from being heard again - with a
+  dozen legal bytes, or equally by making an ordinary edit that deletes their
+  text. The deletion then propagates to every peer. The reference
+  implementation behaves identically; this was measured in both directions,
+  with the victim's client ID pinned on each side. `TestUpdateFormat_DeletesAreNotAuthenticated`
+  keeps the claim honest, and will fail if ygo ever diverges here.
+
+  The practical consequence, now stated where it belongs rather than implied
+  away: skipping malformed input protects a reader's *availability*, not the
+  document's *integrity*. Anywhere ygo accepts updates from parties you do not
+  trust with the document itself - the Matrix transport most of all, where
+  room membership is write access - that distinction is the whole story.
+
 ## [1.18.0] - 2026-09-03
 
 A data-loss fix in out-of-order update handling, and the strict validator the
@@ -752,6 +789,18 @@ The Matrix transport is a separate Go module
 pull mautrix and its transitive tree into a build that only wants the CRDT. It
 is versioned independently of ygo itself.
 
+## [matrix/0.1.1] - 2026-09-04
+
+Documentation only; no behaviour change.
+
+### Documented
+- The untrusted-input section said a bad publisher "cannot deny the room to
+  everybody else". That is true of the read path and only of the read path: a
+  room member needs no malformed input at all to destroy the document, because
+  Yjs deletes are unauthenticated (see the 1.18.1 entry). The module README now
+  carries that as a first-class limit - room membership is write access to the
+  document - and `SyncResult.Skipped` says which of the two it protects.
+
 ## [matrix/0.1.0] - 2026-09-03
 
 Carry ygo updates over a Matrix room, with no ygo server involved.
@@ -792,6 +841,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.18.1]: https://github.com/Deln0r/ygo/releases/tag/v1.18.1
 [1.18.0]: https://github.com/Deln0r/ygo/releases/tag/v1.18.0
 [1.17.0]: https://github.com/Deln0r/ygo/releases/tag/v1.17.0
 [1.16.0]: https://github.com/Deln0r/ygo/releases/tag/v1.16.0
@@ -817,4 +867,5 @@ not tested (the compose stack runs a single homeserver).
 [0.9.0]: https://github.com/Deln0r/ygo/releases/tag/v0.9.0
 [nats/0.2.0]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.2.0
 [nats/0.1.0]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.1.0
+[matrix/0.1.1]: https://github.com/Deln0r/ygo/releases/tag/integration/matrix/v0.1.1
 [matrix/0.1.0]: https://github.com/Deln0r/ygo/releases/tag/integration/matrix/v0.1.0

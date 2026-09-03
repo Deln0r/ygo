@@ -198,6 +198,9 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 				return nil, buf, err
 			}
 			buf = buf[n:]
+			if err := checkClockRange(start, length); err != nil {
+				return nil, buf, err
+			}
 			ranges[j] = Range{Start: start, Length: length}
 		}
 		s.clients[clientID] = ranges
