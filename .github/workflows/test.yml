@@ -99,6 +99,52 @@ jobs:
             GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist ./client ./server ./internal/...
           done
 
+  matrix-transport:
+    name: matrix transport (real Dendrite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - name: start Dendrite
+        # A real homeserver, not the unit double: the double is written by the
+        # same hand as the client, so only the real server can refute an
+        # assumption both of them share. Without this job "works with Matrix"
+        # would be a promise rather than a fact.
+        working-directory: integration/matrix
+        run: ./testdata/up.sh
+      - name: test the Matrix transport
+        working-directory: integration/matrix
+        run: |
+          go mod download
+          go vet ./...
+          go test -race ./...
+      - name: the core must not have gained the Matrix dependency tree
+        run: |
+          # The whole point of a nested module is that importing ygo does not
+          # drag mautrix in. This is the assertion, not the intention.
+          if go list -m all | grep -qiE 'mautrix|zerolog|tidwall'; then
+            echo "core module now depends on the Matrix transport's tree"; exit 1
+          fi
+      # NOTE: the sibling NATS job also builds against the pinned core with
+      # the replace dropped, to catch interface drift. That step is absent
+      # here on purpose: this module calls ygo.ValidateUpdate, which no core
+      # release contains yet, so the drop-replace build cannot pass until the
+      # pin in integration/matrix/go.mod is bumped. Add it with that bump.
+      - name: converge two peers through a room
+        working-directory: integration/matrix
+        # Exits non-zero unless both peers agree AND both edits survived.
+        run: go run ./cmd/matrixdemo
+      - name: dendrite logs on failure
+        if: failure()
+        working-directory: integration/matrix
+        run: docker compose -f testdata/docker-compose.yml logs --tail=100
+      - name: stop Dendrite
+        if: always()
+        working-directory: integration/matrix
+        run: ./testdata/down.sh
+
   lint:
     name: lint
     runs-on: ubuntu-latest

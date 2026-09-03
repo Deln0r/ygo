@@ -1,0 +1,54 @@
+# Real Dendrite homeserver for the Matrix transport's integration test and
+# demo. A unit-test double cannot prove interoperability - it is written by the
+# same hand as the client, so it shares the client's assumptions - which is why
+# "works with Matrix" is demonstrated here against the real server.
+#
+# What the real server actually does with pagination tokens, measured on
+# 2026-09-03 and asserted by TestDendrite_TokenHandling: it REJECTS a malformed
+# token with 400 M_INVALID_PARAM, and ACCEPTS a literal empty one with 200 and
+# the newest page. The accepting case is the dangerous one, because success-
+# looking truncation is invisible; the transport therefore never sends an empty
+# token on its main path, and the unit double refuses one outright as a house
+# rule.
+#
+# The image tag deliberately floats. A digest pin would freeze a measurement
+# that is already a year stale the moment it is written; the token test above
+# fails the day the behaviour changes, which is the thing actually worth
+# having.
+#
+# The explicit project name matters: without it Compose derives the project
+# from the directory name, and on a shared machine this stack would collide
+# with another checkout's.
+name: ygo-matrix-it
+
+services:
+  dendrite:
+    image: ghcr.io/element-hq/dendrite-monolith:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -f /data/matrix_key.pem ]; then
+          /usr/bin/generate-keys --private-key /data/matrix_key.pem
+        fi
+        if [ ! -f /data/dendrite.yaml ]; then
+          # generate-config emits a RELATIVE private_key path, which Dendrite
+          # resolves against its own default config dir (/etc/dendrite) and
+          # not against --config. Pin it to where the key actually is.
+          /usr/bin/generate-config -ci -dir /data -server localhost \
+            | sed "s#^  private_key: matrix_key.pem#  private_key: /data/matrix_key.pem#" \
+            > /data/dendrite.yaml
+        fi
+        /usr/bin/dendrite --config /data/dendrite.yaml \
+          --really-enable-open-registration \
+          --http-bind-address 0.0.0.0:8008
+    ports:
+      - "8008:8008"
+    tmpfs:
+      - /data
+    healthcheck:
+      # Readiness is the client API answering, not the container starting.
+      test: ["CMD", "wget", "-qO-", "http://localhost:8008/_matrix/client/versions"]
+      interval: 1s
+      timeout: 3s
+      retries: 60

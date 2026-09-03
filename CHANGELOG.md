@@ -13,6 +13,50 @@ The optional NATS backplane adapter lives in the nested module
 `server/backplane/nats` and is versioned independently; its releases are listed
 at the end of this file.
 
+## [Unreleased]
+
+Federated transport over Matrix, and the core fix it uncovered.
+
+**Upgrade impact** — an update whose first clock sits above what the receiving
+document knows for that client is now held in the pending buffer until the gap
+is filled, instead of being integrated immediately. This is the yjs and yrs
+behaviour, and it fixes silent, permanent data loss: integrating over the hole
+advanced the store clock past it, so the update that would have filled the hole
+arrived later, read as already-known, and was discarded. Reproduced with one
+client editing two roots and publishing only the second delta — delivered
+newest-first, the first root's text vanished. Code that applies updates in
+causal order is unaffected. Code that applies out-of-order deltas will now see
+`HasPending` report true between the two applies where it previously reported
+false, and will end up with more data, not less.
+
+### Added
+
+- `ygo.ValidateUpdate` — parses a V1 update without integrating it, for callers
+  that accept updates from somewhere they do not control. Stricter than
+  `ApplyUpdate` in the way that matters: `ApplyUpdate` decodes one update and
+  silently ignores whatever bytes follow, so `append(a, b...)` applies only `a`
+  and loses `b` with no error anywhere (yjs 13.6.32 behaves identically, which
+  is why `ApplyUpdate` keeps that behaviour and this is a separate check).
+  Combine updates with `MergeUpdates`, never with `append`.
+- `integration/matrix` — an opt-in nested module carrying ygo updates over a
+  Matrix room, so peers synchronise through a room they share rather than
+  through a server you run. One event type (`dev.ygo.update`), whole update
+  blobs, no state-vector diffing and no server of its own. Room content is
+  treated as untrusted throughout: validated on publish and on read, decoded
+  one event at a time so a single hostile event cannot fail a whole page, an
+  event-size ceiling in both directions, and end-to-end-encrypted rooms refused
+  rather than written to in the clear. Runs in CI against a real Dendrite on
+  every push. See [integration/matrix/README.md](integration/matrix/README.md),
+  which documents the limits — room growth, full re-read per sync, history
+  visibility, redaction — rather than papering over them.
+
+### Fixed
+
+- Updates with a clock gap in their own client sequence are queued instead of
+  integrated, closing the data-loss path described under Upgrade impact. The
+  same guard covers GC ranges, which carried the identical monotonicity
+  precondition.
+
 ## [1.17.0] - 2026-08-29
 
 Compaction integrity, idle keep-warm, automatic log compaction.
