@@ -207,11 +207,14 @@ func (t *Transport) PublishDoc(ctx context.Context, doc *ygo.Doc) (id.EventID, e
 
 // SyncResult reports what one Sync did.
 type SyncResult struct {
-	// Applied is the number of update events merged into the document during
-	// this call. Sync reads the room from the beginning every time, so a
-	// second Sync over an unchanged room reports the same count again - the
-	// number describes the room, not what is new. To learn whether anything
-	// changed, compare ygo.EncodeStateVector(doc) across the call.
+	// Applied is the number of update events accepted and handed to the
+	// document during this call. Note both halves of that: Sync reads the
+	// room from the beginning every time, so a second Sync over an unchanged
+	// room reports the same count again - the number describes the room, not
+	// what is new - and an update whose causal dependencies are not in the
+	// room counts here while sitting in the document's pending buffer rather
+	// than in its content. To learn whether anything actually changed,
+	// compare ygo.EncodeStateVector(doc) across the call.
 	Applied int
 	// Skipped counts events of our type that could not be used: unknown
 	// format, oversized payload, undecodable base64, or an update the parser
@@ -425,8 +428,12 @@ func (t *Transport) mergeEvents(ctx context.Context, events []json.RawMessage, d
 			continue
 		}
 		if err := ygo.ApplyUpdate(doc, update); err != nil {
-			// Validated clean but would not integrate: still untrusted
-			// input, still not fatal for the rest of the room.
+			// Unreachable as the two functions stand: ValidateUpdate above
+			// decodes the same bytes with the same decoder, and ApplyUpdate
+			// can only fail on a decode. Kept because "the validator and the
+			// applier agree" is an invariant of another package, not of this
+			// one, and the cost of being wrong about it is a panic-free
+			// document silently taking bytes nobody checked.
 			out.Skipped++
 			continue
 		}
