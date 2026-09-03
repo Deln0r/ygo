@@ -21,13 +21,20 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/event"
 
 	ygo "github.com/Deln0r/ygo"
 	ymatrix "github.com/Deln0r/ygo/integration/matrix"
 )
 
 func main() {
-	hs := flag.String("homeserver", "http://localhost:8008", "Matrix homeserver base URL")
+	def := "http://localhost:8008"
+	if u := os.Getenv("YGO_MATRIX_HOMESERVER"); u != "" {
+		def = u
+	} else if p := os.Getenv("YGO_MATRIX_PORT"); p != "" {
+		def = "http://localhost:" + p
+	}
+	hs := flag.String("homeserver", def, "Matrix homeserver base URL")
 	flag.Parse()
 
 	if err := run(*hs); err != nil {
@@ -50,7 +57,19 @@ func run(hs string) error {
 		return fmt.Errorf("register bob: %w", err)
 	}
 
-	created, err := alice.CreateRoom(ctx, &mautrix.ReqCreateRoom{Preset: "public_chat", Name: "ygo demo"})
+	empty := ""
+	created, err := alice.CreateRoom(ctx, &mautrix.ReqCreateRoom{
+		Preset: "public_chat",
+		Name:   "ygo demo",
+		// Explicit rather than relying on the preset default: a room set to
+		// history_visibility=joined hands a peer nothing published before it
+		// joined, and the document it rebuilds is quietly partial.
+		InitialState: []*event.Event{{
+			Type:     event.StateHistoryVisibility,
+			StateKey: &empty,
+			Content:  event.Content{Raw: map[string]any{"history_visibility": "shared"}},
+		}},
+	})
 	if err != nil {
 		return fmt.Errorf("create room: %w", err)
 	}

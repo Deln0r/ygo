@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -48,19 +50,40 @@ func peer(t *testing.T, f *fakeHS, clientID uint64, at int, s string) (*ygo.Doc,
 
 // TestFake_RejectsBadTokens keeps the double honest. It must refuse a
 // malformed token (Dendrite does, asserted in TestDendrite_TokenHandling) and,
-// by house rule, an empty one too. If the double ever accepts either, every
-// pagination test below is worthless: the client could be reading one page and
-// calling it the whole room.
+// by house rule, a present-but-empty one. If the double ever accepts either,
+// every pagination test below is worthless.
+//
+// The empty case goes over raw HTTP deliberately: mautrix drops a `from` it
+// considers unset, so asking through the library sends no parameter at all and
+// tests the library rather than the server. This test passed for the wrong
+// reason until the double learned to tell "absent" from "empty".
 func TestFake_RejectsBadTokens(t *testing.T) {
 	f := newFakeHS(t)
-	for _, tok := range []string{"", "garbage"} {
-		_, err := f.client(t).Messages(context.Background(), testRoom, tok, "", mautrix.DirectionBackward, nil, 10)
-		if err == nil {
-			t.Fatalf("double accepted from=%q", tok)
-		}
-		if !strings.Contains(err.Error(), "M_INVALID_PARAM") {
-			t.Fatalf("from=%q: unexpected error %v", tok, err)
-		}
+
+	if _, err := f.client(t).Messages(context.Background(), testRoom, "garbage", "", mautrix.DirectionBackward, nil, 10); err == nil {
+		t.Fatal("double accepted a malformed from-token")
+	} else if !strings.Contains(err.Error(), "M_INVALID_PARAM") {
+		t.Fatalf("malformed token: unexpected error %v", err)
+	}
+
+	resp, err := http.Get(f.srv.URL + "/_matrix/client/v3/rooms/" + url.PathEscape(string(testRoom)) + "/messages?dir=b&limit=10&from=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("double answered %d to a literal empty from-token, want 400", resp.StatusCode)
+	}
+
+	// And the fallback shape - no `from` at all - must be SERVED, the way
+	// Dendrite serves it, or the /sync fallback path could never be exercised.
+	resp2, err := http.Get(f.srv.URL + "/_matrix/client/v3/rooms/" + url.PathEscape(string(testRoom)) + "/messages?dir=b&limit=10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("double answered %d to a missing from-token, want 200 (Dendrite serves it)", resp2.StatusCode)
 	}
 }
 
@@ -616,6 +639,9 @@ func TestSync_SurvivesUndecodableEvent(t *testing.T) {
 	if res.Applied != 2 {
 		t.Fatalf("applied=%d skipped=%d, want 2 applied: the good events either side of the poison must survive", res.Applied, res.Skipped)
 	}
+	if res.Skipped != 1 {
+		t.Fatalf("skipped=%d, want 1: a content that is not a JSON object is one of the shapes Skipped counts", res.Skipped)
+	}
 	if got := textOf(t, reader); len(got) != len("alphabeta") {
 		t.Fatalf("reader text %q; one hostile event cost a legitimate edit", got)
 	}
@@ -655,5 +681,45 @@ func TestSync_SurvivesUndecodableEventInHistory(t *testing.T) {
 	}
 	if got := textOf(t, reader); len(got) != len("alphabetagamma") {
 		t.Fatalf("reader text %q lost an edit to the poison event", got)
+	}
+}
+
+// TestSync_FallsBackToMessagesWhenSyncFails: a single pathological event can
+// break /sync for everyone joined to a room on some servers, while /messages
+// on the same room keeps working. The fallback turns a permanent outage into a
+// slower read, and it is the one path in this package that legitimately asks
+// for a page with no from-token at all.
+func TestSync_FallsBackToMessagesWhenSyncFails(t *testing.T) {
+	f := newFakeHS(t)
+	f.syncWindow = 1
+	f.pageSize = 1
+	ctx := context.Background()
+
+	for i, word := range []string{"aa", "bb", "cc"} {
+		d, tr := peer(t, f, uint64(i+1), 0, word)
+		if _, err := tr.PublishDoc(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Control first: with /sync healthy the room reads normally.
+	reader := ygo.NewDoc()
+	tr, _ := ymatrix.New(f.client(t), testRoom)
+	if res, err := tr.Sync(ctx, reader); err != nil || res.Applied != 3 {
+		t.Fatalf("control: applied=%v err=%v, want 3 and nil", res.Applied, err)
+	}
+
+	f.syncFails = true
+	broken := ygo.NewDoc()
+	tr2, _ := ymatrix.New(f.client(t), testRoom)
+	res, err := tr2.Sync(ctx, broken)
+	if err != nil {
+		t.Fatalf("sync failed instead of falling back to /messages: %v", err)
+	}
+	if res.Applied != 3 {
+		t.Fatalf("applied=%d via the fallback, want 3: the fallback must read the whole room, not one page", res.Applied)
+	}
+	if got := textOf(t, broken); len(got) != 6 {
+		t.Fatalf("fallback read %q, want all three edits", got)
 	}
 }

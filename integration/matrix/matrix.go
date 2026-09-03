@@ -216,9 +216,9 @@ type SyncResult struct {
 	// than in its content. To learn whether anything actually changed,
 	// compare ygo.EncodeStateVector(doc) across the call.
 	Applied int
-	// Skipped counts events of our type that could not be used: unknown
-	// format, oversized payload, undecodable base64, or an update the parser
-	// rejected. Room content is untrusted input; a bad event is skipped, not
+	// Skipped counts events of our type that could not be used: a content
+	// that is not a JSON object, an unknown format, an oversized payload,
+	// undecodable base64, or an update the parser rejected. Room content is untrusted input; a bad event is skipped, not
 	// fatal, so one malformed publisher cannot deny the room to everyone
 	// else.
 	Skipped int
@@ -259,7 +259,7 @@ func (t *Transport) Sync(ctx context.Context, doc *ygo.Doc) (SyncResult, error) 
 		// pagination alone turns a permanent outage into a slower read. If
 		// the fallback cannot start either, the original error is the more
 		// informative one to report.
-		fallback, err := t.newestPageToken(ctx)
+		fallback, err := t.readNewestPage(ctx, doc, seen, &out)
 		if err != nil {
 			return out, syncErr
 		}
@@ -322,13 +322,22 @@ func (t *Transport) readSyncWindow(ctx context.Context, doc *ygo.Doc, seen map[i
 	return room.Timeline.PrevBatch, nil
 }
 
-// newestPageToken asks /messages for the newest page without a from-token, to
-// obtain a token to page backward from when /sync is unusable. Dendrite
-// accepts a missing from-token and answers with the newest page (measured
-// 2026-09-03); servers that refuse simply make this fallback unavailable.
-func (t *Transport) newestPageToken(ctx context.Context) (string, error) {
+// readNewestPage asks /messages for the newest page without a from-token, when
+// /sync is unusable. It MERGES that page and returns the token to continue
+// backward from - an earlier version returned only the token and dropped the
+// events it had already fetched, losing the newest update in the room every
+// time the fallback ran.
+//
+// Dendrite treats a missing from-token as "start at the newest" and answers
+// 200 with a page and a continuation token (measured 2026-09-03); servers that
+// refuse simply make this fallback unavailable, and the caller gets the
+// original /sync error instead.
+func (t *Transport) readNewestPage(ctx context.Context, doc *ygo.Doc, seen map[id.EventID]struct{}, out *SyncResult) (string, error) {
 	page, err := t.messages(ctx, "")
 	if err != nil {
+		return "", err
+	}
+	if err := t.mergeEvents(ctx, page.Chunk, doc, seen, out); err != nil {
 		return "", err
 	}
 	if page.End == "" {

@@ -3,6 +3,7 @@ package matrix_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +28,19 @@ import (
 // can refute an assumption both of them share. Skipped unless a homeserver is
 // reachable, so `go test ./...` stays useful without Docker; CI always has one
 // and therefore always runs them.
-const homeserverURL = "http://localhost:8008"
+// homeserverURL is overridable so the suite cannot silently run against some
+// other homeserver that happens to hold port 8008 on a shared machine - a
+// neighbouring project's Dendrite answers /versions exactly like ours, and the
+// tests would register accounts and create rooms on it.
+var homeserverURL = func() string {
+	if u := os.Getenv("YGO_MATRIX_HOMESERVER"); u != "" {
+		return u
+	}
+	if p := os.Getenv("YGO_MATRIX_PORT"); p != "" {
+		return "http://localhost:" + p
+	}
+	return "http://localhost:8008"
+}()
 
 func requireHomeserver(t *testing.T) {
 	t.Helper()
@@ -197,10 +210,17 @@ func TestDendrite_TwoPeersConverge(t *testing.T) {
 // imitation is worse than none.
 //
 // MEASURED, not assumed, on 2026-09-03: Dendrite REJECTS a malformed token
-// with 400 M_INVALID_PARAM, and ACCEPTS a literal empty one with 200. The
-// accepting case is the dangerous one - it looks like success while returning
-// a single page - which is why Sync pages from the /sync prev_batch token
-// instead, and why the double refuses empty tokens outright.
+// with 400 M_INVALID_PARAM, and treats a literal EMPTY one as absent - 200,
+// the newest page, AND a continuation token that leads to the rest. So it does
+// not truncate; a client could in fact page a whole room from an empty token
+// here.
+//
+// Sync still does not do that on its main path, for portability rather than
+// safety: nothing in the spec obliges a server to read an empty `from` as
+// "start at the newest", and the /sync prev_batch token is well defined
+// everywhere. The one place the transport does rely on it is the fallback for
+// when /sync is unusable, which is why this test asserts the continuation
+// token exists rather than just the status code.
 //
 // The empty case goes over raw HTTP on purpose: every client library here,
 // mautrix included, drops a `from` it considers unset, so calling through one
@@ -211,9 +231,14 @@ func TestDendrite_TokenHandling(t *testing.T) {
 	requireHomeserver(t)
 	ctx := context.Background()
 	alice := register(t, uniq("tok"))
-	created, err := alice.CreateRoom(ctx, &mautrix.ReqCreateRoom{Preset: "public_chat"})
+	created, err := alice.CreateRoom(ctx, &mautrix.ReqCreateRoom{Preset: "public_chat", InitialState: sharedHistory()})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := alice.SendText(ctx, created.RoomID, fmt.Sprintf("m%d", i)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := alice.Messages(ctx, created.RoomID, "garbage", "", mautrix.DirectionBackward, nil, 10); err == nil {
@@ -222,16 +247,32 @@ func TestDendrite_TokenHandling(t *testing.T) {
 		t.Fatalf("malformed token rejected with an unexpected error: %v", err)
 	}
 
-	status, body := rawGET(t, alice, fmt.Sprintf("/_matrix/client/v3/rooms/%s/messages?dir=b&limit=10&from=",
+	status, body := rawGET(t, alice, fmt.Sprintf("/_matrix/client/v3/rooms/%s/messages?dir=b&limit=2&from=",
 		url.PathEscape(string(created.RoomID))))
 	if status != http.StatusOK {
 		t.Fatalf("Dendrite answered %d to a literal empty from-token (body %s).\n"+
-			"This reverses the measurement the double and the README are built on. "+
-			"Neither the transport nor its safety depends on the old answer - Sync never sends an empty token - "+
-			"but the comments claiming Dendrite accepts one are now wrong and must be corrected.", status, body)
+			"This reverses the measurement the double and the README are built on. The transport's MAIN path "+
+			"never sends an empty token, but its /sync fallback does, so a change here disables that fallback "+
+			"and every comment describing this behaviour must be corrected.", status, body)
 	}
-	if !strings.Contains(body, "\"chunk\"") {
-		t.Fatalf("empty from-token returned 200 without a chunk: %s", body)
+	var page struct {
+		Chunk []json.RawMessage `json:"chunk"`
+		End   string            `json:"end"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		t.Fatalf("empty from-token returned unparseable body: %s", body)
+	}
+	if len(page.Chunk) == 0 {
+		t.Fatalf("empty from-token returned 200 with an empty chunk: %s", body)
+	}
+	if page.End == "" {
+		t.Fatal("empty from-token returned a page with NO continuation token; the /sync fallback in Sync cannot page past the newest events without one")
+	}
+	// And the token it hands out really does lead somewhere.
+	status2, body2 := rawGET(t, alice, fmt.Sprintf("/_matrix/client/v3/rooms/%s/messages?dir=b&limit=2&from=%s",
+		url.PathEscape(string(created.RoomID)), url.QueryEscape(page.End)))
+	if status2 != http.StatusOK {
+		t.Fatalf("continuation token from an empty from-token answered %d: %s", status2, body2)
 	}
 }
 
@@ -315,15 +356,19 @@ func TestDendrite_ThirdPeerReadsHistory(t *testing.T) {
 
 var _ = id.RoomID("")
 
-// TestDendrite_HostileEventInRealRoom: the untrusted-input claim, against a
-// real homeserver rather than the double. A room member posts an event of our
-// type whose `content` is a string instead of an object - the server stores
-// and serves it without complaint - and a legitimate update published
-// afterwards must still arrive.
+// TestDendrite_HostileEventInRealRoom records, by measurement, how REACHABLE
+// the hostile shape actually is through a real homeserver's front door.
 //
-// The unit test for this uses a hand-written response; this one proves the
-// server really does hand such an event back, so the tolerance is not
-// defending against an imaginary shape.
+// Measured 2026-09-03: Dendrite refuses an event whose `content` is not an
+// object with M_BAD_JSON, so this test SKIPS - and the skip is the result. A
+// member of a Dendrite room cannot post the shape that breaks a whole-response
+// decode; it would arrive from another server implementation, over federation,
+// or from a server-side defect. The client-side tolerance is kept regardless,
+// because the cost of being wrong about reachability is losing the room, and
+// TestSync_SurvivesUndecodableEvent covers that with a hand-written response.
+//
+// If a future Dendrite starts accepting it, this test stops skipping and
+// asserts that a legitimate update published afterwards still arrives.
 func TestDendrite_HostileEventInRealRoom(t *testing.T) {
 	requireHomeserver(t)
 	ctx := context.Background()
@@ -369,5 +414,67 @@ func TestDendrite_HostileEventInRealRoom(t *testing.T) {
 	_, got := syncFresh(t, tr, len("survivor"))
 	if got != "survivor" {
 		t.Fatalf("read %q back from a room containing one hostile event; a single bad publisher must not deny the room", got)
+	}
+}
+
+// TestDendrite_EncryptedRoom pins the measurement that justifies refusing
+// encrypted rooms outright, against the real server rather than in prose.
+//
+// Two halves. Ours: Publish and Sync must both return ErrRoomEncrypted. The
+// server's: a plaintext event posted into that same room is ACCEPTED, with a
+// normal event ID and no complaint. The second half is the reason the first
+// exists - nothing about the send path reveals the mistake, so a transport
+// that does not check would put document contents in the clear in a room whose
+// members were promised otherwise. The day Dendrite starts rejecting it, this
+// test says so instead of leaving a stale claim in three comments.
+func TestDendrite_EncryptedRoom(t *testing.T) {
+	requireHomeserver(t)
+	ctx := context.Background()
+
+	alice := register(t, uniq("enc"))
+	empty := ""
+	created, err := alice.CreateRoom(ctx, &mautrix.ReqCreateRoom{
+		Preset: "public_chat",
+		InitialState: []*event.Event{{
+			Type:     event.StateEncryption,
+			StateKey: &empty,
+			Content:  event.Content{Raw: map[string]any{"algorithm": "m.megolm.v1.aes-sha2"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create encrypted room: %v", err)
+	}
+
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 606})
+	txt := ygo.NewText(d, "t")
+	txn := d.WriteTxn()
+	if err := txt.Insert(txn, 0, "secret"); err != nil {
+		t.Fatal(err)
+	}
+	txn.Commit()
+
+	tr, err := ymatrix.New(alice, created.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.PublishDoc(ctx, d); !errors.Is(err, ymatrix.ErrRoomEncrypted) {
+		t.Fatalf("publish into an encrypted room: err=%v, want ErrRoomEncrypted", err)
+	}
+	tr2, _ := ymatrix.New(alice, created.RoomID)
+	if _, err := tr2.Sync(ctx, ygo.NewDoc()); !errors.Is(err, ymatrix.ErrRoomEncrypted) {
+		t.Fatalf("sync on an encrypted room: err=%v, want ErrRoomEncrypted", err)
+	}
+
+	// The server half of the measurement.
+	resp, err := alice.SendMessageEvent(ctx, created.RoomID, ymatrix.EventType,
+		map[string]any{"format": ymatrix.FormatV1, "payload": "AA=="})
+	if err != nil {
+		t.Logf("NOTE: this Dendrite REFUSED a plaintext event in an encrypted room (%v). "+
+			"The refusal in Transport is now belt-and-braces rather than the only line of defence; "+
+			"the comments in matrix.go and README.md that cite this measurement are stale and must be corrected.", err)
+		return
+	}
+	if resp.EventID == "" {
+		t.Fatal("plaintext publish into an encrypted room returned no event ID and no error")
 	}
 }

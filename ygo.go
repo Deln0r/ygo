@@ -403,9 +403,15 @@ func EncodeDiffV2(d *Doc, remoteSVBytes []byte) ([]byte, error) {
 }
 
 // ApplyUpdate decodes raw and integrates it into d. Items whose
-// dependencies the local store has not yet seen queue in the
-// per-doc pending buffer and drain automatically on subsequent
-// ApplyUpdate calls that satisfy them.
+// dependencies the local store has not yet seen - an unseen Origin,
+// RightOrigin or Parent, or a gap in the item's own client clock -
+// queue in the per-doc pending buffer and drain automatically on
+// subsequent ApplyUpdate calls that satisfy them.
+//
+// It decodes ONE update and ignores any bytes after it, so a buffer
+// holding two appended updates applies only the first and loses the
+// second with no error (yjs behaves identically). Run ValidateUpdate
+// first on anything you did not encode yourself.
 //
 // Use HasPending / MissingSV to inspect the queue.
 func ApplyUpdate(d *Doc, raw []byte) error {
@@ -417,19 +423,24 @@ func ApplyUpdate(d *Doc, raw []byte) error {
 // missing causal dependencies queue silently and drain on
 // subsequent ApplyUpdate / ApplyUpdateV2 calls.
 //
-// V1 and V2 are NOT wire-interchangeable. Calling ApplyUpdateV2
-// on V1 bytes (or ApplyUpdate on V2 bytes) is undefined behaviour
-// — either errors loudly or yields a semantically-wrong Update
-// that fails integrate. Per the docs there is no autodetect; the
-// caller must know which version they have via the surrounding
-// transport metadata.
+// Same trailing-byte behaviour as ApplyUpdate: one update is read
+// and the rest of the buffer is ignored. There is no strict
+// validator for V2 bytes, because the V2 decoder does not report a
+// remainder - so for V2 the check has to be "I encoded this myself".
+//
+// V1 and V2 are NOT wire-interchangeable, and the two mistakes fail
+// differently. ApplyUpdateV2 on V1 bytes errors loudly. ApplyUpdate
+// on V2 bytes does NOT: the V1 decoder reads the V2 prefix as a
+// complete, empty update and returns nil, so the call is a silent
+// no-op (measured). There is no autodetect; the caller must know
+// which version they have via the surrounding transport metadata.
 func ApplyUpdateV2(d *Doc, raw []byte) error {
 	return encoding.ApplyUpdateV2(d, raw)
 }
 
-// ValidateUpdate reports whether raw is a well-formed V1 update that is
-// consumed in its entirety, WITHOUT integrating it into any document. Use it
-// on updates that arrive from somewhere you do not control.
+// ValidateUpdate returns an error unless raw is a well-formed V1 update that
+// is consumed in its entirety, WITHOUT integrating it into any document. Use
+// it on updates that arrive from somewhere you do not control.
 //
 // It is stricter than ApplyUpdate in the one way that matters for untrusted
 // input: ApplyUpdate decodes a single update and silently ignores whatever
@@ -437,22 +448,34 @@ func ApplyUpdateV2(d *Doc, raw []byte) error {
 // no error anywhere - the reference implementation (yjs 13.6.32, measured)
 // behaves the same, which is why ApplyUpdate keeps that behaviour and this
 // separate check exists. Combine updates with MergeUpdates, never with
-// append.
+// append. Note the boundary: MergeUpdates returns nil for an empty batch, and
+// nil is not a valid update, so guard the length before validating.
 //
-// Validating costs a decode, not an integrate: it does not build a document,
-// so it is safe to run on input before deciding whether to accept it.
+// Validating costs a decode, not an integrate: it does not build a document
+// or run conflict resolution. It does allocate in proportion to the input, so
+// a network-facing caller should bound the payload size before calling rather
+// than treating this as a free filter on unbounded bytes.
 //
 // V1 only. The V2 decoder does not report a trailing remainder, so there is
-// no equivalent strict check for V2 bytes.
+// no equivalent strict check for V2 bytes; passing V2 bytes here is reported
+// as such rather than misdiagnosed.
 func ValidateUpdate(raw []byte) error {
-	_, rest, err := encoding.DecodeUpdate(raw)
+	upd, rest, err := encoding.DecodeUpdate(raw)
 	if err != nil {
 		return fmt.Errorf("ygo: invalid update: %w", err)
 	}
-	if len(rest) > 0 {
-		return fmt.Errorf("ygo: invalid update: %d trailing byte(s) after one complete update (concatenated updates are not a valid update - use MergeUpdates)", len(rest))
+	if len(rest) == 0 {
+		return nil
 	}
-	return nil
+	// A V2 update starts with bytes a V1 decoder happily reads as a complete
+	// but EMPTY update, so without this the caller is told their V2 bytes are
+	// "concatenated updates" and pointed at MergeUpdates, which cannot help.
+	if len(upd.Blocks) == 0 {
+		if _, v2err := encoding.DecodeUpdateV2(raw); v2err == nil {
+			return fmt.Errorf("ygo: invalid update: these are V2 wire bytes, not V1 (the V1 decoder read them as an empty update with %d trailing byte(s)); use ApplyUpdateV2, and note there is no strict validator for V2", len(rest))
+		}
+	}
+	return fmt.Errorf("ygo: invalid update: %d trailing byte(s) after one complete update (concatenated updates are not a valid update - use MergeUpdates)", len(rest))
 }
 
 // HasPending reports whether d has any queued items awaiting

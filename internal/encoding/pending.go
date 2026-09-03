@@ -129,6 +129,17 @@ func (p *Pending) BlockCount() int {
 // that target, and the SV convention is "the smallest clock NOT
 // yet seen". Parent-by-ID references contribute the same way.
 //
+// A block queued because of a hole in its OWN client sequence
+// contributes that client's currently-known clock, which is the
+// smallest one not yet seen for it. Without this, a document stuck
+// purely on such a hole reported an empty vector and could not name
+// what it needed — the first item in a root type has no Origin,
+// RightOrigin or Parent-by-ID to walk.
+//
+// Entries merge by taking the larger clock, so when one client has
+// several unmet needs the vector names the highest of them: it is a
+// request that may have to be repeated, not a complete manifest.
+//
 // Returns an empty map when nothing is missing.
 func (p *Pending) MissingSV(bs *store.BlockStore) store.StateVector {
 	out := make(store.StateVector)
@@ -144,8 +155,31 @@ func (p *Pending) MissingSV(bs *store.BlockStore) store.StateVector {
 			out[ref.Client] = want
 		}
 	}
-	for _, list := range p.Blocks {
+	for client, list := range p.Blocks {
 		for _, b := range list {
+			// A hole in the block's own client sequence is a dependency as
+			// real as an Origin reference, and for a first-in-a-root item it
+			// is the ONLY one - all three references below are nil or
+			// non-ID there. Leaving it out made MissingSV report an empty
+			// vector on a document that was demonstrably stuck, so the
+			// documented recovery path (ask a peer for what is missing)
+			// could not name the thing it needed.
+			// Block.ID is only populated for GC and Skip blocks; an item
+			// carries its own. Reading the wrong one here made this whole
+			// branch silently dead - it compared 0 against the known clock
+			// and never fired.
+			start := b.ID
+			if b.Kind == WireBlockItem && b.Item != nil {
+				start = b.Item.ID
+			}
+			if known := bs.GetClock(client); start.Clock > known {
+				// The smallest clock not yet seen for this client, which is
+				// exactly what the store already has: everything from there
+				// up to the queued block is what we are waiting for.
+				if cur, ok := out[client]; !ok || known > cur {
+					out[client] = known
+				}
+			}
 			if b.Kind != WireBlockItem || b.Item == nil {
 				continue
 			}

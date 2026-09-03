@@ -52,6 +52,9 @@ type fakeHS struct {
 	// roomMissing drops the room from /sync entirely, the way a homeserver
 	// does for a room this account is not joined to.
 	roomMissing bool
+	// syncFails makes /sync answer 500 while /messages keeps working, which
+	// is the shape a single pathological event produces on some servers.
+	syncFails bool
 	// encrypted serves an m.room.encryption state event for the room.
 	encrypted bool
 
@@ -120,6 +123,10 @@ func (f *fakeHS) snapshot() []json.RawMessage {
 // handleSync returns the newest syncWindow events plus a prev_batch token
 // pointing at everything older.
 func (f *fakeHS) handleSync(w http.ResponseWriter, r *http.Request) {
+	if f.syncFails {
+		matrixError(w, http.StatusInternalServerError, "M_UNKNOWN", "internal server error")
+		return
+	}
 	all := f.snapshot()
 	start := len(all) - f.syncWindow
 	if start < 0 {
@@ -163,29 +170,42 @@ func (f *fakeHS) handleMessages(w http.ResponseWriter, r *http.Request) {
 	f.msgCalls++
 	f.mu.Unlock()
 
-	from := r.URL.Query().Get("from")
-	// Two rejections, and they are NOT the same kind of rule.
+	// Three cases, and they are NOT the same kind of rule.
 	//
-	// (1) A malformed token: this mirrors Dendrite exactly. Measured against
-	// ghcr.io/element-hq/dendrite-monolith on 2026-09-03, a garbage from-token
-	// answers 400 M_INVALID_PARAM "Invalid from parameter: malformed sync
-	// token". TestDendrite_TokenHandling asserts that against the real server,
-	// so this branch cannot drift into being more permissive than production.
+	// (1) NO from parameter at all: served like Dendrite, which answers 200
+	// with the newest page AND a continuation token (measured 2026-09-03 and
+	// asserted by TestDendrite_TokenHandling). This is the transport's
+	// fallback path when /sync is unusable, so the double has to support it
+	// or the fallback could never be tested.
 	//
-	// (2) An EMPTY token: this double is deliberately STRICTER than Dendrite,
-	// which was measured to accept it (200, newest page only). Accepting it is
-	// the more dangerous behaviour precisely because it looks like success: a
-	// client that pages from an empty token silently reads one page and calls
-	// it the whole room. Refusing here turns that silent truncation into a
-	// loud failure in our own tests. This is a house rule, not an imitation.
-	if from == "" {
+	// (2) A present but EMPTY from: this double is deliberately STRICTER than
+	// Dendrite, which treats it as absent. Refusing it here keeps our own
+	// tests loud if the main pagination path ever starts sending one, because
+	// relying on a server to interpret an empty token is not portable. House
+	// rule, not imitation.
+	//
+	// (3) A malformed token: mirrors Dendrite exactly - 400 M_INVALID_PARAM
+	// "Invalid from parameter: malformed sync token", pinned against the real
+	// server so this branch cannot drift into being more permissive than
+	// production.
+	vals, present := r.URL.Query()["from"]
+	from := ""
+	if present {
+		from = vals[0]
+	}
+	all0 := f.snapshot()
+	cursor := len(all0)
+	switch {
+	case !present:
+		// newest page: cursor stays at the end of the log
+	case from == "":
 		matrixError(w, http.StatusBadRequest, "M_INVALID_PARAM", "empty from-token (stricter than Dendrite on purpose)")
 		return
-	}
-	var cursor int
-	if _, err := fmt.Sscanf(from, "t%d", &cursor); err != nil {
-		matrixError(w, http.StatusBadRequest, "M_INVALID_PARAM", "Invalid from parameter: malformed sync token")
-		return
+	default:
+		if _, err := fmt.Sscanf(from, "t%d", &cursor); err != nil {
+			matrixError(w, http.StatusBadRequest, "M_INVALID_PARAM", "Invalid from parameter: malformed sync token")
+			return
+		}
 	}
 	if d := r.URL.Query().Get("dir"); d != "b" {
 		// Real servers require dir, and this transport only ever reads

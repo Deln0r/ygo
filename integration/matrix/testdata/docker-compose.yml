@@ -5,11 +5,11 @@
 #
 # What the real server actually does with pagination tokens, measured on
 # 2026-09-03 and asserted by TestDendrite_TokenHandling: it REJECTS a malformed
-# token with 400 M_INVALID_PARAM, and ACCEPTS a literal empty one with 200 and
-# the newest page. The accepting case is the dangerous one, because success-
-# looking truncation is invisible; the transport therefore never sends an empty
-# token on its main path, and the unit double refuses one outright as a house
-# rule.
+# token with 400 M_INVALID_PARAM, and treats a literal empty one as absent -
+# 200, the newest page, and a continuation token leading to the rest. It does
+# not truncate. The transport still avoids an empty token on its main path for
+# portability (nothing obliges a server to read it that way), uses it only in
+# the /sync fallback, and the unit double refuses one outright as a house rule.
 #
 # The image tag deliberately floats. A digest pin would freeze a measurement
 # that is already a year stale the moment it is written; the token test above
@@ -43,7 +43,12 @@ services:
           --really-enable-open-registration \
           --http-bind-address 0.0.0.0:8008
     ports:
-      - "8008:8008"
+      # The host port is overridable because a developer machine may already
+      # be running another homeserver on 8008 - a neighbouring project's, say.
+      # Binding blind means the suite happily talks to somebody else's server
+      # and reports about their room, so the port and the URL the tests use
+      # move together (YGO_MATRIX_PORT / YGO_MATRIX_HOMESERVER).
+      - "${YGO_MATRIX_PORT:-8008}:8008"
     tmpfs:
       - /data
     healthcheck:

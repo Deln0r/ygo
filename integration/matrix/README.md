@@ -83,9 +83,10 @@ parses without integrating:
   concatenated with `append` instead of combined with `ygo.MergeUpdates` —
   applying such a buffer reads the first update and silently discards the rest,
   in ygo and in yjs alike.
-- **On read**, because room content is untrusted input. An unknown format, an
-  oversized payload, undecodable base64 or an update the parser rejects is
-  skipped and counted in `SyncResult.Skipped`, never fatal.
+- **On read**, because room content is untrusted input. A content that is not
+  a JSON object, an unknown format, an oversized payload, undecodable base64 or
+  an update the parser rejects is skipped and counted in `SyncResult.Skipped`,
+  never fatal.
 
 Responses are decoded one event at a time rather than as a single typed tree.
 That distinction is the difference between skipping one bad event and losing a
@@ -106,18 +107,24 @@ ends pagination by omitting `end` — so an empty chunk mid-history does not sto
 the walk.
 
 It never pages from an empty token on that path. Measured against
-`ghcr.io/element-hq/dendrite-monolith` on 2026-09-03: Dendrite *accepts* an
-empty `from` and answers `200` with only the newest page, while a *malformed*
-token gets `400 M_INVALID_PARAM "Invalid from parameter: malformed sync
-token"`. The accepting case is the dangerous one, because silent truncation
-looks exactly like success. `TestDendrite_TokenHandling` asserts both against
-the real server — over raw HTTP for the empty case, because every client
-library drops a `from` it considers unset, which is how an earlier version of
-that test ended up asserting nothing at all.
+`ghcr.io/element-hq/dendrite-monolith` on 2026-09-03: a *malformed* token gets
+`400 M_INVALID_PARAM "Invalid from parameter: malformed sync token"`, while an
+*empty* one is treated as absent — `200`, the newest page, **and** a
+continuation token that leads to the rest. So Dendrite does not truncate there;
+a client could in fact page a whole room from an empty token on this server.
 
-Empty-token pagination is used in exactly one place: as a fallback when the
+The main path avoids it for portability, not safety: nothing in the spec
+obliges a server to read an empty `from` as "start at the newest", while the
+`/sync` `prev_batch` token is well defined everywhere.
+`TestDendrite_TokenHandling` asserts both behaviours against the real server —
+over raw HTTP for the empty case, because every client library drops a `from`
+it considers unset, which is how an earlier version of that test ended up
+asserting nothing at all.
+
+The one place the transport does rely on it is the fallback for when the
 initial `/sync` fails outright, since a single pathological event can break
-`/sync` for a whole room on some servers while `/messages` keeps working. If
+`/sync` for a whole room on some servers while `/messages` keeps working. That
+path merges the page it fetches and then continues backward from its token. If
 the fallback cannot start either, the original `/sync` error is what you get.
 
 Within one `Sync`, events are deduplicated by event ID, because the `/sync`
@@ -153,7 +160,8 @@ instead once a document gets serious.
   to strangers can therefore grow a peer's pending buffer.
 - **History visibility.** A room set to `history_visibility: joined` hands a
   newcomer nothing published before they joined, and the document they rebuild
-  is quietly partial. The tests create rooms with `shared` explicitly.
+  is quietly partial. Every room this suite and the demo create sets `shared`
+  explicitly rather than relying on the preset default.
 - **Redaction.** Redacting an event strips the payload. The update is gone for
   anyone who reads the room afterwards, while peers that already merged it keep
   it — old and new readers diverge, permanently.
@@ -195,7 +203,7 @@ go run ./cmd/matrixdemo   # convergence check: exits non-zero if peers disagree
 ./testdata/down.sh
 ```
 
-Both run in CI on every push, against a real Dendrite.
+Both run in CI against a real Dendrite, on every push to `main` and every pull request.
 
 The demo is a check, not a printout. Two peers edit while they cannot see each
 other, publish in the inconvenient order (the second publishes first), read the

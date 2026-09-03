@@ -128,10 +128,9 @@ jobs:
             echo "core module now depends on the Matrix transport's tree"; exit 1
           fi
       # NOTE: the sibling NATS job also builds against the pinned core with
-      # the replace dropped, to catch interface drift. That step is absent
-      # here on purpose: this module calls ygo.ValidateUpdate, which no core
-      # release contains yet, so the drop-replace build cannot pass until the
-      # pin in integration/matrix/go.mod is bumped. Add it with that bump.
+      # the replace dropped, to catch interface drift. Added here once
+      # v1.18.0 - the first core release carrying ygo.ValidateUpdate, which
+      # this module calls - is resolvable from the module proxy.
       - name: converge two peers through a room
         working-directory: integration/matrix
         # Exits non-zero unless both peers agree AND both edits survived.

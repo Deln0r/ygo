@@ -9,53 +9,82 @@ deferred to a future major.
 Where upgrading to a release can change what an existing deployment does, the
 entry opens with an **Upgrade impact** note. Most releases have none.
 
-The optional NATS backplane adapter lives in the nested module
-`server/backplane/nats` and is versioned independently; its releases are listed
-at the end of this file.
+Two optional adapters live in nested modules and are versioned independently of
+ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
+transport (`integration/matrix`). Their releases are listed at the end of this
+file.
 
-## [Unreleased]
+## [1.18.0] - 2026-09-03
 
-Federated transport over Matrix, and the core fix it uncovered.
+A data-loss fix in out-of-order update handling, and the strict validator the
+Matrix transport needed. The transport itself ships as a separate module; see
+"Nested module: integration/matrix" at the end of this file.
 
-**Upgrade impact** — an update whose first clock sits above what the receiving
+**Upgrade impact** - an update whose first clock sits above what the receiving
 document knows for that client is now held in the pending buffer until the gap
 is filled, instead of being integrated immediately. This is the yjs and yrs
 behaviour, and it fixes silent, permanent data loss: integrating over the hole
 advanced the store clock past it, so the update that would have filled the hole
 arrived later, read as already-known, and was discarded. Reproduced with one
-client editing two roots and publishing only the second delta — delivered
-newest-first, the first root's text vanished. Code that applies updates in
-causal order is unaffected. Code that applies out-of-order deltas will now see
-`HasPending` report true between the two applies where it previously reported
-false, and will end up with more data, not less.
+client editing two roots and publishing only the second delta - delivered
+newest-first, the first root's text vanished, and the same sequence on
+yjs 13.6.32 kept both.
+
+Applies to both wire formats: V1 and V2 share the integration path, and each
+has its own regression test.
+
+Code that applies a causally complete stream is unaffected. Code that applies
+out-of-order deltas will see `HasPending` report true where it previously
+reported false, and `ApplyUpdate` will end up with more data, not less. Two
+consequences of that wider pending class are worth naming, because they do not
+go through `ApplyUpdate`:
+
+- `MergeUpdates` and `MergeUpdatesV2` build a document and re-encode it, so an
+  update that is queued rather than integrated is **dropped from the merged
+  result**. Merging a set that does not contain the causal ancestor of every
+  update in it now loses more than it did before. Merge complete sets, or check
+  `HasPending` on your own replay first. (This is the same class of hazard the
+  1.17.0 note describes for stored logs, in the one entry point that does not
+  refuse.)
+- `persist.MergeUpdates`, and therefore `Server.Flush`, `persist.SaveVersion`
+  and `FlushEvery`, refuse with `persist.ErrIncompleteLog` when a stored log
+  holds an update with a clock gap. That is the 1.17.0 guard doing its job -
+  refusing beats silently compacting the update away - but a log whose filling
+  update never arrives will not compact until it does.
 
 ### Added
 
-- `ygo.ValidateUpdate` — parses a V1 update without integrating it, for callers
+- `ygo.ValidateUpdate` - parses a V1 update without integrating it, for callers
   that accept updates from somewhere they do not control. Stricter than
   `ApplyUpdate` in the way that matters: `ApplyUpdate` decodes one update and
   silently ignores whatever bytes follow, so `append(a, b...)` applies only `a`
   and loses `b` with no error anywhere (yjs 13.6.32 behaves identically, which
   is why `ApplyUpdate` keeps that behaviour and this is a separate check).
-  Combine updates with `MergeUpdates`, never with `append`.
-- `integration/matrix` — an opt-in nested module carrying ygo updates over a
-  Matrix room, so peers synchronise through a room they share rather than
-  through a server you run. One event type (`dev.ygo.update`), whole update
-  blobs, no state-vector diffing and no server of its own. Room content is
-  treated as untrusted throughout: validated on publish and on read, decoded
-  one event at a time so a single hostile event cannot fail a whole page, an
-  event-size ceiling in both directions, and end-to-end-encrypted rooms refused
-  rather than written to in the clear. Runs in CI against a real Dendrite on
-  every push. See [integration/matrix/README.md](integration/matrix/README.md),
-  which documents the limits — room growth, full re-read per sync, history
-  visibility, redaction — rather than papering over them.
+  Combine updates with `MergeUpdates`, never with `append`. V1 only: the V2
+  decoder does not report a trailing remainder, so there is no equivalent
+  strict check for V2 bytes - V2 bytes handed to it are named as such rather
+  than misdiagnosed as a concatenation.
 
 ### Fixed
 
 - Updates with a clock gap in their own client sequence are queued instead of
   integrated, closing the data-loss path described under Upgrade impact. The
   same guard covers GC ranges, which carried the identical monotonicity
-  precondition.
+  precondition as blocks.
+- `MissingSV` now reports the clock gap itself, so a document stuck behind one
+  can name what it is waiting for. It previously returned an empty vector in
+  exactly the case that matters - an item that is first in its root type has no
+  Origin, RightOrigin or Parent-by-ID to walk, so the gap is its only
+  dependency - which left the documented "ask a peer for what is missing"
+  round trip asking for nothing.
+- The package documentation said "Status: pre-alpha. Public API is unstable.",
+  contradicting the stability promise the project has made since v1.0.0 and
+  displayed it as the first thing a reader sees on pkg.go.dev. `Version` is now
+  set at release time instead of reading `0.0.0-dev`.
+- `ApplyUpdate` and `ApplyUpdateV2` document the trailing-byte behaviour at the
+  point of use, and the note about mixing wire formats now says what actually
+  happens in each direction: `ApplyUpdateV2` on V1 bytes errors loudly, while
+  `ApplyUpdate` on V2 bytes is a silent no-op.
 
 ## [1.17.0] - 2026-08-29
 
@@ -714,6 +743,56 @@ Core NATS backplane adapter.
 - Delivery is core-NATS at-most-once. Where a dropped delta is unacceptable,
   use `NewJetStream` (v0.2.0) instead.
 
+---
+
+# Nested module: integration/matrix
+
+The Matrix transport is a separate Go module
+(`github.com/Deln0r/ygo/integration/matrix`) so that importing ygo does not
+pull mautrix and its transitive tree into a build that only wants the CRDT. It
+is versioned independently of ygo itself.
+
+## [matrix/0.1.0] - 2026-09-03
+
+Carry ygo updates over a Matrix room, with no ygo server involved.
+
+### Added
+- `New(client, roomID)`, `Publish`, `PublishDoc` and `Sync` move whole update
+  blobs through a Matrix room as `dev.ygo.update` events. A room is an
+  append-only log with neither ordering nor exactly-once delivery, which is the
+  delivery model Yjs updates tolerate; the three properties that make it work -
+  idempotence, order independence, and holding an early-arriving update pending -
+  are pinned by tests in the core module rather than assumed.
+- Untrusted-input handling throughout, because room content is written by
+  whoever is in the room: `ygo.ValidateUpdate` on both the publish and the read
+  path (so an update is decoded strictly and integrated exactly once), responses
+  decoded one event at a time so a single event whose `content` is not an object
+  costs one event instead of a whole page, a 40,000-byte ceiling on raw updates
+  checked before decoding, and `context` observed between events since
+  integration is superlinear in the conflicts an update carries.
+- History is read backward from the `/sync` `prev_batch` token. An empty page is
+  not the end of history (the spec ends pagination by omitting `end`), a
+  re-issued pagination token is refused rather than followed forever, a room
+  absent from an initial sync is an error instead of a quiet empty success, and
+  a timeline marked limited with no `prev_batch` fails rather than truncating
+  silently. When `/sync` itself is unusable, pagination falls back to the
+  newest page.
+- End-to-end-encrypted rooms are refused in both directions (`ErrRoomEncrypted`)
+  rather than written to in the clear, which a homeserver accepts without
+  complaint.
+- Integration tests and a convergence demo run against a real Dendrite in CI on
+  every push, alongside a unit suite against a deliberately strict in-process
+  double.
+
+### Known limits
+Documented in the module README rather than papered over: full-state publishing
+hits the Matrix event-size ceiling as a document grows, rooms grow without
+compaction and every sync re-reads the whole room, merge cost is quadratic in
+conflicting items, a room set to `history_visibility: joined` hands a newcomer a
+partial document, redaction makes old and new readers diverge, and federation is
+not tested (the compose stack runs a single homeserver).
+
+[1.18.0]: https://github.com/Deln0r/ygo/releases/tag/v1.18.0
 [1.17.0]: https://github.com/Deln0r/ygo/releases/tag/v1.17.0
 [1.16.0]: https://github.com/Deln0r/ygo/releases/tag/v1.16.0
 [1.15.0]: https://github.com/Deln0r/ygo/releases/tag/v1.15.0
@@ -738,3 +817,4 @@ Core NATS backplane adapter.
 [0.9.0]: https://github.com/Deln0r/ygo/releases/tag/v0.9.0
 [nats/0.2.0]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.2.0
 [nats/0.1.0]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.1.0
+[matrix/0.1.0]: https://github.com/Deln0r/ygo/releases/tag/integration/matrix/v0.1.0

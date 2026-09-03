@@ -2,6 +2,7 @@ package ygo_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/Deln0r/ygo"
@@ -252,6 +253,34 @@ func TestApplyUpdate_HoldsClockGapPending(t *testing.T) {
 		t.Fatalf("B = %q after the gap was filled, want %q - the queued delta never drained", got, "second")
 	}
 
+	// The recovery path the pending buffer exists to enable, end to end. A
+	// document stuck on a gap has to be able to NAME what it needs, and for
+	// an item that is first in its root type the clock gap is its only
+	// dependency - there is no Origin, RightOrigin or Parent-by-ID to walk.
+	// MissingSV reported an empty vector here until 2026-09-03, so the
+	// documented "ask a peer for the gap" round trip asked for nothing.
+	stuck := ygo.NewDoc()
+	if err := ygo.ApplyUpdate(stuck, late); err != nil {
+		t.Fatal(err)
+	}
+	missing := ygo.MissingSV(stuck)
+	if len(missing) <= 1 {
+		t.Fatalf("MissingSV = %v on a document stuck behind a clock gap; a stuck document must be able to say what it is waiting for", missing)
+	}
+	fill, err := ygo.EncodeDiff(c, missing)
+	if err != nil {
+		t.Fatalf("peer could not answer MissingSV: %v", err)
+	}
+	if err := ygo.ApplyUpdate(stuck, fill); err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(t, stuck, "A"); got != "first" {
+		t.Fatalf("after the peer answered MissingSV, A = %q, want %q", got, "first")
+	}
+	if ygo.HasPending(stuck) {
+		t.Fatal("still pending after the gap was filled from MissingSV")
+	}
+
 	// Positive control: the same two updates in causal order must also
 	// converge, so a failure above is about the gap and not about EncodeDiff
 	// producing something unusable in the first place.
@@ -265,4 +294,128 @@ func TestApplyUpdate_HoldsClockGapPending(t *testing.T) {
 	if textOf(t, f, "A") != "first" || textOf(t, f, "B") != "second" {
 		t.Fatalf("control: in-order delivery gave A=%q B=%q", textOf(t, f, "A"), textOf(t, f, "B"))
 	}
+}
+
+// TestApplyUpdateV2_HoldsClockGapPending is the V2 twin of the test above.
+// V1 and V2 decode differently but integrate through the same path, and the
+// release notes say the fix covers both - a claim that should cost a test
+// rather than a sentence.
+func TestApplyUpdateV2_HoldsClockGapPending(t *testing.T) {
+	c := ygo.NewDocWithOptions(ygo.Options{ClientID: 77})
+	a := ygo.NewText(c, "A")
+	txn := c.WriteTxn()
+	if err := a.Insert(txn, 0, "first"); err != nil {
+		t.Fatal(err)
+	}
+	txn.Commit()
+	early := ygo.EncodeStateAsUpdateV2(c)
+	sv := ygo.EncodeStateVector(c)
+
+	b := ygo.NewText(c, "B")
+	txn = c.WriteTxn()
+	if err := b.Insert(txn, 0, "second"); err != nil {
+		t.Fatal(err)
+	}
+	txn.Commit()
+	late, err := ygo.EncodeDiffV2(c, sv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := ygo.NewDoc()
+	if err := ygo.ApplyUpdateV2(r, late); err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(t, r, "B"); got != "" {
+		t.Fatalf("B = %q after a V2 delta with a clock gap; it must queue, not integrate", got)
+	}
+	if !ygo.HasPending(r) {
+		t.Fatal("no pending state after a V2 delta with a clock gap")
+	}
+	if err := ygo.ApplyUpdateV2(r, early); err != nil {
+		t.Fatal(err)
+	}
+	if got := textOf(t, r, "A"); got != "first" {
+		t.Fatalf("A = %q after the V2 gap was filled, want %q", got, "first")
+	}
+	if got := textOf(t, r, "B"); got != "second" {
+		t.Fatalf("B = %q after the V2 gap was filled, want %q", got, "second")
+	}
+
+	f := ygo.NewDoc()
+	if err := ygo.ApplyUpdateV2(f, early); err != nil {
+		t.Fatal(err)
+	}
+	if err := ygo.ApplyUpdateV2(f, late); err != nil {
+		t.Fatal(err)
+	}
+	if textOf(t, f, "A") != "first" || textOf(t, f, "B") != "second" {
+		t.Fatalf("control: in-order V2 delivery gave A=%q B=%q", textOf(t, f, "A"), textOf(t, f, "B"))
+	}
+}
+
+// TestValidateUpdate covers each branch of the strict validator, because it is
+// a permanent v1.x API and because two of its three outcomes had no test at
+// all: a mutation returning nil for a decode failure survived the whole suite.
+func TestValidateUpdate(t *testing.T) {
+	good := helloUpdate(t, 1, "hello")
+	other := helloUpdate(t, 2, "world")
+
+	t.Run("accepts one well-formed update", func(t *testing.T) {
+		if err := ygo.ValidateUpdate(good); err != nil {
+			t.Fatalf("rejected a valid update: %v", err)
+		}
+	})
+	t.Run("rejects nil and empty", func(t *testing.T) {
+		for name, in := range map[string][]byte{"nil": nil, "empty": {}} {
+			if err := ygo.ValidateUpdate(in); err == nil {
+				t.Errorf("%s accepted; note MergeUpdates returns nil for an empty batch, so a caller can reach this", name)
+			}
+		}
+	})
+	t.Run("rejects a truncated update", func(t *testing.T) {
+		for _, n := range []int{1, 2, len(good) / 2, len(good) - 1} {
+			if err := ygo.ValidateUpdate(good[:n]); err == nil {
+				t.Errorf("accepted a %d-byte prefix of a %d-byte update", n, len(good))
+			}
+		}
+	})
+	t.Run("rejects trailing bytes", func(t *testing.T) {
+		err := ygo.ValidateUpdate(append(append([]byte(nil), good...), 0xff))
+		if err == nil {
+			t.Fatal("accepted one trailing byte")
+		}
+		err = ygo.ValidateUpdate(append(append([]byte(nil), good...), other...))
+		if err == nil {
+			t.Fatal("accepted two concatenated updates")
+		}
+		if !strings.Contains(err.Error(), "MergeUpdates") {
+			t.Errorf("error does not name the remedy: %v", err)
+		}
+	})
+	t.Run("names V2 bytes instead of misdiagnosing them", func(t *testing.T) {
+		d := ygo.NewDocWithOptions(ygo.Options{ClientID: 9})
+		txt := ygo.NewText(d, "t")
+		txn := d.WriteTxn()
+		if err := txt.Insert(txn, 0, "v2 content"); err != nil {
+			t.Fatal(err)
+		}
+		txn.Commit()
+		err := ygo.ValidateUpdate(ygo.EncodeStateAsUpdateV2(d))
+		if err == nil {
+			t.Fatal("accepted V2 bytes as a V1 update")
+		}
+		if !strings.Contains(err.Error(), "V2") {
+			t.Fatalf("V2 bytes reported as %v; a caller pointed at MergeUpdates cannot act on that", err)
+		}
+	})
+	t.Run("accepts what MergeUpdates produces", func(t *testing.T) {
+		merged, err := ygo.MergeUpdates([][]byte{good, other})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ygo.ValidateUpdate(merged); err != nil {
+			t.Fatalf("rejected the output of the remedy it recommends: %v", err)
+		}
+	})
 }

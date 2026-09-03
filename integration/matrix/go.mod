@@ -3,13 +3,13 @@ module github.com/Deln0r/ygo/integration/matrix
 go 1.25.0
 
 require (
-	// RELEASE ORDER: this pin must be bumped to the first core release that
-	// contains ygo.ValidateUpdate before the module is usable standalone.
-	// The replace below hides the gap locally and in CI; a `replace` in a
-	// dependency's go.mod is ignored, so an adopter resolves this exact
-	// version. Verified 2026-09-03 by dropping the replace: the build fails
-	// with `undefined: ygo.ValidateUpdate`.
-	github.com/Deln0r/ygo v1.17.0
+	// v1.18.0 is the first core release containing ygo.ValidateUpdate, which
+	// this module calls. The pin and the core tag are cut from the same
+	// commit deliberately: a `replace` in a dependency's go.mod is ignored by
+	// consumers, so this line is what an adopter actually resolves, and
+	// pinning anything older publishes a module that cannot compile
+	// (measured: `undefined: ygo.ValidateUpdate`).
+	github.com/Deln0r/ygo v1.18.0
 	maunium.net/go/mautrix v0.30.0
 )
 
