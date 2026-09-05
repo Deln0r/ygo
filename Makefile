@@ -5,7 +5,7 @@
 # go-version matrix differences and the cross-language fixtures job).
 
 GO ?= go
-GOLANGCI_LINT_VERSION ?= v1.64.8
+GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2> /dev/null)
 
 .PHONY: check
@@ -37,7 +37,7 @@ lint:
 ifndef GOLANGCI_LINT
 	@echo "golangci-lint not found on PATH."
 	@echo "Install matching CI version with:"
-	@echo "  $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"
+	@echo "  $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"
 	@echo "(brew installs v2 by default; the project config is v1)"
 	@exit 1
 else
@@ -46,7 +46,7 @@ endif
 
 .PHONY: lint-install
 lint-install:
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: fixtures
 fixtures:

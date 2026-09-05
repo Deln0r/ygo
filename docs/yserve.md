@@ -86,7 +86,7 @@ BroadcastStateless, Close, SyncStatus. Authentication plugs in via
 `OnStateless` (see [embedding](#embedding-in-your-own-go-backend)).
 
 The CRDT engine underneath is byte-for-byte wire-compatible with
-`yjs@13.6.31`, verified by 158 cross-language fixture scenarios in CI
+`yjs@13.6.32`, verified by the cross-language fixture suite in CI (the count lives in README.md, where a CI check keeps it honest)
 (see the [main README](../README.md)).
 
 ## Migrating from y-sweet

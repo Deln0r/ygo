@@ -207,6 +207,15 @@ func GetDiff(ctx context.Context, s Store, docName string, remoteSV []byte) ([]b
 // (SaveVersion) propagate it rather than record an incomplete state.
 var ErrIncompleteLog = errors.New("persist: log has updates with unmet causal dependencies; compaction refused")
 
+// MergeUpdates compacts a stored update log into a single update, for callers
+// that own the log and are about to replace it.
+//
+// It REFUSES a log whose updates depend on causal ancestors the log does not
+// contain, returning ErrIncompleteLog rather than a compacted result. That is
+// deliberately different from the root ygo.MergeUpdates, which preserves such
+// updates behind Skip runs: compaction here is a destructive replace, so
+// refusing and retrying later is the safe answer, while coalescing for
+// transport is not destructive and can carry the unresolved half forward.
 func MergeUpdates(updates [][]byte) ([]byte, error) {
 	if len(updates) == 0 {
 		return nil, nil
