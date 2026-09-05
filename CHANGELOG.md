@@ -14,6 +14,75 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+Merging updates no longer loses the half that could not be integrated.
+
+**Upgrade impact** - `MergeUpdates` and `MergeUpdatesV2` now preserve updates
+whose causal ancestor is absent from the set being merged, instead of dropping
+them. This **retires the warning added in 1.18.0**: merging an incomplete set is
+no longer a way to lose data, and callers that were told to "merge complete
+sets, or check `HasPending` on your own replay first" no longer have to.
+
+The output can now contain `Skip` runs, which is how the wire format expresses
+a hole and what yjs has always emitted for this shape. Any decoder that could
+read yjs's own merged output can read ours; ygo has decoded Skip runs since
+v13.5-format support landed. A caller that applies a merged update to an empty
+document and expects it to integrate fully must still supply the missing
+history first - the merged update carries the far side, but carrying is not
+integrating.
+
+Merging a set with nothing pending is byte-identical to before.
+
+### Fixed
+
+- `MergeUpdates` / `MergeUpdatesV2` applied every update to a scratch document
+  and re-encoded it, so anything parked in the pending buffer never reached the
+  output. Merging a lone delta whose ancestor was absent returned an EMPTY
+  update and the edit was gone, with no error anywhere. The reference
+  implementation returns that delta unchanged, which is now also what ygo does -
+  byte for byte, in the lone case.
+
+  The two encoders emit the same plan through different writers, because V2
+  carries a Skip's length in the rest stream rather than the len column. Both
+  are covered by their own tests; the V1 output was additionally handed to
+  yjs 13.6.32, which read it, held the far side pending, converged once the gap
+  was filled, and re-merged our bytes without loss.
+
+  Note the sibling function `persist.MergeUpdates` is unchanged: it still
+  refuses an incomplete log with `ErrIncompleteLog` rather than compacting it.
+  Compaction is a destructive replace, so refusing remains the safe answer
+  there; making it use the preserving encoder is a separate change with its own
+  risks.
+
+- Overlapping views of one client's run are reconciled before they are
+  emitted. Neither wire format carries a per-block clock - a receiver derives
+  each block's clock by accumulating lengths from the run's declared start - so
+  emitting two records that cover overlapping clocks relabels the second one at
+  the end of the first, duplicating content on clocks its client never minted
+  and shifting every later block. Both ygo and yjs accept the result without
+  complaint, which is what made it worth finding: an adversarial review of this
+  change reproduced `"cccccXccc"` where every other path gives `"ccXccc"`, from
+  two ordinary diffs - one peer publishing a run whole while another, having
+  spliced into the middle of it, published the same run split in two.
+
+- Queued deletes are carried too. A delete whose target has not arrived yet
+  sits in the same buffer as an unintegrated block, and dropping it silently
+  resurrects content the author deleted once the insert finally shows up.
+
+- The pending buffer no longer discards a longer block that starts at a clock
+  it has already queued. Skipping by start clock alone was meant to stop a
+  re-applied update double-queueing, but a longer block at a known start clock
+  is new content, and losing it showed up as a Skip run over clocks the buffer
+  had been handed. Not reachable through ygo's own encoders, which emit whole
+  client runs; a peer that slices at the state-vector boundary produces it.
+
+**Cost note.** Merging updates that cannot integrate is superlinear in how many
+of them there are: the pending buffer is re-drained per update. Measured on
+this machine, 1600 such updates (24 KB) merge in ~100 ms and the curve is
+roughly quadratic. A merge set with nothing pending takes the ordinary path and
+is unaffected, which covers compaction of a healthy log.
+
 ## [1.18.1] - 2026-09-04
 
 Wire-format fidelity at the top of the clock space, and an honest note about

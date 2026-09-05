@@ -499,12 +499,21 @@ func MissingSV(d *Doc) []byte {
 	return encoding.EncodeStateVector(sv, nil)
 }
 
-// MergeUpdates decodes every blob in updates in order, applies
-// them to a fresh Doc, and returns a single V1 update blob
-// equivalent to the merged state. Returns nil for an empty input.
+// MergeUpdates coalesces V1 update blobs into a single equivalent V1
+// update. Returns nil for an empty input - nil is not itself a valid
+// update, so guard the length before feeding the result onward.
 //
-// Used by persistence layers for compaction (Flush) and by
-// transports that want to batch-coalesce updates before sending.
+// Nothing is dropped. A block whose causal dependencies are absent from
+// the merged set is preserved, and the clocks nobody supplied come out as
+// Skip runs, which is how the wire format expresses a hole and what yjs
+// mergeUpdates emits for the same input. Two consequences worth knowing:
+// the output may contain Skip runs where an ordinary update would not, and
+// applying it to an empty document may leave part of it queued in the
+// pending buffer until the missing history arrives. Carrying is not
+// integrating.
+//
+// Used by persistence layers for compaction (Flush) and by transports
+// that want to batch-coalesce updates before sending.
 func MergeUpdates(updates [][]byte) ([]byte, error) {
 	// Use the persist package's helper directly — the function is
 	// stateless and re-exporting it would create a dependency cycle
@@ -526,16 +535,17 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 		}
 	}
 	wtxn.Commit()
-	return encoding.EncodeStateAsUpdate(d), nil
+	return encoding.EncodeStateAsUpdateWithPending(d), nil
 }
 
-// MergeUpdatesV2 is the V2 counterpart of MergeUpdates: it coalesces V2
-// update blobs into a single equivalent V2 update. Returns nil for an
-// empty input. Like MergeUpdates it reconstructs then re-encodes, so
-// blocks whose causal dependencies are absent across the merged set are
-// dropped rather than preserved behind Skip blocks (as yjs
-// mergeUpdatesV2 would); ygo-produced full updates are self-contained and
-// unaffected.
+// MergeUpdatesV2 is the V2 counterpart of MergeUpdates, with the same
+// contract: nothing is dropped, holes come out as Skip runs, and the
+// result may not integrate fully into an empty document until the missing
+// history arrives. Returns nil for an empty input.
+//
+// The two formats carry a Skip's length differently - V2 puts it in the
+// rest stream rather than the len column - so the emitters are separate
+// code paths with separate tests.
 func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 	if len(updates) == 0 {
 		return nil, nil
@@ -554,7 +564,7 @@ func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 		}
 	}
 	wtxn.Commit()
-	return encoding.EncodeStateAsUpdateV2(d), nil
+	return encoding.EncodeStateAsUpdateV2WithPending(d), nil
 }
 
 // EncodeStateVectorFromUpdate computes the state vector a V1 update
@@ -571,10 +581,13 @@ func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
 // stored update before sending it to a peer that already has part of it.
 //
 // It reconstructs the update's state and diffs against remoteSV, emitting
-// whole blocks like EncodeDiff. A full update that ygo produces
-// (EncodeStateAsUpdate / MergeUpdates) is self-contained and fully
-// covered; a diff (from EncodeDiff) or a hand-crafted update whose block
-// dependencies are absent drops those unresolved blocks.
+// whole blocks like EncodeDiff. Blocks whose dependencies are absent from
+// the input are DROPPED rather than carried: unlike MergeUpdates, this
+// does not preserve the pending buffer. That is fine for the intended use
+// - trimming a self-contained update before sending it - and lossy for
+// anything else, including the output of MergeUpdates over an incomplete
+// set, which by design can contain blocks that do not integrate on their
+// own. Do not use DiffUpdate to re-trim such an update.
 func DiffUpdate(update, remoteSV []byte) ([]byte, error) {
 	d := NewDoc()
 	if err := ApplyUpdate(d, update); err != nil {

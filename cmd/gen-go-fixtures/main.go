@@ -72,6 +72,12 @@ type scenario struct {
 	// shallow children — nested element trees out of scope for
 	// MVP cross-language validation.
 	ExpectedXmlChildren []map[string]interface{} `json:"expected_xml_children,omitempty"`
+	// FollowUpHex is a second update applied after UpdateHex before the
+	// expectation is checked. It exists for one thing: an update that
+	// deliberately carries blocks the receiver cannot integrate yet, where
+	// the point being proved is that the far side SURVIVES until the rest of
+	// the history arrives.
+	FollowUpHex string `json:"follow_up_hex,omitempty"`
 }
 
 type fixtureFile struct {
@@ -188,7 +194,97 @@ func captureXml(enc encoder, description, rootName string, clientID uint64, muta
 
 // captureAll runs the same scenario list for both encoders so V1
 // and V2 fixtures cover identical surface area.
+// captureMergedWithPending records what MergeUpdates emits when the set it is
+// given spans a hole, so the reference implementation gets to say whether our
+// output is readable.
+//
+// This is the cross-language half of the merge-preserves-pending work. The
+// merged update contains a Skip run standing in for clocks nobody supplied;
+// yjs must read it, integrate the near side, hold the far side, and converge
+// once the rest of the history arrives. Two scenarios, because one update
+// cannot assert both halves: the first checks the near side landed, the second
+// applies the remaining history and checks the far side was kept rather than
+// dropped at merge time.
+//
+// Separate roots on purpose - a single Text run squashes into one cell at
+// commit and a diff would then carry the whole run, leaving no hole to test.
+func captureMergedWithPending(enc encoder) []scenario {
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 900})
+
+	a := ygo.NewText(d, "A")
+	txn := d.WriteTxn()
+	must(a.Insert(txn, 0, "aaaaa"))
+	txn.Commit()
+	first := enc.encode(d)
+	svAfterA := ygo.EncodeStateVector(d)
+
+	b := ygo.NewText(d, "B")
+	txn = d.WriteTxn()
+	must(b.Insert(txn, 0, "bbbbb"))
+	txn.Commit()
+	svAfterB := ygo.EncodeStateVector(d)
+
+	// The filler is captured HERE, before the third root exists, so it holds
+	// the hole and NOTHING ELSE. Taking it later would also carry the far
+	// side, and the second scenario below would then pass whether or not the
+	// merge preserved anything - which is exactly what it did on the first
+	// attempt, caught by deliberately removing the feature and watching the
+	// fixtures stay green.
+	var filler []byte
+	var err error
+	if enc == encV1 {
+		filler, err = ygo.EncodeDiff(d, svAfterA)
+	} else {
+		filler, err = ygo.EncodeDiffV2(d, svAfterA)
+	}
+	must(err)
+
+	c := ygo.NewText(d, "C")
+	txn = d.WriteTxn()
+	must(c.Insert(txn, 0, "ccccc"))
+	txn.Commit()
+
+	var late, merged []byte
+	if enc == encV1 {
+		late, err = ygo.EncodeDiff(d, svAfterB)
+		must(err)
+		merged, err = ygo.MergeUpdates([][]byte{first, late})
+		must(err)
+	} else {
+		late, err = ygo.EncodeDiffV2(d, svAfterB)
+		must(err)
+		merged, err = ygo.MergeUpdatesV2([][]byte{first, late})
+		must(err)
+	}
+
+	return []scenario{
+		{
+			Description:    "merged across a hole: the near side integrates",
+			GoClientID:     900,
+			RootKind:       "text",
+			RootName:       "A",
+			UpdateHex:      hex.EncodeToString(merged),
+			ExpectedText:   "aaaaa",
+			ExpectedLength: 5,
+		},
+		{
+			Description:    "merged across a hole: the far side survives until the history arrives",
+			GoClientID:     900,
+			RootKind:       "text",
+			RootName:       "C",
+			UpdateHex:      hex.EncodeToString(merged),
+			FollowUpHex:    hex.EncodeToString(filler),
+			ExpectedText:   "ccccc",
+			ExpectedLength: 5,
+		},
+	}
+}
+
 func captureAll(enc encoder) []scenario {
+	return append(baseScenarios(enc), captureMergedWithPending(enc)...)
+}
+
+func baseScenarios(enc encoder) []scenario {
 	return []scenario{
 		// --- Map ---
 		captureMap(enc, "empty Map", "x", 100, nil, func(_ *ygo.Map, _ *ygo.TransactionMut) {}),

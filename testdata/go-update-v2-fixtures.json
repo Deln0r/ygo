@@ -255,6 +255,25 @@
       "update_hex": "000002b60400000104110e78c3a9f09fa791e2808df09f92bb01060101000001010000",
       "expected_text": "é🧑‍💻",
       "expected_length": 6
+    },
+    {
+      "description": "merged across a hole: the near side integrates",
+      "go_client_id": 900,
+      "root_kind": "text",
+      "root_name": "A",
+      "update_hex": "000002840e00000504000a0004110c41616161616143636363636301050105010100000103000500",
+      "expected_text": "aaaaa",
+      "expected_length": 5
+    },
+    {
+      "description": "merged across a hole: the far side survives until the history arrives",
+      "go_client_id": 900,
+      "root_kind": "text",
+      "root_name": "C",
+      "update_hex": "000002840e00000504000a0004110c41616161616143636363636301050105010100000103000500",
+      "expected_text": "ccccc",
+      "expected_length": 5,
+      "follow_up_hex": "000002840e00000104090642626262626201050101000001010500"
     }
   ]
 }

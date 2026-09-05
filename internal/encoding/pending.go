@@ -201,15 +201,33 @@ func (p *Pending) MissingSV(bs *store.BlockStore) store.StateVector {
 // addBlock appends b to the per-client queue, keeping the queue
 // sorted by clock ascending so causal-prefix integration sees the
 // earliest unsatisfied item first.
+// blockLen is how many clocks a queued block covers, whichever kind it is.
+func blockLen(b Block) uint64 {
+	if b.Kind == WireBlockItem {
+		if b.Item == nil {
+			return 0
+		}
+		return b.Item.Len
+	}
+	return b.Len
+}
+
 func (p *Pending) addBlock(client uint64, b Block) {
 	list := p.Blocks[client]
 	clock := blockStartClock(b)
 	idx := sort.Search(len(list), func(i int) bool {
 		return blockStartClock(list[i]) >= clock
 	})
-	// Skip exact-clock duplicates — re-applying the same update
-	// shouldn't double-queue.
+	// Two blocks can start at the same clock and cover different amounts of
+	// it: peers split a client's run at different points, so one may hand us
+	// (10, len 5) where another hands us (10, len 2). Keeping whichever
+	// arrived first and discarding the other loses the difference outright -
+	// re-applying the same update must not double-queue, but a LONGER block
+	// at a known start clock is new content, not a duplicate.
 	if idx < len(list) && blockStartClock(list[idx]) == clock {
+		if blockLen(b) > blockLen(list[idx]) {
+			list[idx] = b
+		}
 		return
 	}
 	list = append(list, Block{})

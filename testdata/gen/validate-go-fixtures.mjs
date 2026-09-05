@@ -144,6 +144,12 @@ function validateFile(path, applyFn, label) {
     const doc = new Y.Doc();
     try {
       applyFn(doc, bytes);
+      // A scenario may carry a second update: the case being proved is that
+      // the first one holds blocks this document cannot integrate yet, and
+      // that they are still there once the rest of the history shows up.
+      if (sc.follow_up_hex) {
+        applyFn(doc, hexToBytes(sc.follow_up_hex));
+      }
     } catch (e) {
       console.error(`${label} ✘ ${sc.description}: applyUpdate threw: ${e.message}`);
       failures++;

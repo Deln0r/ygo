@@ -7,10 +7,14 @@ import (
 )
 
 // TestDecodeSkipStruct verifies the V1 decoder recognises a Skip struct
-// (ref number 10), which yjs@14 uses to represent holes in the struct
-// store. ygo must decode it gracefully (as a no-op gap range) to stay
-// forward-compatible with v14 update streams; a decoder that only knew
-// refs 0-9 would error on the leading info byte.
+// (ref number 10), which represents a hole in a client's run.
+//
+// Not a forward-compatibility exercise, though it was written as one:
+// measured against yjs 13.6.32, mergeUpdates emits Skip runs today, for the
+// ordinary case of merging a set that spans a gap. ygo emits them too now
+// (EncodeStateAsUpdateWithPending), so both halves of the format are in use
+// rather than merely tolerated. A decoder that only knew refs 0-9 would error
+// on the leading info byte.
 func TestDecodeSkipStruct(t *testing.T) {
 	// numClients=1, blockCount=1, client=5, clock=0,
 	// Skip block (info=10, len=3), empty delete set.
