@@ -152,11 +152,14 @@
 - **Was:** delete-set apply called `txn.Delete(it)` on the whole item when a wire range covered only a SUBSET of its clocks. Receivers of a partial-delete from a peer who had previously split an item lost MORE than the sender intended; cross-client convergence broke for any pattern where one side has a single contiguous item and the other ApplyDelta's a sub-range delete.
 - **Resolved by:** new `applyDeleteRange` helper in `internal/encoding/pending.go` calls `txn.MaterializeCleanStart` (splits at range start) and `txn.MaterializeCleanEnd` (splits at range end-1) before `txn.Delete`. The Drain loop routes every delete-set range through it. 4 dedicated regression tests in `internal/encoding/delete_split_test.go` cover split-at-start (preserve prefix), split-at-end (preserve suffix), split-at-both-ends (preserve prefix + suffix around middle delete), and whole-item degenerate case. `TestApplyDelta_CrossClient_Converges` re-enabled to the full insert+format+partial-delete+insert scenario and passes.
 
-### Update.Apply does not handle Skip blocks
+### Update.Apply does not handle Skip blocks — PARTLY RESOLVED (2026-09-05, v1.19.0)
 
 - **Where:** `internal/encoding/update.go` `Update.Apply`.
-- **What:** Skip wire records (BLOCK_SKIP_REF_NUMBER = 10) reserve clock space without semantics; yrs uses them in V2 mostly. We decode them but Apply silently drops them. Re-encoding from the resulting store will not emit the same Skip ranges.
-- **When to address:** if V2 encoding lands or if a wire trace shows JS Yjs emitting Skip in V1 (rare).
+- **What:** Skip wire records (BLOCK_SKIP_REF_NUMBER = 10) reserve clock space without semantics. We decode them but Apply drops them, so re-encoding from the resulting store does not reproduce them.
+- **Both triggers have since fired.** V2 encoding landed, and JS Yjs was measured emitting Skip in V1: `yjs@13.6.32` `mergeUpdates` writes a Skip run for every hole in a client's sequence, for the ordinary case of merging a set that spans a gap. It is not rare, it is the normal shape of a merged update.
+- **What is resolved:** the merge path now EMITS Skip runs. `EncodeStateAsUpdateWithPending` (`internal/encoding/merge.go`) encodes the store together with the pending buffer and writes a Skip for each hole between them, in both wire formats, so `MergeUpdates` / `MergeUpdatesV2` reproduce what yjs produces and no longer drop the blocks behind a gap. Cross-language fixtures hand our output to yjs on every push.
+- **Remaining gap:** `Apply` still drops an incoming Skip rather than recording the reserved range, so a Skip that arrives and is never followed by the real blocks leaves no trace in the store. That costs nothing today - the blocks behind the hole queue in the pending buffer and carry their own clocks - but it is why re-encoding a document is still not byte-identical to the update that built it when Skips were involved.
+- **When to address:** if a scenario turns up where the reserved range itself has to survive a store round trip.
 
 ### Content encoding for Embed / Format / Type / Doc / Move / JSON not implemented
 

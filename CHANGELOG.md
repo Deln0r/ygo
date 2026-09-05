@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.19.0] - 2026-09-05
 
 Merging updates no longer loses the half that could not be integrated.
 
@@ -82,6 +82,16 @@ of them there are: the pending buffer is re-drained per update. Measured on
 this machine, 1600 such updates (24 KB) merge in ~100 ms and the curve is
 roughly quadratic. A merge set with nothing pending takes the ordinary path and
 is unaffected, which covers compaction of a healthy log.
+
+### Infrastructure
+
+- The Codeberg mirror job was failing on release days - a release pushes the
+  commit and then the tag a second later, and the two mirror runs raced for the
+  same remote. The mirror stayed correct only because whichever run won pushed
+  everything. Runs are now serialised, and the job verifies the result rather
+  than trusting the push's exit code: it fails unless `main` matches on both
+  sides and every local tag exists on the mirror. The README's "auto-synced on
+  every push" is a checkable statement again.
 
 ## [1.18.1] - 2026-09-04
 
@@ -910,6 +920,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.19.0]: https://github.com/Deln0r/ygo/releases/tag/v1.19.0
 [1.18.1]: https://github.com/Deln0r/ygo/releases/tag/v1.18.1
 [1.18.0]: https://github.com/Deln0r/ygo/releases/tag/v1.18.0
 [1.17.0]: https://github.com/Deln0r/ygo/releases/tag/v1.17.0
