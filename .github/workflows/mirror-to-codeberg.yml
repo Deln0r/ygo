@@ -6,6 +6,22 @@ on:
     tags: ['*']
   workflow_dispatch:
 
+# Serialise the mirror. A release pushes the commit and then the tag a second
+# apart, which started two jobs that raced each other for the same remote and
+# lost:
+#
+#   remote: error: cannot lock ref 'refs/heads/main': is at cc0b2ce but expected 20f5cf6
+#   remote: error: cannot lock ref 'refs/tags/integration/matrix/v0.1.1': reference already exists
+#
+# The mirror stayed correct only because whichever job won pushed everything -
+# luck, not design, since a winner that started before the loser's refs existed
+# would have left them unmirrored until the next push. cancel-in-progress stays
+# false on purpose: cancelling a queued run would skip a mirror rather than
+# delay it.
+concurrency:
+  group: mirror-to-codeberg
+  cancel-in-progress: false
+
 jobs:
   mirror:
     name: Sync to codeberg.org/Deln0r/ygo
@@ -20,3 +36,29 @@ jobs:
           CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
         run: |
           git push --force "https://Deln0r:${CODEBERG_TOKEN}@codeberg.org/Deln0r/ygo.git" origin/main:main --tags
+
+      - name: Verify the mirror is actually in sync
+        env:
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+        run: |
+          # A guard on the RESULT, not on the exit code of the push. The README
+          # promises an EU-hosted mirror synced on every push, so this job
+          # succeeding has to mean the mirror holds what GitHub holds - not
+          # merely that a git command returned 0.
+          remote="https://Deln0r:${CODEBERG_TOKEN}@codeberg.org/Deln0r/ygo.git"
+          local_main=$(git rev-parse origin/main)
+          remote_main=$(git ls-remote "$remote" refs/heads/main | cut -f1)
+          if [ "$local_main" != "$remote_main" ]; then
+            echo "main out of sync: github=$local_main codeberg=${remote_main:-<absent>}" >&2
+            exit 1
+          fi
+          missing=0
+          while read -r _sha ref; do
+            [ -z "$ref" ] && continue
+            if ! git ls-remote "$remote" "$ref" | grep -q .; then
+              echo "tag missing on the mirror: $ref" >&2
+              missing=1
+            fi
+          done < <(git ls-remote --tags . | grep -v '\^{}$')
+          [ "$missing" -eq 0 ] || exit 1
+          echo "mirror verified in sync: main=$local_main, all tags present"
