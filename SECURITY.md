@@ -2,12 +2,7 @@
 
 ## Supported Versions
 
-Ygo is in pre-1.0 development. Security fixes are applied to the latest tagged release on `main`. Older minor versions are not patched.
-
-| Version | Supported |
-| ------- | --------- |
-| 0.9.x   | yes       |
-| < 0.9   | no        |
+Security fixes are applied to the latest tagged release on `main`. Older minor versions are not patched, so the supported version is always the current one - deliberately stated as a rule rather than a table, because a table of version numbers goes stale on the next release and this one had said "0.9.x" for nineteen of them.
 
 ## Reporting a Vulnerability
 

@@ -218,6 +218,12 @@ jobs:
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff
         run: git diff --exit-code testdata/
+      - name: the README's fixture counts must match the fixtures
+        # The counts are the project's headline claim, and they are exactly the
+        # kind of number that rots: adding a scenario is routine, updating the
+        # four sentences about it is not. Both had drifted before this guard.
+        working-directory: testdata/gen
+        run: node check-fixture-counts.mjs
       - name: run go tests against fixtures
         run: |
           go test ./internal/lib0/... -run TestFixtures

@@ -18,9 +18,17 @@ file.
 
 Merging updates no longer loses the half that could not be integrated.
 
-**Upgrade impact** - `MergeUpdates` and `MergeUpdatesV2` now preserve updates
-whose causal ancestor is absent from the set being merged, instead of dropping
-them. This **retires the warning added in 1.18.0**: merging an incomplete set is
+**Upgrade impact, and it is not only about merging.** `ApplyUpdate` changes
+too: a document that queues two views of one client's run starting at the same
+clock now keeps the longer one instead of whichever arrived first. That path
+runs for every document - `ApplyUpdate` -> `Update.Apply` -> `foldUpdate` ->
+`Pending.addBlock` - so a deployment peered with yjs, which slices runs at the
+state-vector boundary, could silently drop content on 1.18.x and no longer
+does. If you never call `MergeUpdates`, this is still the paragraph that
+concerns you.
+
+`MergeUpdates` and `MergeUpdatesV2` now preserve updates whose causal ancestor
+is absent from the set being merged, instead of dropping them. This **retires the warning added in 1.18.0**: merging an incomplete set is
 no longer a way to lose data, and callers that were told to "merge complete
 sets, or check `HasPending` on your own replay first" no longer have to.
 

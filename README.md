@@ -11,11 +11,11 @@
 
 Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications, [officially listed](https://docs.yjs.dev/ecosystem/ports-to-other-languages) in the Yjs documentation's ports page.
 
-Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients running `yjs@13.x` synchronize directly with Go servers and vice versa, with both directions verified through **158 cross-language fixture scenarios** generated from `yjs@13.6.32`. The bundled WebSocket server is Hocuspocus-compatible. No CGO; `gomobile bind` produces an iOS xcframework and Android AAR (manually verified, not run in CI).
+Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients running `yjs@13.x` synchronize directly with Go servers and vice versa, with both directions verified through **163 cross-language fixture scenarios** generated from `yjs@13.6.32`. The bundled WebSocket server is Hocuspocus-compatible. No CGO; `gomobile bind` produces an iOS xcframework and Android AAR (manually verified, not run in CI).
 
 ## Highlights
 
-- **Byte-for-byte wire compatibility, verified in both directions.** 158 cross-language fixture scenarios (generated from `yjs@13.6.32`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push, so a regression in either direction fails the build.
+- **Byte-for-byte wire compatibility, verified in both directions.** 163 cross-language fixture scenarios (generated from `yjs@13.6.32`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push, so a regression in either direction fails the build.
 - **Pure Go, no CGO — mobile included.** Cross-compiles freely to every Go target. The CRDT core, the sync client and the server also compile to `js/wasm` and `wasip1/wasm`; the one exception is the SQLite-backed store in [`persist/sqlite`](persist/sqlite), since `modernc.org/sqlite` is transpiled C with no wasm target — a browser build supplies its own [`persist.Store`](persist) instead (it is a seven-method interface). `gomobile bind` produces an iOS xcframework and Android AAR (manually verified on 2026-06-12, not run in CI) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
 - **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native y-websocket/Hocuspocus provider: handshake, incremental updates, awareness, reconnect with backoff. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
 - **Complete CRDT type set.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments.
@@ -162,7 +162,7 @@ defer unsub()
 | `internal/block` (Item, Content, Branch, Splice, Integrate-YATA, TrySquash, Repair, search markers) | done; full YATA conflict resolution + per-branch LRU position cache |
 | `internal/store` (BlockStore, ItemSlice, Materialize) | done |
 | `internal/doc` (Doc, Transaction, TransactionMut) | done; lock semantics + root-branch registry |
-| `internal/encoding` (StateVector, IdSet, Update encode/decode/apply, Pending buffer, V1 + V2 codecs) | done; JS Yjs → Go proven by 29 V1 + 32 V2 fixture scenarios; Go → JS proven by 48 reverse fixtures (Map / Array / Text / XmlFragment) |
+| `internal/encoding` (StateVector, IdSet, Update encode/decode/apply, Pending buffer, V1 + V2 codecs) | done; JS Yjs → Go proven by 29 V1 + 33 V2 fixture scenarios; Go → JS proven by 52 reverse fixtures (Map / Array / Text / XmlFragment) |
 | `internal/utf16` (UTF-16 length / byte-offset / surrogate-aware split) | done |
 | `internal/types/Map` (Set / Get / Delete / Has / Len / Range / Clear + SetMap / SetArray / SetText) | done; nested-type construction supported |
 | `internal/types/Array` (Insert / InsertRange / Push / Delete / Get / Len / Range / ToSlice + InsertMap / InsertArray / InsertText) | done; nested-type construction supported |
@@ -207,11 +207,11 @@ defer unsub()
 
 ## Wire compatibility
 
-The single most-important guarantee of this project is byte-level wire compatibility with `yjs@13.x`. This is enforced by **158 cross-language fixture scenarios** (plus 56 lib0 primitive vectors):
+The single most-important guarantee of this project is byte-level wire compatibility with `yjs@13.x`. This is enforced by **163 cross-language fixture scenarios** (plus 56 lib0 primitive vectors):
 
 - **29 V1 forward fixtures** (`testdata/yjs-updates.json`) — JS Yjs encodes via `Y.encodeStateAsUpdate`, Go decodes and applies, state matches.
-- **32 V2 forward fixtures** (`testdata/yjs-update-v2-fixtures.json`) — same with `Y.encodeStateAsUpdateV2`.
-- **48 reverse fixtures** (`testdata/go-updates.json` + `go-update-v2-fixtures.json`) — Go encodes via `EncodeStateAsUpdate` / `EncodeStateAsUpdateV2`, JS Yjs decodes via `Y.applyUpdate` / `Y.applyUpdateV2`, state matches.
+- **33 V2 forward fixtures** (`testdata/yjs-update-v2-fixtures.json`) — same with `Y.encodeStateAsUpdateV2`.
+- **52 reverse fixtures** (`testdata/go-updates.json` + `go-update-v2-fixtures.json`) — Go encodes via `EncodeStateAsUpdate` / `EncodeStateAsUpdateV2`, JS Yjs decodes via `Y.applyUpdate` / `Y.applyUpdateV2`, state matches.
 - **49 feature fixtures** — XML (5), awareness (6), sync protocol (6), undo (7), snapshots (4), subdocuments (3), wire edge cases incl. 53-bit client IDs (3), nested-type GC (4), relative positions (11), all captured from the pinned JS reference and byte-compared in both directions where the feature has a Go encoder.
 
 The fixtures regenerate from pinned `yjs@13.6.32` + `lib0@0.2.117` + `y-protocols@1.0.7` on every CI run; `git diff --exit-code testdata/` catches byte-level regressions.
