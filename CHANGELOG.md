@@ -14,6 +14,31 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Changed
+
+- `modernc.org/sqlite` v1.57.0 -> v1.58.0, and with it `modernc.org/libc`
+  v1.74.4 -> v1.75.6. The libc bump is not optional: upstream requires a
+  downstream module to pin the exact libc version its own `go.mod` names, so
+  the two move together.
+
+  The release carries SQLite 3.53.4, whose upstream fix for the
+  journal-rollback data-corruption bug replaces the local super-journal patch
+  v1.56.0 had added as a stopgap. Recovery behaviour is unchanged by that
+  swap, but it is the part of this bump that touches the store's crash path,
+  so `./persist/...` was run with `-race -count=10` rather than once.
+
+  v1.58.0 also adds opt-in Linux OFD file locking, which changes who owns a
+  lock on a database file. It is off unless `MODERNC_SQLITE_OFD_LOCK` is set
+  or `OFDLocking(true)` is called before the first connection; verified off in
+  a build of this tree, so locking behaviour for anyone using
+  [`persist/sqlite`](persist/sqlite) is byte-for-byte what it was.
+
+  The wasm caveat still holds: `persist/sqlite` remains unbuildable for
+  `js/wasm` and `wasip1/wasm` because `modernc.org/libc` has no wasm build,
+  and every other package still compiles for both.
+
 ## [1.19.0] - 2026-09-05
 
 Merging updates no longer loses the half that could not be integrated.
