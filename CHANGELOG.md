@@ -18,8 +18,11 @@ file.
 
 ### Changed
 
-- `modernc.org/sqlite` v1.57.0 -> v1.58.0, and with it `modernc.org/libc`
-  v1.74.4 -> v1.75.6. The libc bump is not optional: upstream requires a
+- `modernc.org/sqlite` v1.57.0 -> v1.59.0, and with it `modernc.org/libc`
+  v1.74.4 -> v1.75.7 (via v1.58.0 / v1.75.6). v1.59.0 only pools the
+  per-call context handed to user-defined SQL functions, which ygo does not
+  register, so it is inert here; its libc bump is not, and got the same
+  verification as the step before it. The libc bump is not optional: upstream requires a
   downstream module to pin the exact libc version its own `go.mod` names, so
   the two move together.
 
