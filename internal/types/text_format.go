@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 
 	"github.com/Deln0r/ygo/internal/block"
@@ -89,10 +90,12 @@ func (t *Text) InsertWithAttributes(txn *doc.TransactionMut, idx uint64, str str
 	}
 
 	currentAttrs := currentAttributesAt(t.branch, right)
+	keys := sortedAttrKeys(attrs)
 
 	// Emit opening markers for every attr whose target value differs
 	// from current. Skip keys that already match.
-	for key, value := range attrs {
+	for _, key := range keys {
+		value := attrs[key]
 		if attrValuesEqual(currentAttrs[key], value) {
 			continue
 		}
@@ -116,7 +119,8 @@ func (t *Text) InsertWithAttributes(txn *doc.TransactionMut, idx uint64, str str
 	// Emit closing markers to restore the previous formatting where
 	// our applied attrs differ. For each key we opened, emit a
 	// marker carrying its previous value (which may be nil = clear).
-	for key, value := range attrs {
+	for _, key := range keys {
+		value := attrs[key]
 		prev := currentAttrs[key]
 		if attrValuesEqual(prev, value) {
 			continue
@@ -180,9 +184,11 @@ func (t *Text) Format(txn *doc.TransactionMut, idx, length uint64, attrs Attrs) 
 	// "what was originally in effect at idx+length" view we will
 	// restore via closing markers.
 	endAttrs := currentAttributesAt(t.branch, endRight)
+	keys := sortedAttrKeys(attrs)
 
 	// Emit opening markers — only for keys whose value changes.
-	for key, value := range attrs {
+	for _, key := range keys {
+		value := attrs[key]
 		if attrValuesEqual(startAttrs[key], value) {
 			continue
 		}
@@ -192,7 +198,8 @@ func (t *Text) Format(txn *doc.TransactionMut, idx, length uint64, attrs Attrs) 
 
 	// Emit closing markers to restore whatever was in effect at the
 	// end position before our format applied.
-	for key, value := range attrs {
+	for _, key := range keys {
+		value := attrs[key]
 		if attrValuesEqual(startAttrs[key], value) {
 			continue
 		}
@@ -561,6 +568,22 @@ func updateCurrentAttrs(attrs Attrs, key string, value any) {
 		return
 	}
 	attrs[key] = value
+}
+
+// sortedAttrKeys returns the keys of attrs in ascending order. Each
+// attribute becomes its own format marker, and the order the markers
+// are emitted in is part of the encoded update. yjs walks the
+// attribute object in property order and closes in that same order;
+// a Go map has no order of its own and ranging over one is randomised,
+// which made the same edit encode to different bytes from run to run.
+// Sorted keys give one order, for opening and closing markers alike.
+func sortedAttrKeys(attrs Attrs) []string {
+	keys := make([]string, 0, len(attrs))
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // copyAttrs returns a shallow copy of attrs so callers cannot

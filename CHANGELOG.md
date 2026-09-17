@@ -14,6 +14,25 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The same formatting edit could encode to different bytes from run to run.**
+  Each attribute that changes the formatting becomes its own format marker, in
+  `InsertWithAttributes`, `Format` and `ApplyDelta` alike, and the markers were
+  emitted in Go map order, which is randomised. With two or more such attributes
+  the same edit could come out in a different order on another run. The text and
+  its formatting were the same and yjs reads either order, but anything that
+  compares or hashes update bytes could see a different update. The
+  cross-language fixture check, which regenerates the Go-encoded fixtures and
+  diffs them, went red on the v1.20.0 release commit: 12 of 20 local
+  regenerations of that tree differed from the committed files. Markers are now
+  emitted in ascending key order, opening and closing alike, and 20 of 20
+  regenerations match. yjs follows the attribute object's own property order,
+  which a Go map does not carry, so the bytes match yjs only when the JS object
+  lists the keys that produce markers in that same ascending order.
+
 ## [1.20.0] - 2026-09-17
 
 **Upgrade impact** - V2 updates carrying formatted text or embeds are now
