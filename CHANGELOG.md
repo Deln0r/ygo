@@ -75,6 +75,27 @@ every caller of the V2 encoders.
   scenarios failed in both directions, and V1's passed; with the codec
   reverted to the previous layout the V2 ones fail again.
 
+- **An object- or array-valued text attribute crashed the process.**
+  Attribute values were compared with a bare Go `==`, which panics at runtime
+  when both are maps or slices. Reformatting a range that carried such an
+  attribute, reading `ToDelta` across two such runs, or building an observer
+  event for them all panicked. The observer path runs on updates from peers, so
+  wherever a text observer was registered - the mobile SDK's `ObserveChanges`,
+  for one - any peer sending that formatting could crash the process; verified
+  with a receiver that only applied a remote update.
+
+  Values are now compared the way yjs compares them (`equalAttrs` -> lib0
+  `equalFlat`), and every rule is pinned against yjs 13.6.32 output, because
+  this comparison decides whether format markers are emitted at all: the same
+  container reused for both values is equal even when it holds a NaN; two
+  objects or two arrays are equal when their entries are strictly equal, one
+  level deep, so nested containers compare by identity; an array equals an
+  object with the same numeric keys, and `[]` equals `{}`. Getting identity
+  right in Go took care: every empty slice shares one runtime address, so two
+  separately decoded empty arrays would otherwise count as one object and merge
+  runs yjs keeps apart. Scalar values compare exactly as before, including
+  `float64(1)` against `int(1)`, which JS would call equal.
+
 ### Infrastructure
 
 - CI tests the current Go release again. Go 1.27 had shipped while the test

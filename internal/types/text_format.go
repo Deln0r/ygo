@@ -2,6 +2,8 @@ package types
 
 import (
 	"fmt"
+	"reflect"
+	"strconv"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -583,15 +585,147 @@ func copyNonEmptyAttrs(attrs Attrs) Attrs {
 	return copyAttrs(attrs)
 }
 
-// attrValuesEqual compares two Any values for structural equality.
-// Both nil are equal; nil-vs-non-nil is unequal; otherwise direct
-// comparison via Go == works for the primitive Any variants we
-// support (bool, int, int64, float64, string).
+// attrValuesEqual decides whether two attribute values are equal, the way yjs
+// decides it: YText.js equalAttrs is `a === b || (both objects && equalFlat)`,
+// and lib0 object.equalFlat is "same size, and every entry strictly equal".
+//
+// Each part of that is load-bearing, and each was checked against yjs 13.6.32:
+//
+//   - The identity check comes first, so one container reused for both values
+//     is equal even when it holds a NaN, which fails an entry-by-entry check.
+//   - "Strictly equal" is JS ===, so the comparison goes one level deep and a
+//     nested container compares by identity: {x:{y:1}} and a separate,
+//     equal-by-value {x:{y:1}} stay distinct.
+//   - JS arrays and objects are both objects to equalFlat, so [1,2] equals
+//     {"0":1,"1":2}, and [] equals {}.
+//
+// This function decides whether Format and InsertWithAttributes emit format
+// markers at all, so any difference from yjs is a different item structure for
+// the same operation, not just a different answer.
+//
+// It used to be a bare a == b, which panics at runtime when both values are
+// maps or slices: reformatting a range carrying such an attribute, reading
+// ToDelta across two such runs, or building an observer event for them crashed
+// the process - and the event path runs on updates from peers.
+//
+// Scalars keep the semantics they had, including float64(1) != int(1) where JS
+// has one number type; changing that would change which markers existing
+// callers produce.
 func attrValuesEqual(a, b any) bool {
-	if a == nil && b == nil {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if sameObject(a, b) {
 		return true
 	}
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if isObjectLike(va) && isObjectLike(vb) {
+		return equalFlat(va, vb)
+	}
+	return strictEqual(a, b)
+}
+
+// isObjectLike reports whether v is what JS would call an object for the
+// purposes of equalFlat: a string-keyed map, or a list.
+func isObjectLike(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Map:
+		return v.Type().Key().Kind() == reflect.String
+	case reflect.Slice, reflect.Array:
+		return true
+	}
+	return false
+}
+
+// equalFlat is lib0 object.equalFlat: the same number of entries, and every
+// entry of a present in b and strictly equal. A list's entries are keyed by
+// their decimal index, which is how a JS array exposes them.
+func equalFlat(a, b reflect.Value) bool {
+	if a.Len() != b.Len() {
+		return false
+	}
+	if a.Kind() == reflect.Map {
+		it := a.MapRange()
+		for it.Next() {
+			bv, ok := entry(b, it.Key().String())
+			if !ok || !strictEqual(it.Value().Interface(), bv) {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i < a.Len(); i++ {
+		bv, ok := entry(b, strconv.Itoa(i))
+		if !ok || !strictEqual(a.Index(i).Interface(), bv) {
+			return false
+		}
+	}
+	return true
+}
+
+// entry looks up key in an object-like value, treating a list index as its
+// canonical decimal string.
+func entry(v reflect.Value, key string) (any, bool) {
+	if v.Kind() == reflect.Map {
+		mv := v.MapIndex(reflect.ValueOf(key).Convert(v.Type().Key()))
+		if !mv.IsValid() {
+			return nil, false
+		}
+		return mv.Interface(), true
+	}
+	i, err := strconv.Atoi(key)
+	if err != nil || i < 0 || i >= v.Len() || strconv.Itoa(i) != key {
+		return nil, false
+	}
+	return v.Index(i).Interface(), true
+}
+
+// sameObject is JS === between two containers: the same object, not an equal
+// one. Nil containers of the same type are the same, as null is.
+//
+// A zero-length slice is never the same object as another. Go gives every
+// empty slice the runtime's shared zerobase address, so pointer identity would
+// call two separately decoded empty arrays one object - and merge runs yjs keeps
+// apart ({x:[]} next to {x:[]}). A non-empty slice has a real backing array.
+func sameObject(a, b any) bool {
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if va.Type() != vb.Type() {
+		return false
+	}
+	switch va.Kind() {
+	case reflect.Map:
+		if va.IsNil() || vb.IsNil() {
+			return va.IsNil() && vb.IsNil()
+		}
+		return va.Pointer() == vb.Pointer()
+	case reflect.Slice:
+		if va.IsNil() || vb.IsNil() {
+			return va.IsNil() && vb.IsNil()
+		}
+		if va.Len() == 0 {
+			return false
+		}
+		return va.Pointer() == vb.Pointer() && va.Len() == vb.Len()
+	}
+	return false
+}
+
+// strictEqual is JS === for an entry: primitives by value, containers by
+// identity. It never panics, including on a comparable type whose dynamic
+// contents are not, such as a struct holding a slice.
+func strictEqual(a, b any) bool {
 	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if va.Type() != vb.Type() {
+		return false
+	}
+	switch va.Kind() {
+	case reflect.Map, reflect.Slice:
+		return sameObject(a, b)
+	}
+	if !va.Comparable() {
 		return false
 	}
 	return a == b
