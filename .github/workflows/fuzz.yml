@@ -73,10 +73,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          # Fuzz on a currently-supported Go release: the runtime and the
-          # fuzzing engine are part of what is under test here, so an old
-          # toolchain fuzzes code paths users no longer run.
-          go-version: "1.26"
+          # Fuzz on the current Go release: the runtime and the fuzzing engine
+          # are part of what is under test here, so an old toolchain fuzzes
+          # code paths users no longer run. `stable` rather than a number,
+          # because the number was 1.26 for weeks after 1.27 shipped.
+          go-version: stable
       - name: go mod download
         run: go mod download
       - name: fuzz ${{ matrix.func }} (${{ env.FUZZTIME }})
