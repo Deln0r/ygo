@@ -51,6 +51,60 @@
       "kind": "text",
       "root": "t",
       "expected": "hello world"
+    },
+    {
+      "description": "text insert and delete in one transaction then undo",
+      "kind": "text",
+      "root": "t",
+      "expected": ""
+    },
+    {
+      "description": "text insert and delete in one transaction then undo then redo",
+      "kind": "text",
+      "root": "t",
+      "expected": "ac"
+    },
+    {
+      "description": "text typed then corrected within one capture window then undo",
+      "kind": "text",
+      "root": "t",
+      "expected": ""
+    },
+    {
+      "description": "formatted insert then undo then redo",
+      "kind": "text-formatted",
+      "root": "t",
+      "expected": "abc{\"bold\":true} #3"
+    },
+    {
+      "description": "format over a run then undo",
+      "kind": "text-formatted",
+      "root": "t",
+      "expected": "ab|cd{\"bold\":true}|ef #6"
+    },
+    {
+      "description": "format over a run then undo then redo",
+      "kind": "text-formatted",
+      "root": "t",
+      "expected": "abcdef{\"bold\":false} #6"
+    },
+    {
+      "description": "clear part of a formatted run then undo",
+      "kind": "text-formatted",
+      "root": "t",
+      "expected": "bold text{\"bold\":true} #9"
+    },
+    {
+      "description": "clear part of a formatted run then undo then redo",
+      "kind": "text-formatted",
+      "root": "t",
+      "expected": "bold| text{\"bold\":true} #9"
+    },
+    {
+      "description": "delete neighbours in separate steps then undo once",
+      "kind": "text",
+      "root": "t",
+      "expected": "acd"
     }
   ]
 }

@@ -413,7 +413,10 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 		}
 	})
 
-	// Resurrect everything that was deleted during the captured window.
+	// Resurrect everything that was deleted during the captured window,
+	// except what the same window inserted. Typing "abc" and deleting the
+	// "b" is one step; undoing it must leave nothing behind, not the "b".
+	// yjs popStackItem skips those items for the same reason.
 	si.Deletions.Iterate(func(client uint64, ranges []encoding.Range) {
 		for _, r := range ranges {
 			clock := r.Start
@@ -429,7 +432,9 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 					}
 					continue
 				}
-				redoItem(txn, it)
+				if !si.Insertions.Contains(client, it.ID.Clock) {
+					redoItem(txn, it)
+				}
 				if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
 					break
 				}

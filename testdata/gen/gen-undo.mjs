@@ -147,6 +147,175 @@ scenarios.push({
   },
 });
 
+// Text with its formatting and length, rendered identically on the Go side:
+// each delta op is its text followed by its attributes as JSON with sorted
+// keys, ops joined by "|", then " #" and the length. Length is in the state
+// because a restored format marker that counts as content shows up nowhere
+// else.
+function textState(t) {
+  const ops = t.toDelta().map((op) => {
+    if (typeof op.insert !== "string") throw new Error("textState renders text only");
+    if (!op.attributes) return op.insert;
+    const keys = Object.keys(op.attributes).sort();
+    return op.insert + JSON.stringify(Object.fromEntries(keys.map((k) => [k, op.attributes[k]])));
+  });
+  return `${ops.join("|")} #${t.length}`;
+}
+
+// 8-10. An insert and a delete of part of it inside one captured step. yjs
+// never resurrects what the same step created, so undo leaves nothing behind.
+scenarios.push({
+  description: "text insert and delete in one transaction then undo",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    doc.transact(() => {
+      t.insert(0, "abc");
+      t.delete(1, 1);
+    });
+    um.undo();
+    return t.toString();
+  },
+});
+
+scenarios.push({
+  description: "text insert and delete in one transaction then undo then redo",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    doc.transact(() => {
+      t.insert(0, "abc");
+      t.delete(1, 1);
+    });
+    um.undo();
+    um.redo();
+    return t.toString();
+  },
+});
+
+scenarios.push({
+  description: "text typed then corrected within one capture window then undo",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 1e9 });
+    t.insert(0, "abc");
+    t.delete(1, 1);
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 11. Undo and redo of formatted text restore its markers without counting
+// them as content.
+scenarios.push({
+  description: "formatted insert then undo then redo",
+  kind: "text-formatted",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "abc", { bold: true });
+    um.undo();
+    um.redo();
+    return textState(t);
+  },
+});
+
+// 12-13. Formatting over a run of the same attribute deletes that run's
+// markers; undo has to bring them back and redo has to take them away again.
+scenarios.push({
+  description: "format over a run then undo",
+  kind: "text-formatted",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "abcdef");
+    t.format(2, 2, { bold: true });
+    t.format(0, 6, { bold: false });
+    um.undo();
+    return textState(t);
+  },
+});
+
+scenarios.push({
+  description: "format over a run then undo then redo",
+  kind: "text-formatted",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "abcdef");
+    t.format(2, 2, { bold: true });
+    t.format(0, 6, { bold: false });
+    um.undo();
+    um.redo();
+    return textState(t);
+  },
+});
+
+// 14-15. Clearing an attribute on part of a run, then undo, then redo.
+scenarios.push({
+  description: "clear part of a formatted run then undo",
+  kind: "text-formatted",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "bold text", { bold: true });
+    t.format(0, 4, { bold: null });
+    um.undo();
+    return textState(t);
+  },
+});
+
+scenarios.push({
+  description: "clear part of a formatted run then undo then redo",
+  kind: "text-formatted",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "bold text", { bold: true });
+    t.format(0, 4, { bold: null });
+    um.undo();
+    um.redo();
+    return textState(t);
+  },
+});
+
+// 16. Two neighbouring characters deleted in separate steps; undoing the
+// second step restores only the second character.
+scenarios.push({
+  description: "delete neighbours in separate steps then undo once",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "abcd");
+    t.delete(1, 1);
+    t.delete(1, 1);
+    um.undo();
+    return t.toString();
+  },
+});
+
 const out = {
   generator: "yjs@13.6.32 (UndoManager)",
   scenarios: scenarios.map((s) => ({

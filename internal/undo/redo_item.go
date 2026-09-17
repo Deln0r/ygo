@@ -163,6 +163,14 @@ func redoSequenceItem(txn *doc.TransactionMut, item *block.Item, parent *block.B
 	clock := txn.Store().GetClock(clientID)
 	nextID := block.ID{Client: clientID, Clock: clock}
 
+	// A restored item counts toward its parent's length only when its
+	// content does, as yjs derives it from the content. A format marker
+	// restored as countable would add a phantom character to Text.Length
+	// and shift every index after it.
+	var flags uint16
+	if item.Content.IsCountable() {
+		flags = block.FlagCountable
+	}
 	redone := &block.Item{
 		ID:          nextID,
 		Len:         item.Len,
@@ -172,7 +180,7 @@ func redoSequenceItem(txn *doc.TransactionMut, item *block.Item, parent *block.B
 		Right:       right,
 		Content:     item.Content.Copy(),
 		Parent:      block.Parent{Kind: block.ParentBranch, Branch: parent},
-		Flags:       block.FlagCountable,
+		Flags:       flags,
 	}
 	redone.SetKeep(true)
 

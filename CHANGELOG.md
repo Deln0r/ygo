@@ -16,14 +16,29 @@ file.
 
 ## [Unreleased]
 
-**Upgrade impact** - `Format`, `Delete` and `ApplyDelta` now match yjs in cases
-where they did not, so an application can see different results than on 1.20.0.
-`Format` over a range that already carries the attribute now formats the whole
-range. `Delete` removes embeds in its range instead of skipping them, and
-positions after an embed count it. Documents already written keep what they
-hold; only new calls behave differently.
+**Upgrade impact** - Undo, `Format`, `Delete` and `ApplyDelta` now match yjs in
+cases where they did not, so an application can see different results than on
+1.20.0. Undoing a step that inserted text and deleted part of it no longer
+brings the deleted part back, and undo or redo of formatted text no longer adds
+phantom length. `Format` over a range that already carries the attribute now
+formats the whole range. `Delete` removes embeds in its range instead of
+skipping them, and positions after an embed count it. Documents already written
+keep what they hold; only new calls behave differently.
 
 ### Fixed
+
+- **Undo brought back text deleted in the same step.** Typing "abc" and deleting
+  the "b" within one step, then undoing, left "b" in the document, where yjs
+  leaves nothing. Undo resurrected every deletion of the step, including items
+  the same step had inserted; those are now skipped, as yjs `popStackItem` does.
+  Three new undo fixtures captured from yjs 13.6.32 cover it, in one transaction
+  and across a capture window.
+
+- **Undo and redo of formatted text inflated its length.** Redo marked every
+  restored item as countable content, so a restored format marker added one to
+  `Text.Length` and shifted every index after it: `InsertWithAttributes("abc",
+  bold)`, undo, redo gave a length of 5. Whether a restored item counts now
+  follows its content, as in yjs.
 
 - **`Format` gave wrong results over existing formatting.** It wrote one opening
   and one closing marker and never touched markers inside the range. `Format(0,
@@ -66,7 +81,8 @@ hold; only new calls behave differently.
   leaves format markers that no longer mark anything. The test pins the exact
   difference each of them shows today and fails when one starts to match, when
   it diverges in any other way, or when a call errors, so the list can only
-  shrink. They stay out of the README totals until it is empty.
+  shrink. They stay out of the README totals until it is empty. Undo fixtures
+  grew from 7 to 16.
 
 ## [1.20.0] - 2026-09-17
 

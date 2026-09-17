@@ -2,10 +2,13 @@ package undo_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -100,10 +103,119 @@ func runByDescription(t *testing.T, desc string) interface{} {
 		deleteText(d, x, 5, 6)
 		um.Undo()
 		return x.String()
+
+	case "text insert and delete in one transaction then undo":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		txn := d.WriteTxn()
+		_ = x.Insert(txn, 0, "abc")
+		_ = x.Delete(txn, 1, 1)
+		txn.Commit()
+		um.Undo()
+		return x.String()
+
+	case "text insert and delete in one transaction then undo then redo":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		txn := d.WriteTxn()
+		_ = x.Insert(txn, 0, "abc")
+		_ = x.Delete(txn, 1, 1)
+		txn.Commit()
+		um.Undo()
+		um.Redo()
+		return x.String()
+
+	case "text typed then corrected within one capture window then undo":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: time.Hour})
+		defer um.Close()
+		insertText(d, x, 0, "abc")
+		deleteText(d, x, 1, 1)
+		um.Undo()
+		return x.String()
+
+	case "delete neighbours in separate steps then undo once":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 0, "abcd")
+		deleteText(d, x, 1, 1)
+		deleteText(d, x, 1, 1)
+		um.Undo()
+		return x.String()
+
+	case "formatted insert then undo then redo":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		txn := d.WriteTxn()
+		_ = x.InsertWithAttributes(txn, 0, "abc", types.Attrs{"bold": true})
+		txn.Commit()
+		um.Undo()
+		um.Redo()
+		return textState(t, x)
+
+	case "format over a run then undo", "format over a run then undo then redo":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 0, "abcdef")
+		formatText(d, x, 2, 2, types.Attrs{"bold": true})
+		formatText(d, x, 0, 6, types.Attrs{"bold": false})
+		um.Undo()
+		if desc == "format over a run then undo then redo" {
+			um.Redo()
+		}
+		return textState(t, x)
+
+	case "clear part of a formatted run then undo", "clear part of a formatted run then undo then redo":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		txn := d.WriteTxn()
+		_ = x.InsertWithAttributes(txn, 0, "bold text", types.Attrs{"bold": true})
+		txn.Commit()
+		formatText(d, x, 0, 4, types.Attrs{"bold": nil})
+		um.Undo()
+		if desc == "clear part of a formatted run then undo then redo" {
+			um.Redo()
+		}
+		return textState(t, x)
 	}
 
 	t.Fatalf("no Go scenario for %q", desc)
 	return nil
+}
+
+func formatText(d *doc.Doc, x *types.Text, idx, n uint64, attrs types.Attrs) {
+	txn := d.WriteTxn()
+	_ = x.Format(txn, idx, n, attrs)
+	txn.Commit()
+}
+
+// textState renders text the way gen-undo.mjs textState does: each delta op
+// as its text plus its attributes as JSON with sorted keys, joined by "|",
+// then " #" and the length.
+func textState(t *testing.T, x *types.Text) string {
+	t.Helper()
+	var ops []string
+	for _, op := range x.ToDelta() {
+		if op.Embed != nil {
+			t.Fatalf("textState renders text only, got embed %v", op.Embed)
+		}
+		if len(op.Attributes) == 0 {
+			ops = append(ops, op.Insert)
+			continue
+		}
+		b, err := json.Marshal(map[string]any(op.Attributes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ops = append(ops, op.Insert+string(b))
+	}
+	return fmt.Sprintf("%s #%d", strings.Join(ops, "|"), x.Length())
 }
 
 func setMap(d *doc.Doc, m *types.Map, k string, v any) {
