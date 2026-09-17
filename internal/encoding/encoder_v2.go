@@ -152,12 +152,14 @@ func (e *EncoderV2) WriteKey(key string) {
 	e.keyClockCounter++
 }
 
-// WriteJSON routes a JSON-encoded value to the rest stream as a
-// varstring. Used by ContentFormat / ContentEmbed (matches the
-// V1 encoder.writeJSON path — V2 doesn't column-encode JSON
-// payloads either).
+// WriteJSON writes a format value or an embed. In V2 that is a lib0 Any
+// in the rest stream, NOT the JSON varstring V1 uses - yjs
+// UpdateEncoderV2.writeJSON calls writeAny. This method used to reuse
+// the V1 layout on the assumption that V2 "doesn't column-encode JSON
+// payloads either", which is true and beside the point: the payload
+// format differs, and the result was unreadable by yjs. See json_any.go.
 func (e *EncoderV2) WriteJSON(v block.Any) {
-	e.rest = writeJSON(e.rest, v)
+	e.WriteAny(jsonValueForAny(v))
 }
 
 // Bytes flushes every column and assembles the final V2 wire

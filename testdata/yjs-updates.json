@@ -301,6 +301,84 @@
       "update_hex": "0101b60200040101780e65cc81f09fa791e2808df09f92bb00",
       "expected_text": "é🧑‍💻",
       "expected_length": 7
+    },
+    {
+      "description": "Text.insert with a boolean attribute",
+      "js_client_id": 360,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0103e802000601017804626f6c64047472756584e802000568656c6c6f86e8020504626f6c64046e756c6c00",
+      "expected_text": "hello",
+      "expected_length": 5,
+      "expected_delta": [
+        {
+          "insert": "hello",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ]
+    },
+    {
+      "description": "Text.format an existing range",
+      "js_client_id": 361,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0104e90200040101780668656c6c6f2084e9020505776f726c64c6e90205e90206066974616c6963047472756586e9020a066974616c6963046e756c6c00",
+      "expected_text": "hello world",
+      "expected_length": 11,
+      "expected_delta": [
+        {
+          "insert": "hello "
+        },
+        {
+          "insert": "world",
+          "attributes": {
+            "italic": true
+          }
+        }
+      ]
+    },
+    {
+      "description": "Text.insertEmbed with an object payload",
+      "js_client_id": 362,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0103ea020004010178016184ea02000162c5ea0200ea02011d7b22696d616765223a22782e706e67222c227769647468223a3132307d00",
+      "expected_text": "ab",
+      "expected_length": 3,
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": {
+            "image": "x.png",
+            "width": 120
+          }
+        },
+        {
+          "insert": "b"
+        }
+      ]
+    },
+    {
+      "description": "Text attributes with an integer and a string value",
+      "js_client_id": 363,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0105eb02000601017806686561646572013186eb020005616c69676e082263656e7465722284eb0201065469746c650a86eb020706686561646572046e756c6c86eb020805616c69676e046e756c6c00",
+      "expected_text": "Title\n",
+      "expected_length": 6,
+      "expected_delta": [
+        {
+          "insert": "Title\n",
+          "attributes": {
+            "header": 1,
+            "align": "center"
+          }
+        }
+      ]
     }
   ]
 }

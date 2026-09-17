@@ -75,6 +75,9 @@ func TestFixtures_DecodeApplyJSYjsV2Updates(t *testing.T) {
 				verifyArrayScenario(t, types.NewArray(branch), sc.ExpectedArray)
 			case "text":
 				verifyTextScenario(t, types.NewText(branch), sc.ExpectedText, sc.ExpectedLength)
+				if sc.ExpectedDelta != nil {
+					verifyTextDelta(t, types.NewText(branch), sc.ExpectedDelta)
+				}
 			default:
 				t.Fatalf("unknown root_kind %q", rootKind)
 			}

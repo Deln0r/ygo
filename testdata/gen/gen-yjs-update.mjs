@@ -89,6 +89,22 @@ function captureText(description, rootName, clientID, mutate) {
   };
 }
 
+// captureRichText records the delta as well as the flat string. Text and
+// length alone cannot see formatting: a decoder that dropped every attribute
+// would still match them. The V2 rich-text codec went wrong in exactly that
+// blind spot - Format values and embeds are written through writeJSON, which
+// V1 encodes as a JSON string and V2 as a lib0 Any - and no fixture in either
+// format carried a single attribute until these.
+function captureRichText(description, rootName, clientID, mutate) {
+  const sc = captureText(description, rootName, clientID, mutate);
+  const doc = new Y.Doc();
+  doc.clientID = clientID;
+  const text = doc.getText(rootName);
+  mutate(text, doc);
+  sc.expected_delta = text.toDelta();
+  return sc;
+}
+
 // Scenario clientIDs are arbitrary but stable. Picking distinct
 // values per scenario avoids any cross-scenario state leakage in
 // case the generator ever shares a doc.
@@ -234,6 +250,21 @@ const scenarios = [
   captureText("Text deeply nested non-BMP (combining marks + surrogates)", "x", 310, (t) => {
     // e + combining acute + emoji + zero-width-joiner + family modifier
     t.insert(0, "é🧑‍💻"); // 7 UTF-16 units total
+  }),
+  // --- Rich text: format values and embeds go through writeJSON ---
+  captureRichText("Text.insert with a boolean attribute", "x", 360, (t) => {
+    t.insert(0, "hello", { bold: true });
+  }),
+  captureRichText("Text.format an existing range", "x", 361, (t) => {
+    t.insert(0, "hello world");
+    t.format(6, 5, { italic: true });
+  }),
+  captureRichText("Text.insertEmbed with an object payload", "x", 362, (t) => {
+    t.insert(0, "ab");
+    t.insertEmbed(1, { image: "x.png", width: 120 });
+  }),
+  captureRichText("Text attributes with an integer and a string value", "x", 363, (t) => {
+    t.insert(0, "Title\n", { header: 1, align: "center" });
   }),
 ];
 

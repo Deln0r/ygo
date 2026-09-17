@@ -274,6 +274,84 @@
       "expected_text": "ccccc",
       "expected_length": 5,
       "follow_up_hex": "000002840e00000104090642626262626201050101000001010500"
+    },
+    {
+      "description": "rich text: an insert with a boolean attribute",
+      "go_client_id": 960,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0002000203c00f0102000a00050600840086130e78626f6c6468656c6c6f626f6c640104050401010000010300787e00",
+      "expected_text": "hello",
+      "expected_length": 5,
+      "expected_delta": [
+        {
+          "attributes": {
+            "bold": true
+          },
+          "insert": "hello"
+        }
+      ]
+    },
+    {
+      "description": "rich text: formatting an existing range",
+      "go_client_id": 961,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0002000203c10f03030a000a010c0704008400c600861e187868656c6c6f20776f726c646974616c69636974616c6963010605460001010000010400787e00",
+      "expected_text": "hello world",
+      "expected_length": 11,
+      "expected_delta": [
+        {
+          "insert": "hello "
+        },
+        {
+          "attributes": {
+            "italic": true
+          },
+          "insert": "world"
+        }
+      ]
+    },
+    {
+      "description": "rich text: an embed with an object payload",
+      "go_client_id": 962,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "000003c20f0202010001020504008400c50603786162410101010000010300760205696d6167657705782e706e670577696474687db80100",
+      "expected_text": "ab",
+      "expected_length": 3,
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": {
+            "image": "x.png",
+            "width": 120
+          }
+        },
+        {
+          "insert": "b"
+        }
+      ]
+    },
+    {
+      "description": "rich text: an integer and a string attribute",
+      "go_client_id": 963,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "000300030103c30f030400020c02000706008600840086241d78686561646572616c69676e5469746c650a686561646572616c69676e010605460005010100000105007d01770663656e7465727e7e00",
+      "expected_text": "Title\n",
+      "expected_length": 6,
+      "expected_delta": [
+        {
+          "attributes": {
+            "align": "center",
+            "header": 1
+          },
+          "insert": "Title\n"
+        }
+      ]
     }
   ]
 }

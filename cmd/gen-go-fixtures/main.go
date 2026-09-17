@@ -78,6 +78,10 @@ type scenario struct {
 	// the point being proved is that the far side SURVIVES until the rest of
 	// the history arrives.
 	FollowUpHex string `json:"follow_up_hex,omitempty"`
+	// ExpectedDelta is the delta in JS shape ([{insert, attributes?}]), for
+	// scenarios where the flat text cannot tell right from wrong: a decoder
+	// that dropped every attribute would still match expected_text.
+	ExpectedDelta []map[string]any `json:"expected_delta,omitempty"`
 }
 
 type fixtureFile struct {
@@ -280,8 +284,55 @@ func captureMergedWithPending(enc encoder) []scenario {
 	}
 }
 
+// captureRichText records formatting and embeds, which travel through the
+// writeJSON codec - a JSON string in V1, a lib0 Any in V2. No reverse fixture
+// carried a single attribute before these, which is how Go's V2 encoder spent
+// its whole life writing the V1 layout without a check noticing.
+func captureRichText(enc encoder, description, rootName string, clientID uint64, mutate func(*ygo.Text, *ygo.TransactionMut)) scenario {
+	sc := captureText(enc, description, rootName, clientID, mutate)
+
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: clientID})
+	t := ygo.NewText(d, rootName)
+	txn := d.WriteTxn()
+	mutate(t, txn)
+	txn.Commit()
+	for _, op := range t.ToDelta() {
+		m := map[string]any{}
+		if op.Embed != nil {
+			m["insert"] = op.Embed
+		} else {
+			m["insert"] = op.Insert
+		}
+		if len(op.Attributes) > 0 {
+			m["attributes"] = map[string]any(op.Attributes)
+		}
+		sc.ExpectedDelta = append(sc.ExpectedDelta, m)
+	}
+	return sc
+}
+
 func captureAll(enc encoder) []scenario {
-	return append(baseScenarios(enc), captureMergedWithPending(enc)...)
+	all := append(baseScenarios(enc), captureMergedWithPending(enc)...)
+	return append(all,
+		captureRichText(enc, "rich text: an insert with a boolean attribute", "x", 960,
+			func(t *ygo.Text, txn *ygo.TransactionMut) {
+				must(t.InsertWithAttributes(txn, 0, "hello", map[string]any{"bold": true}))
+			}),
+		captureRichText(enc, "rich text: formatting an existing range", "x", 961,
+			func(t *ygo.Text, txn *ygo.TransactionMut) {
+				must(t.Insert(txn, 0, "hello world"))
+				must(t.Format(txn, 6, 5, map[string]any{"italic": true}))
+			}),
+		captureRichText(enc, "rich text: an embed with an object payload", "x", 962,
+			func(t *ygo.Text, txn *ygo.TransactionMut) {
+				must(t.Insert(txn, 0, "ab"))
+				must(t.InsertEmbed(txn, 1, map[string]any{"image": "x.png", "width": 120}))
+			}),
+		captureRichText(enc, "rich text: an integer and a string attribute", "x", 963,
+			func(t *ygo.Text, txn *ygo.TransactionMut) {
+				must(t.InsertWithAttributes(txn, 0, "Title\n", map[string]any{"header": 1, "align": "center"}))
+			}),
+	)
 }
 
 func baseScenarios(enc encoder) []scenario {

@@ -16,15 +16,84 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact** - V2 updates carrying formatted text or embeds are now
+encoded the way yjs encodes them, which is not the way ygo encoded them before.
+If you called `EncodeStateAsUpdateV2`, `EncodeDiffV2` or `MergeUpdatesV2` on a
+document with formatting or embeds AND stored the bytes, do not feed those
+stored bytes to this release: they carry the old, non-yjs layout, and they may
+be rejected OR silently decoded into different content - a JSON length prefix
+can happen to be a valid Any tag. Re-encode them with the previous release first
+(apply with `ApplyUpdateV2` on 1.19.x, then `EncodeStateAsUpdate` to V1). Nothing else is affected: V1 is unchanged, V2
+without formatting or embeds is byte-identical to before, and ygo's own server,
+client, persistence and mobile SDK only ever write V1 - checked by searching
+every caller of the V2 encoders.
+
+### Fixed
+
+- **V2 rich text was unreadable in both directions.** Format values and embeds
+  travel through the JSON content codec, which yjs writes as a JSON string in
+  V1 and as a lib0 Any in V2 (`UpdateEncoderV2.writeJSON` calls `writeAny`).
+  ygo used the V1 layout inside V2, on the stated assumption that V2 "doesn't
+  column-encode JSON payloads either" - true, and beside the point. It
+  round-tripped with itself and with no one else: measured against yjs
+  13.6.32, a bold insert, a format of an existing range and an embed each made
+  `Y.applyUpdateV2` throw, and the same content encoded by yjs failed to
+  decode here with `lib0: truncated input`.
+
+  V2 now reads and writes the Any layout. Two kinds of value reach the
+  encoder and they are handled differently. Values that are already an Any
+  tree - everything decoded from a peer - are written as they stand, so what
+  JSON cannot carry survives a relay: a yjs embed `{n: Infinity, keep: 1}` and
+  a `Uint8Array` come back out intact (a first draft routed everything through
+  JSON and turned the former into a bare `null`). Everything else - structs,
+  typed maps, custom `MarshalJSON` - goes through `encoding/json` first, as V1
+  always has, because the Any encoder panics on those types; a custom
+  marshaler emitting a literal JSON cannot read back, such as `1e1000`,
+  degrades to `null` there, and so does a value that refers back to itself.
+  A nil map, slice or byte slice is `null` too - which in a format attribute
+  means "remove it" - exactly as V1 has always sent it, so the same `Format`
+  call leaves V1 and V2 receivers with the same document.
+
+  Numbers are classified the way lib0 `writeAny` classifies a JS number, and
+  the output is byte-identical to yjs for integers, the int31 boundaries,
+  float32-exact and float64-only values, large integers, strings, booleans,
+  null and binary. The exceptions are inherited from the shared Any codec
+  rather than introduced here: an object with more than one key may differ in
+  key order, because the Any encoder sorts keys; a negative zero supplied
+  locally is kept as a float64 so it keeps its sign, but one arriving from yjs
+  as a signed varint has already lost it in the decoder; and a JS `undefined`
+  decodes as `null`. Decoded attributes come back as the same Go types V1
+  yields (numbers as `float64`), so `attrs["header"].(float64)` does not work
+  on a V1 document and panic on the identical V2 one; a BigInt from yjs
+  therefore arrives as a float64, and loses precision beyond 2^53.
+
+  Found while reviewing an unrelated change; nothing in the suite could
+  have caught it, because no cross-language fixture in either format
+  carried a single attribute. Now four rich-text scenarios in each of V1 and V2
+  run in both directions, and both sides compare the delta rather than the
+  flat string, which cannot see formatting. Before the fix the four V2
+  scenarios failed in both directions, and V1's passed; with the codec
+  reverted to the previous layout the V2 ones fail again.
+
+### Infrastructure
+
+- CI tests the current Go release again. Go 1.27 had shipped while the test
+  matrix still read `["1.25", "1.26"]` under a comment calling that pair the
+  two releases upstream supports. Everything was run under go1.27.1 first -
+  vet, the race suite, lint, all cross-compile targets, both nested modules -
+  and nothing needed porting. The current-release leg is now `stable`, so it
+  cannot go stale the same way; the floor stays pinned at 1.25 because go.mod
+  declares it and no dependency needs more.
+
 ### Changed
 
 - `modernc.org/sqlite` v1.57.0 -> v1.59.0, and with it `modernc.org/libc`
   v1.74.4 -> v1.75.7 (via v1.58.0 / v1.75.6). v1.59.0 only pools the
   per-call context handed to user-defined SQL functions, which ygo does not
   register, so it is inert here; its libc bump is not, and got the same
-  verification as the step before it. The libc bump is not optional: upstream requires a
-  downstream module to pin the exact libc version its own `go.mod` names, so
-  the two move together.
+  verification as the step before it. The libc bump is not optional:
+  upstream requires a downstream module to pin the exact libc version its
+  own `go.mod` names, so the two move together.
 
   The release carries SQLite 3.53.4, whose upstream fix for the
   journal-rollback data-corruption bug replaces the local super-journal patch
@@ -39,8 +108,10 @@ file.
   [`persist/sqlite`](persist/sqlite) is byte-for-byte what it was.
 
   The wasm caveat still holds: `persist/sqlite` remains unbuildable for
-  `js/wasm` and `wasip1/wasm` because `modernc.org/libc` has no wasm build,
-  and every other package still compiles for both.
+  `js/wasm` and `wasip1/wasm` because `modernc.org/libc` has no wasm build.
+  The library packages the README lists for wasm still compile for both;
+  anything that imports `persist/sqlite` - the mobile SDK, the server
+  binaries, the examples - does not, as before.
 
 ## [1.19.0] - 2026-09-05
 

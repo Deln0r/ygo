@@ -90,6 +90,17 @@ function verifyArray(doc, rootName, expected) {
   return null;
 }
 
+// canonical renders a JSON-shaped value with object keys sorted at every
+// level, so two structurally equal values render identically regardless of
+// the key order the producing side happened to use.
+function canonical(v) {
+  if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
+  if (v && typeof v === "object") {
+    return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
+  }
+  return JSON.stringify(v);
+}
+
 function verifyText(doc, rootName, expectedText, expectedLength) {
   const t = doc.getText(rootName);
   const gotText = t.toString();
@@ -167,6 +178,16 @@ function validateFile(path, applyFn, label) {
         break;
       case "text":
         err = verifyText(doc, sc.root_name, sc.expected_text || "", sc.expected_length || 0);
+        if (!err && sc.expected_delta) {
+          // The flat string cannot see formatting; compare the delta too.
+          // Structurally, not as JSON text: Go's encoder sorts object keys
+          // and JS keeps insertion order, so identical deltas stringify
+          // differently. The first version of this check compared strings
+          // and failed V1 scenarios that were correct.
+          const got = canonical(doc.getText(sc.root_name).toDelta());
+          const want = canonical(sc.expected_delta);
+          if (got !== want) err = `delta mismatch: actual=${got} expected=${want}`;
+        }
         break;
       case "xml":
         err = verifyXml(doc, sc.root_name, sc.expected_xml_children);

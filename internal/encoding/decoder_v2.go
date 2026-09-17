@@ -265,14 +265,14 @@ func (d *DecoderV2) ReadKey() (string, error) {
 	return s, nil
 }
 
-// ReadJSON consumes the next JSON-encoded payload (varstring) from
-// the rest stream and JSON-unmarshals it. Used by ContentFormat /
-// ContentEmbed (mirrors V1 readJSON path).
+// ReadJSON reads a format value or an embed: a lib0 Any in the rest
+// stream, as yjs UpdateDecoderV2.readJSON reads it, with numbers mapped
+// to the types the V1 path yields so callers see the same Go types
+// whichever wire format delivered the document. See json_any.go.
 func (d *DecoderV2) ReadJSON() (block.Any, error) {
-	v, tail, err := readJSON(d.rest[d.restPos:])
+	v, err := d.ReadAny()
 	if err != nil {
 		return nil, err
 	}
-	d.restPos = len(d.rest) - len(tail)
-	return v, nil
+	return jsonValueFromAny(v), nil
 }

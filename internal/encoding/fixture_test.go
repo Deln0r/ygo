@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/Deln0r/ygo/internal/doc"
@@ -27,6 +28,10 @@ type fixtureScenario struct {
 	ExpectedArray  []interface{}          `json:"expected_array,omitempty"`
 	ExpectedText   string                 `json:"expected_text,omitempty"`
 	ExpectedLength uint64                 `json:"expected_length,omitempty"`
+	// ExpectedDelta is the JS Y.Text.toDelta() output, for scenarios where the
+	// flat string cannot tell right from wrong: a decoder that dropped every
+	// attribute would still match ExpectedText and ExpectedLength.
+	ExpectedDelta []any `json:"expected_delta,omitempty"`
 }
 
 // TestFixtures_DecodeApplyJSYjsUpdates is the binary-protocol-compat
@@ -98,6 +103,9 @@ func TestFixtures_DecodeApplyJSYjsUpdates(t *testing.T) {
 				verifyArrayScenario(t, types.NewArray(branch), sc.ExpectedArray)
 			case "text":
 				verifyTextScenario(t, types.NewText(branch), sc.ExpectedText, sc.ExpectedLength)
+				if sc.ExpectedDelta != nil {
+					verifyTextDelta(t, types.NewText(branch), sc.ExpectedDelta)
+				}
 			default:
 				t.Fatalf("unknown root_kind %q", rootKind)
 			}
@@ -155,6 +163,48 @@ func verifyTextScenario(t *testing.T, txt *types.Text, expectedStr string, expec
 	}
 	if got := txt.Length(); got != expectedLength {
 		t.Errorf("Text.Length() = %d, want %d (UTF-16 code units)", got, expectedLength)
+	}
+}
+
+// verifyTextDelta compares Text.ToDelta against the delta JS Yjs produced for
+// the same document, in the JS shape: [{insert, attributes?}].
+//
+// Both sides go through JSON before comparison, so a number is a number
+// whichever codec decoded it (JSON gives float64, lib0 Any gives int64) and
+// only structure and values are compared.
+func verifyTextDelta(t *testing.T, txt *types.Text, expected []any) {
+	t.Helper()
+	ops := txt.ToDelta()
+	got := make([]any, 0, len(ops))
+	for _, op := range ops {
+		m := map[string]any{}
+		if op.Embed != nil {
+			m["insert"] = op.Embed
+		} else {
+			m["insert"] = op.Insert
+		}
+		if len(op.Attributes) > 0 {
+			m["attributes"] = map[string]any(op.Attributes)
+		}
+		got = append(got, m)
+	}
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal delta: %v", err)
+	}
+	wantJSON, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatalf("marshal expected delta: %v", err)
+	}
+	var gotNorm, wantNorm any
+	if err := json.Unmarshal(gotJSON, &gotNorm); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(wantJSON, &wantNorm); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotNorm, wantNorm) {
+		t.Errorf("Text.ToDelta() = %s\n                  want %s", gotJSON, wantJSON)
 	}
 }
 
