@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
@@ -535,7 +535,8 @@ func TestSync_SecondDocumentGetsFullHistory(t *testing.T) {
 // TestSync_HonoursContextCancellation: integrating an update is superlinear
 // in the conflicts it carries, so one page of hostile-but-legal events is slow
 // to merge. That cost cannot be removed here - it is YATA's, and the reference
-// implementation shares it - but a caller's deadline has to survive it.
+// implementation shares it - but a caller's deadline has to survive it, so the
+// merge loop checks the context between events.
 //
 // The cancellation deliberately lands mid-merge rather than before the call.
 // Cancelling up front proves nothing: the HTTP client fails first and the test
@@ -545,56 +546,39 @@ func TestSync_SecondDocumentGetsFullHistory(t *testing.T) {
 // so once the response is parsed there is no network left; a cancellation
 // observed after that can only have come from the merge loop, and the error
 // message is asserted to say so.
+//
+// The document cancels the context itself, from a hook that fires when the
+// first update has been merged, so the guard is exercised on every run. The
+// previous version raced a 100ms deadline against a deliberately slow update
+// and only worked where that merge took longer than the deadline: on a fast
+// machine it finished first, and the test failed in 8 to 10 runs out of 10.
 func TestSync_HonoursContextCancellation(t *testing.T) {
 	f := newFakeHS(t)
 	f.syncWindow = 100
-
-	// One update carrying many single-item runs that all conflict at the same
-	// position: the expensive shape, published a few times over.
-	slow := conflictHeavyUpdate(t, 1500)
-	tr, _ := ymatrix.New(f.client(t), testRoom)
-	for i := 0; i < 4; i++ {
-		f.append(&event.Event{
-			ID:      id.EventID(fmt.Sprintf("$slow%d", i)),
-			Type:    ymatrix.EventType,
-			RoomID:  testRoom,
-			Content: event.Content{Raw: map[string]any{"format": ymatrix.FormatV1, "payload": base64.StdEncoding.EncodeToString(slow)}},
-		})
+	words := []string{"alpha", "beta", "gamma", "delta"}
+	for i, w := range words {
+		d, tr := peer(t, f, uint64(i+1), 0, w)
+		if _, err := tr.PublishDoc(context.Background(), d); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	start := time.Now()
-	_, err := tr.Sync(ctx, ygo.NewDoc())
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("sync err=%v, want context.DeadlineExceeded after %s", err, time.Since(start))
+	d := ygo.NewDoc()
+	stop := d.OnAfterTransaction(func(*ygo.TransactionMut) { cancel() })
+	tr, _ := ymatrix.New(f.client(t), testRoom)
+	_, err := tr.Sync(ctx, d)
+	stop()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sync err=%v, want context.Canceled", err)
 	}
 	if !strings.Contains(err.Error(), "merging room history") {
 		t.Fatalf("cancellation came from %v, not from the merge loop; the test is not exercising the guard", err)
 	}
-}
-
-// conflictHeavyUpdate builds an update of n single-item runs from n distinct
-// clients, all inserting at the same position, so every item conflicts with
-// every earlier one. Merging it is quadratic by construction.
-func conflictHeavyUpdate(t *testing.T, n int) []byte {
-	t.Helper()
-	ups := make([][]byte, 0, n)
-	for i := 1; i <= n; i++ {
-		d := ygo.NewDocWithOptions(ygo.Options{ClientID: uint64(i)})
-		txt := ygo.NewText(d, "t")
-		txn := d.WriteTxn()
-		if err := txt.Insert(txn, 0, "x"); err != nil {
-			t.Fatal(err)
-		}
-		txn.Commit()
-		ups = append(ups, ygo.EncodeStateAsUpdate(d))
+	if got := textOf(t, d); !slices.Contains(words, got) {
+		t.Fatalf("document holds %q; want exactly one of %v merged before the loop stopped", got, words)
 	}
-	m, err := ygo.MergeUpdates(ups)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m
 }
 
 // TestSync_SurvivesUndecodableEvent is the module's central untrusted-input
