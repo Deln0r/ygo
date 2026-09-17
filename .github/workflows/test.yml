@@ -232,6 +232,9 @@ jobs:
       - name: regenerate wire-edge fixtures
         working-directory: testdata/gen
         run: node gen-wire-edge.mjs
+      - name: regenerate rich-text behaviour fixtures
+        working-directory: testdata/gen
+        run: node gen-rich-text.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff
@@ -253,6 +256,7 @@ jobs:
           go test ./internal/encoding/... -run TestSnapshotFixtures
           go test . -run TestSubdoc_CrossLanguage
           go test . -run TestWireEdge_CrossLanguage
+          go test . -run TestRichText_Fixtures
       - name: validate reverse fixtures (JS applies Go-encoded bytes)
         working-directory: testdata/gen
         run: node validate-go-fixtures.mjs

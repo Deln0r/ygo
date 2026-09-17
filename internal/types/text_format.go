@@ -132,88 +132,225 @@ func (t *Text) InsertWithAttributes(txn *doc.TransactionMut, idx uint64, str str
 	return nil
 }
 
-// Format applies attrs to the range [idx, idx+length). For each
-// attribute whose target value differs from the current formatting:
-// open a marker at idx, walk through the range rewriting any
-// intermediate markers for the same key (to ensure they don't
-// re-establish the old value mid-range), and close with a marker
-// at idx+length restoring the prior state.
+// Format applies attrs to the range [idx, idx+length). It is a port of
+// yjs YText.format / formatText: the cursor stops at idx before any
+// format markers there, markers that already set a requested value are
+// stepped over, an opening marker is written for every attribute that
+// changes, markers inside the range for a requested key are deleted
+// (they would otherwise re-establish the old value mid-range), and
+// markers after the range restore what was in effect there.
 //
-// length == 0 is a no-op. nil attrs is a no-op. Per
-// docs/yrs-port-notes/types-text-rich.md §4.
+// A nil value in attrs clears that attribute over the range. length == 0
+// and empty attrs are no-ops. A range past the end of the text is an
+// error; yjs instead appends newlines for the missing length, a Quill
+// convention this port does not follow.
 func (t *Text) Format(txn *doc.TransactionMut, idx, length uint64, attrs Attrs) error {
 	if length == 0 || len(attrs) == 0 {
 		return nil
 	}
 	total := t.Length()
-	if idx+length > total {
-		return fmt.Errorf("text: format range [%d, %d) exceeds length %d", idx, idx+length, total)
+	if idx > total || length > total-idx {
+		return fmt.Errorf("text: format range of %d at %d exceeds length %d", length, idx, total)
 	}
-
-	// Split at the start boundary so we can insert a marker exactly there.
-	startLeft, startRight, err := findTextPosition(t.branch, txn, idx)
+	pos, err := findTextPos(txn, t.branch, idx)
 	if err != nil {
 		return err
 	}
-	// Skip tombstones and format markers so cursor lands at the
-	// natural end of the position — any pre-existing markers there
-	// have already taken effect.
-	for startRight != nil && (startRight.IsDeleted() || startRight.Content.Kind == block.KindFormat) {
-		startLeft = startRight
-		startRight = startRight.Right
+	return formatText(txn, t.branch, pos, length, attrs)
+}
+
+// textPos is a cursor between two items of a text, carrying the
+// formatting in effect at that point. It mirrors yjs
+// ItemTextListPosition.
+type textPos struct {
+	left, right *block.Item
+	index       uint64
+	attrs       Attrs
+}
+
+// forward steps the cursor over right, which must not be nil. A live
+// format marker updates the formatting in effect; live content advances
+// the index. Deleted items change neither.
+func (p *textPos) forward() {
+	r := p.right
+	if !r.IsDeleted() {
+		if r.Content.Kind == block.KindFormat {
+			updateCurrentAttrs(p.attrs, r.Content.FormatKey, formatValue(r))
+		} else {
+			p.index += r.Len
+		}
 	}
+	p.left = r
+	p.right = r.Right
+}
 
-	// Snapshot startAttrs BEFORE emitting any new markers so the
-	// "what was here originally" view is stable.
-	startAttrs := currentAttributesAt(t.branch, startRight)
-
-	// Split + locate end position. endLeft / endRight are pointers
-	// to existing Items; emitting open markers at the start position
-	// does not invalidate them because the new markers land strictly
-	// before endRight in the linked list.
-	endLeft, endRight, err := findTextPosition(t.branch, txn, idx+length)
-	if err != nil {
-		return err
+// findTextPos walks from the start of the text to index, splitting a
+// string item the index falls inside. Like yjs findNextPosition it
+// stops as soon as index units of content are behind it, so format
+// markers right after the index stay ahead of the cursor. It does not
+// use search markers: the formatting in effect at the cursor needs
+// every marker before it.
+func findTextPos(txn *doc.TransactionMut, branch *block.Branch, index uint64) (*textPos, error) {
+	pos := &textPos{right: branch.Start, attrs: Attrs{}}
+	for pos.right != nil && index > 0 {
+		r := pos.right
+		if !r.IsDeleted() && r.Content.Kind != block.KindFormat && index < r.Len {
+			if txn.Store().SplitBlock(r, index) == nil {
+				return nil, fmt.Errorf("text: split failed at offset %d in item %v", index, r.ID)
+			}
+		}
+		if !r.IsDeleted() && r.Content.Kind != block.KindFormat {
+			index -= r.Len
+		}
+		pos.forward()
 	}
-	for endRight != nil && (endRight.IsDeleted() || endRight.Content.Kind == block.KindFormat) {
-		endLeft = endRight
-		endRight = endRight.Right
+	return pos, nil
+}
+
+// negatedAttrs holds the values to restore after a formatted range, in
+// the order they were recorded. Setting an existing key keeps its place
+// and deleting then setting moves it last, as with a JavaScript Map.
+type negatedAttrs struct {
+	keys   []string
+	values map[string]any
+}
+
+func (n *negatedAttrs) set(key string, value any) {
+	if n.values == nil {
+		n.values = map[string]any{}
 	}
+	if _, ok := n.values[key]; !ok {
+		n.keys = append(n.keys, key)
+	}
+	n.values[key] = value
+}
 
-	// Snapshot endAttrs BEFORE emitting any markers — this is the
-	// "what was originally in effect at idx+length" view we will
-	// restore via closing markers.
-	endAttrs := currentAttributesAt(t.branch, endRight)
-	keys := sortedAttrKeys(attrs)
+func (n *negatedAttrs) get(key string) (any, bool) {
+	v, ok := n.values[key]
+	return v, ok
+}
 
-	// Emit opening markers — only for keys whose value changes.
-	for _, key := range keys {
+func (n *negatedAttrs) remove(key string) {
+	if _, ok := n.values[key]; !ok {
+		return
+	}
+	delete(n.values, key)
+	for i, k := range n.keys {
+		if k == key {
+			n.keys = append(n.keys[:i], n.keys[i+1:]...)
+			return
+		}
+	}
+}
+
+// minimizeAttributeChanges steps over deleted items and over format
+// markers that already set the value attrs asks for, so no marker is
+// written for a change that is already in effect. An attribute missing
+// from attrs counts as nil. Mirrors yjs minimizeAttributeChanges.
+func minimizeAttributeChanges(pos *textPos, attrs Attrs) {
+	for pos.right != nil {
+		r := pos.right
+		if !r.IsDeleted() && (r.Content.Kind != block.KindFormat || !attrValuesEqual(attrs[r.Content.FormatKey], formatValue(r))) {
+			return
+		}
+		pos.forward()
+	}
+}
+
+// insertAttributes writes an opening marker for every attribute whose
+// requested value differs from the one in effect, and returns the values
+// that were in effect so they can be restored after the range. Mirrors
+// yjs insertAttributes, with keys in ascending order.
+func insertAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, attrs Attrs) *negatedAttrs {
+	negated := &negatedAttrs{}
+	for _, key := range sortedAttrKeys(attrs) {
 		value := attrs[key]
-		if attrValuesEqual(startAttrs[key], value) {
+		current := pos.attrs[key]
+		if attrValuesEqual(current, value) {
 			continue
 		}
-		marker := buildFormatMarker(txn, startLeft, startRight, t.branch, key, value)
-		startLeft = marker
+		negated.set(key, current)
+		pos.right = buildFormatMarker(txn, pos.left, pos.right, branch, key, value)
+		pos.forward()
 	}
+	return negated
+}
 
-	// Emit closing markers to restore whatever was in effect at the
-	// end position before our format applied.
-	for _, key := range keys {
-		value := attrs[key]
-		if attrValuesEqual(startAttrs[key], value) {
-			continue
+// formatText applies attrs to length units of content from pos. Mirrors
+// yjs formatText: after the opening markers it walks the range, deleting
+// markers for requested keys, and keeps walking past the range while
+// values remain to restore and the next item is a marker or deleted, so
+// a marker that already restores a value is reused instead of doubled.
+func formatText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, length uint64, attrs Attrs) error {
+	minimizeAttributeChanges(pos, attrs)
+	negated := insertAttributes(txn, branch, pos, attrs)
+walk:
+	for pos.right != nil {
+		r := pos.right
+		if length == 0 && (len(negated.keys) == 0 || (!r.IsDeleted() && r.Content.Kind != block.KindFormat)) {
+			break
 		}
-		prevAtEnd := endAttrs[key]
-		// If our applied value is already what's in effect at the
-		// end (i.e. the original formatting at idx+length was the
-		// same as what we're applying), no close needed.
-		if attrValuesEqual(prevAtEnd, value) {
-			continue
+		if !r.IsDeleted() {
+			if r.Content.Kind == block.KindFormat {
+				key, value := r.Content.FormatKey, formatValue(r)
+				if requested, ok := attrs[key]; ok {
+					if attrValuesEqual(requested, value) {
+						negated.remove(key)
+					} else {
+						if length == 0 {
+							break walk
+						}
+						negated.set(key, value)
+					}
+					txn.Delete(r)
+				} else {
+					pos.attrs[key] = value
+				}
+			} else {
+				if length < r.Len {
+					if txn.Store().SplitBlock(r, length) == nil {
+						return fmt.Errorf("text: split failed at offset %d in item %v", length, r.ID)
+					}
+				}
+				length -= r.Len
+			}
 		}
-		closeMarker := buildFormatMarker(txn, endLeft, endRight, t.branch, key, prevAtEnd)
-		endLeft = closeMarker
+		pos.forward()
 	}
+	insertNegatedAttributes(txn, branch, pos, negated)
+	return nil
+}
 
+// insertNegatedAttributes restores the values recorded in negated after a
+// formatted range. Deleted items are stepped over, and so are markers
+// that already set a recorded value, which drop that value from the list.
+// Mirrors yjs insertNegatedAttributes.
+func insertNegatedAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, negated *negatedAttrs) {
+	for pos.right != nil {
+		r := pos.right
+		if !r.IsDeleted() {
+			if r.Content.Kind != block.KindFormat {
+				break
+			}
+			value, ok := negated.get(r.Content.FormatKey)
+			if !ok || !attrValuesEqual(value, formatValue(r)) {
+				break
+			}
+			negated.remove(r.Content.FormatKey)
+		}
+		pos.forward()
+	}
+	for _, key := range negated.keys {
+		pos.right = buildFormatMarker(txn, pos.left, pos.right, branch, key, negated.values[key])
+		pos.forward()
+	}
+}
+
+// formatValue returns the value a format marker sets; nil clears.
+func formatValue(it *block.Item) any {
+	if len(it.Content.Anys) > 0 {
+		return it.Content.Anys[0]
+	}
 	return nil
 }
 
@@ -333,8 +470,9 @@ func (t *Text) Range(fn func(kind ChunkKind, value any, attrs Attrs) bool) {
 //
 //   - Insert string with optional Attributes — insert text at
 //     cursor, advance cursor by len(text)
-//   - Insert non-string (Embed) — insert single embed at cursor,
-//     advance cursor by 1
+//   - Insert non-string (Embed) with optional Attributes — insert a
+//     single embed at cursor, format it with Attributes, advance
+//     cursor by 1
 //   - Retain N with optional Attributes — if Attributes is non-nil,
 //     apply Format(cursor, N, Attributes); advance cursor by N
 //   - Delete N — delete N units at cursor; cursor unchanged
@@ -360,6 +498,11 @@ func (t *Text) ApplyDelta(txn *doc.TransactionMut, ops []DeltaOp) error {
 		case op.Embed != nil:
 			if err := t.InsertEmbed(txn, cursor, op.Embed); err != nil {
 				return fmt.Errorf("ApplyDelta op[%d] embed: %w", i, err)
+			}
+			if len(op.Attributes) > 0 {
+				if err := t.Format(txn, cursor, 1, op.Attributes); err != nil {
+					return fmt.Errorf("ApplyDelta op[%d] embed attributes: %w", i, err)
+				}
 			}
 			cursor++
 		case op.Retain > 0:
@@ -535,16 +678,13 @@ func postInsertLeftOf(branch *block.Branch, pos uint64) *block.Item {
 	var counted uint64
 	var lastSeen *block.Item
 	for cur := branch.Start; cur != nil; cur = cur.Right {
-		if cur.IsDeleted() {
+		if cur.IsDeleted() || cur.Content.Kind == block.KindFormat {
 			continue
 		}
-		if cur.Content.Kind == block.KindString {
-			contentLen := cur.Content.Len(block.OffsetUtf16)
-			counted += contentLen
-			lastSeen = cur
-			if counted >= pos {
-				return cur
-			}
+		counted += cur.Len
+		lastSeen = cur
+		if counted >= pos {
+			return cur
 		}
 	}
 	return lastSeen

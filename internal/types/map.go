@@ -303,6 +303,10 @@ func extractValue(c block.Content) any {
 		}
 	case block.KindString:
 		return c.Str
+	case block.KindEmbed:
+		if len(c.Anys) > 0 {
+			return c.Anys[0]
+		}
 	case block.KindBinary:
 		return c.Bytes
 	case block.KindType:

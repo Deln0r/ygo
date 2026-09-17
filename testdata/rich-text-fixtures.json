@@ -1,0 +1,1598 @@
+{
+  "generator": "gen-rich-text.mjs (yjs@13.6.32)",
+  "scenarios": [
+    {
+      "name": "format-over-inner-run",
+      "description": "format a range that contains a run of the same attribute",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": false
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abcdef",
+          "attributes": {
+            "bold": false
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": false
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-clear-middle",
+      "description": "clear an attribute in the middle of a formatted run",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": null
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "bcd"
+        },
+        {
+          "insert": "ef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "bcd"
+          },
+          {
+            "insert": "ef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-overlapping",
+      "description": "a second format overlaps the first and clears it",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 0,
+            "length": 4,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 4,
+            "attrs": {
+              "italic": true,
+              "bold": null
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ab",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "cdef",
+          "attributes": {
+            "italic": true
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "cdef",
+            "attributes": {
+              "italic": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-same-value",
+      "description": "format with the value already in effect",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abcdef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-extends-run",
+      "description": "format from inside a run to past its end",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 0,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abcde",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "f"
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "abcde",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "f"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-meets-run",
+      "description": "format ends where a run with the same value starts",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 3,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 0,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abcdef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-two-keys-mixed",
+      "description": "two attributes over text that already carries one of them",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 2,
+            "attrs": {
+              "italic": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": true,
+              "italic": null
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abcdef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-surrogate-pair",
+      "description": "format counts UTF-16 units across an emoji",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "a😀b"
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": "😀",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "b"
+        }
+      ],
+      "expected_string": "a😀b",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "😀",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "b"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-next-transaction",
+      "description": "reformat in a second transaction",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": false
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abcdef",
+          "attributes": {
+            "bold": false
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "ab"
+          },
+          {
+            "insert": "cd",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        [
+          {
+            "retain": 2,
+            "attributes": {
+              "bold": false
+            }
+          },
+          {
+            "retain": 2,
+            "attributes": {
+              "bold": false
+            }
+          },
+          {
+            "retain": 2,
+            "attributes": {
+              "bold": false
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-partial-attrs-inside-run",
+      "description": "insert with one attribute inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X",
+            "attrs": {
+              "italic": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "X",
+          "attributes": {
+            "italic": true
+          }
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heXllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-empty-attrs-inside-run",
+      "description": "insert with an empty attribute object inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X",
+            "attrs": {}
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "X"
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heXllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X"
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-inside-run",
+      "description": "insert without attributes inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "Y"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "heYllo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heYllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "heYllo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-at-run-end",
+      "description": "insert without attributes at the end of bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 5,
+            "text": "!"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "hello!",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "hello!",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "hello!",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-at-run-start",
+      "description": "insert without attributes at the start of bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "^"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "^"
+        },
+        {
+          "insert": "hello",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "^hello",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "^"
+          },
+          {
+            "insert": "hello",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-at-run-end-next-transaction",
+      "description": "type at the end of bold text in a later transaction",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 5,
+            "text": "!"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "hello!",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "hello!",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "hello",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "retain": 5
+          },
+          {
+            "insert": "!",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "embed-inside-run",
+      "description": "insert an embed without attributes inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "embed",
+            "index": 2,
+            "embed": {
+              "image": "a"
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": {
+            "image": "a"
+          }
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "hello",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": {
+              "image": "a"
+            }
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-after-embed",
+      "description": "insert text right after an embed",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab"
+          },
+          {
+            "op": "embed",
+            "index": 1,
+            "embed": {
+              "image": "a"
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": {
+            "image": "a"
+          }
+        },
+        {
+          "insert": "Xb"
+        }
+      ],
+      "expected_string": "aXb",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": {
+              "image": "a"
+            }
+          },
+          {
+            "insert": "Xb"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-across-embed",
+      "description": "delete a range that holds an embed",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab"
+          },
+          {
+            "op": "embed",
+            "index": 1,
+            "embed": {
+              "image": "a"
+            }
+          },
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 2
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        }
+      ],
+      "expected_string": "a",
+      "expected_length": 1,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "format-across-embed",
+      "description": "format a range that holds an embed",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab"
+          },
+          {
+            "op": "embed",
+            "index": 1,
+            "embed": {
+              "image": "a"
+            }
+          },
+          {
+            "op": "format",
+            "index": 0,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": {
+            "image": "a"
+          },
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "b",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "ab",
+      "expected_length": 3,
+      "expected_events": [
+        [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": {
+              "image": "a"
+            },
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "b",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-across-boundary-then-insert",
+      "description": "delete across a format boundary, then insert at the seam",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 4
+          },
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "Z"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "aZf"
+        }
+      ],
+      "expected_string": "aZf",
+      "expected_length": 3,
+      "expected_events": [
+        [
+          {
+            "insert": "aZf"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-whole-run",
+      "description": "delete a whole formatted run",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 2
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abef"
+        }
+      ],
+      "expected_string": "abef",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "abef"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-embed-attrs",
+      "description": "delta inserts an embed with attributes",
+      "txns": [
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": "a"
+              },
+              {
+                "insert": {
+                  "image": "a.png"
+                },
+                "attributes": {
+                  "link": "x"
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": {
+            "image": "a.png"
+          },
+          "attributes": {
+            "link": "x"
+          }
+        }
+      ],
+      "expected_string": "a",
+      "expected_length": 2,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": {
+              "image": "a.png"
+            },
+            "attributes": {
+              "link": "x"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-insert-partial-attrs",
+      "description": "delta inserts with one attribute inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 2
+              },
+              {
+                "insert": "Z",
+                "attributes": {
+                  "italic": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "Z",
+          "attributes": {
+            "italic": true
+          }
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heZllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "Z",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-insert-plain-inside-run",
+      "description": "delta inserts without attributes inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 2
+              },
+              {
+                "insert": "W"
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "W"
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heWllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "W"
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-quill-document",
+      "description": "a Quill document delta",
+      "txns": [
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": "Hello"
+              },
+              {
+                "insert": " world",
+                "attributes": {
+                  "bold": true
+                }
+              },
+              {
+                "insert": "\n"
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "Hello"
+        },
+        {
+          "insert": " world",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "\n"
+        }
+      ],
+      "expected_string": "Hello world\n",
+      "expected_length": 12,
+      "expected_events": [
+        [
+          {
+            "insert": "Hello"
+          },
+          {
+            "insert": " world",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "\n"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-retain-format-mixed",
+      "description": "retain with an attribute over mixed formatting",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 1
+              },
+              {
+                "retain": 4,
+                "attributes": {
+                  "italic": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": "bc",
+          "attributes": {
+            "italic": true,
+            "bold": true
+          }
+        },
+        {
+          "insert": "de",
+          "attributes": {
+            "italic": true
+          }
+        },
+        {
+          "insert": "f"
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bc",
+            "attributes": {
+              "italic": true,
+              "bold": true
+            }
+          },
+          {
+            "insert": "de",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "f"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-retain-clear",
+      "description": "retain with a null attribute clears it",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 2
+              },
+              {
+                "retain": 2,
+                "attributes": {
+                  "bold": null
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ab",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "cd"
+        },
+        {
+          "insert": "ef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abcdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "cd"
+          },
+          {
+            "insert": "ef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-delete-then-insert",
+      "description": "delete, then insert with attributes at the same cursor",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 1
+              },
+              {
+                "delete": 2
+              },
+              {
+                "insert": "XY",
+                "attributes": {
+                  "italic": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": "XY",
+          "attributes": {
+            "italic": true
+          }
+        },
+        {
+          "insert": "def"
+        }
+      ],
+      "expected_string": "aXYdef",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "XY",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "def"
+          }
+        ]
+      ]
+    }
+  ]
+}

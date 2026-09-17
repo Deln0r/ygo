@@ -1,6 +1,7 @@
 package types_test
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
@@ -109,6 +110,32 @@ func TestText_Format_ClearAttribute(t *testing.T) {
 	}
 	if !reflect.DeepEqual(delta, want) {
 		t.Errorf("ToDelta = %+v, want %+v", delta, want)
+	}
+}
+
+// A range that does not fit is an error, including ranges whose end
+// overflows uint64: idx+length wrapped around to a small number and let
+// such a call through.
+func TestText_Format_RangePastTheEndIsAnError(t *testing.T) {
+	d := doc.NewDocWithOptions(doc.Options{ClientID: 704})
+	tx := types.NewText(d.Branch("body"))
+
+	wtxn := d.WriteTxn()
+	_ = tx.Insert(wtxn, 0, "abc")
+	wtxn.Commit()
+
+	wtxn = d.WriteTxn()
+	for _, r := range []struct{ idx, length uint64 }{
+		{3, 1}, {2, 2}, {math.MaxUint64, 2}, {1, math.MaxUint64},
+	} {
+		if err := tx.Format(wtxn, r.idx, r.length, types.Attrs{"bold": true}); err == nil {
+			t.Errorf("Format(%d, %d) on a 3-unit text returned no error", r.idx, r.length)
+		}
+	}
+	wtxn.Commit()
+
+	if got, want := tx.ToDelta(), []types.DeltaOp{{Insert: "abc"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a rejected Format changed the text: %+v", got)
 	}
 }
 

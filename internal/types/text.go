@@ -162,17 +162,13 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 	remaining := length
 	cur := right
 	for cur != nil && remaining > 0 {
-		if cur.IsDeleted() {
+		// Format markers take no room; embeds and nested types are one
+		// unit each and are deleted like text, as yjs deleteText does.
+		if cur.IsDeleted() || cur.Content.Kind == block.KindFormat {
 			cur = cur.Right
 			continue
 		}
-		if cur.Content.Kind != block.KindString {
-			// Embed / Type / Format etc. — defer per types-text.md
-			// out-of-scope list. Skip without consuming.
-			cur = cur.Right
-			continue
-		}
-		contentLen := cur.Content.Len(block.OffsetUtf16)
+		contentLen := cur.Len
 		if remaining < contentLen {
 			// End split: carve cur at `remaining` UTF-16 units, take
 			// left half (the survivor of the split is what we delete).
@@ -192,13 +188,12 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 
 // findTextPosition resolves a UTF-16 cursor index into the (left,
 // right) neighbour pair YATA needs. Walks branch.Start counting live
-// String items by their UTF-16 length; on a mid-block hit calls
-// Store.SplitBlock at the UTF-16 boundary.
+// content by length: strings in UTF-16 units, embeds and nested types
+// as one unit each, the same count Length and the search markers use.
+// Format markers and deleted items take no room. On a mid-block hit it
+// calls Store.SplitBlock at the UTF-16 boundary.
 //
-// Mirrors yrs find_position (text.rs:734-804) for the plain-text
-// path. Format / Embed / Type items (which we do not yet produce
-// but a JS peer might send) are walked through without consuming
-// the cursor budget — same as deleted items.
+// Mirrors yrs find_position (text.rs:734-804).
 //
 // Edge cases:
 //   - idx == 0: returns (nil, branch.Start). branch.Start may be a
@@ -231,13 +226,10 @@ func findTextPosition(branch *block.Branch, txn *doc.TransactionMut, idx uint64)
 	}
 	for ; cur != nil; cur = cur.Right {
 		lastSeen = cur
-		if cur.IsDeleted() {
+		if cur.IsDeleted() || cur.Content.Kind == block.KindFormat {
 			continue
 		}
-		if cur.Content.Kind != block.KindString {
-			continue
-		}
-		contentLen := cur.Content.Len(block.OffsetUtf16)
+		contentLen := cur.Len
 		if counted+contentLen == idx {
 			rememberMarker(branch, cur.Right, idx)
 			return cur, cur.Right, nil

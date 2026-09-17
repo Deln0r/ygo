@@ -16,7 +16,31 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact** - `Format`, `Delete` and `ApplyDelta` now match yjs in cases
+where they did not, so an application can see different results than on 1.20.0.
+`Format` over a range that already carries the attribute now formats the whole
+range. `Delete` removes embeds in its range instead of skipping them, and
+positions after an embed count it. Documents already written keep what they
+hold; only new calls behave differently.
+
 ### Fixed
+
+- **`Format` gave wrong results over existing formatting.** It wrote one opening
+  and one closing marker and never touched markers inside the range. `Format(0,
+  6, {bold: false})` over text with a bold run inside left that run bold and
+  dropped the attribute after it, and a range starting inside a run with the
+  same value was ignored. `Format` is now a port of yjs `formatText`: markers
+  for the requested keys inside the range are removed, and the values in effect
+  after the range are restored. A range whose end overflows uint64 is rejected
+  instead of wrapping around.
+
+- **Embeds were invisible to text positions.** The position lookup counted
+  strings only, so an insert right after an embed landed one unit too far, and
+  `Delete` skipped embeds in its range. Both now count embeds and nested types
+  as one unit, the same count `Length` and the search markers use.
+
+- **`ApplyDelta` dropped the attributes of an embed**, and text events reported
+  an inserted embed without its value. Both are fixed.
 
 - **The same formatting edit could encode to different bytes from run to run.**
   Each attribute that changes the formatting becomes its own format marker, in
@@ -32,6 +56,17 @@ file.
   regenerations match. yjs follows the attribute object's own property order,
   which a Go map does not carry, so the bytes match yjs only when the JS object
   lists the keys that produce markers in that same ascending order.
+
+### Infrastructure
+
+- Rich-text behaviour fixtures. 28 scenarios run the same insert, embed, format,
+  delete and applyDelta calls in yjs 13.6.32 and in ygo, and compare the final
+  delta, string and length plus the delta of every event. Ten still diverge:
+  inserting into formatted text inherits attributes differently, and `Delete`
+  leaves format markers that no longer mark anything. The test pins the exact
+  difference each of them shows today and fails when one starts to match, when
+  it diverges in any other way, or when a call errors, so the list can only
+  shrink. They stay out of the README totals until it is empty.
 
 ## [1.20.0] - 2026-09-17
 
