@@ -104,6 +104,11 @@ const (
 // Per-branch type discipline: a branch should be used as ONE type
 // (Map OR Array OR Text OR XML). Mixing types on the same root
 // branch produces undefined behaviour.
+//
+// Call these before opening a transaction, not inside one. They take
+// the document lock, which an open WriteTxn on the same document
+// already holds, so a call inside the transaction blocks forever.
+// yjs allows getMap inside transact; this port does not yet.
 func NewMap(d *Doc, name string) *Map {
 	return types.NewMap(d.Branch(name))
 }
