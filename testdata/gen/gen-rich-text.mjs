@@ -1,4 +1,4 @@
-// Generates testdata/rich-text-fixtures.json - what yjs@13.6.32 does with a
+// Generates testdata/rich-text-fixtures.json - what yjs@13.6.33 does with a
 // formatted text, as opposed to what bytes it writes.
 //
 // Every other fixture here pins the wire format. These pin behaviour: the
@@ -164,6 +164,6 @@ for (const sc of out) {
 
 writeFileSync(
   outPath,
-  JSON.stringify({ generator: "gen-rich-text.mjs (yjs@13.6.32)", scenarios: out }, null, 2) + "\n",
+  JSON.stringify({ generator: "gen-rich-text.mjs (yjs@13.6.33)", scenarios: out }, null, 2) + "\n",
 );
 console.log(`wrote ${out.length} scenarios to ${outPath}`);

@@ -1,5 +1,5 @@
 {
-  "generator": "gen-rich-text.mjs (yjs@13.6.32)",
+  "generator": "gen-rich-text.mjs (yjs@13.6.33)",
   "scenarios": [
     {
       "name": "format-over-inner-run",

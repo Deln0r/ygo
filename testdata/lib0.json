@@ -1,5 +1,5 @@
 {
-  "generator": "lib0@0.2.117",
+  "generator": "lib0@0.2.118",
   "cases": [
     {
       "kind": "varuint",

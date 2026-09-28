@@ -11,7 +11,7 @@ import (
 	"github.com/Deln0r/ygo"
 )
 
-// The fixtures in testdata/rich-text-fixtures.json record what yjs 13.6.32
+// The fixtures in testdata/rich-text-fixtures.json record what yjs 13.6.33
 // does with formatted text: the same insert, embed, format, delete and
 // applyDelta calls, and the delta that comes out. They pin behaviour, not
 // bytes - two implementations can agree on every attribute a reader sees and

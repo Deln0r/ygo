@@ -1,5 +1,5 @@
 // Generates testdata/yjs-updates.json — V1 Update wire-byte fixtures
-// captured from JS Yjs (yjs@13.6.32). Drives the binary-protocol-compat
+// captured from JS Yjs (yjs@13.6.33). Drives the binary-protocol-compat
 // proof in internal/encoding/fixture_test.go.
 //
 // For each scenario we capture:
@@ -269,7 +269,7 @@ const scenarios = [
 ];
 
 const out = {
-  generator: "yjs@13.6.32",
+  generator: "yjs@13.6.33",
   scenarios,
 };
 

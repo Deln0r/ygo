@@ -1,5 +1,5 @@
 // Generates testdata/undo-fixtures.json — cross-language UndoManager
-// conformance fixtures captured from JS Yjs (yjs@13.6.32).
+// conformance fixtures captured from JS Yjs (yjs@13.6.33).
 //
 // The UndoManager is a local-only concept: there is no wire format for
 // the undo / redo stacks. So the cross-language check is semantic, not
@@ -317,7 +317,7 @@ scenarios.push({
 });
 
 const out = {
-  generator: "yjs@13.6.32 (UndoManager)",
+  generator: "yjs@13.6.33 (UndoManager)",
   scenarios: scenarios.map((s) => ({
     description: s.description,
     kind: s.kind,
