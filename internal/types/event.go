@@ -1,6 +1,8 @@
 package types
 
 import (
+	"sort"
+
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
 )
@@ -79,21 +81,26 @@ func (m *Map) ObserveDeep(fn func([]any)) func() {
 	return observeDeep(m.branch, fn)
 }
 
-// dispatchEvents is installed as doc.TypeEventHook. For each branch
-// changed this transaction that has observers, it builds the
-// appropriate event and fires them. Routing is by which kind of change
-// was recorded (keyed vs positional), which is reliable even for root
-// branches whose TypeRef defaults to zero.
+// dispatchEvents is installed as doc.TypeEventHook. It fires observers the
+// way yjs cleanupTransactions does: types in the order they were first
+// changed, deleted types skipped, then every deep observer once per
+// transaction with all the events under it.
+//
+// Routing is by which kind of change was recorded (keyed vs positional),
+// which is reliable even for root branches whose TypeRef defaults to zero.
 func dispatchEvents(t *doc.TransactionMut) {
-	// firedEvent pairs a built event with the branch it targets, so the
-	// deep pass can bubble it up the parent chain.
-	type firedEvent struct {
-		br *block.Branch
-		ev any
-	}
-	var fired []firedEvent
+	// Events per type, for the type itself and each of its ancestors, in
+	// the order the types were first reached: yjs changedParentTypes. An
+	// event is recorded here before its shallow observers run, as yjs
+	// callTypeObservers does.
+	var parents []*block.Branch
+	under := map[*block.Branch][]any{}
 
 	for _, br := range t.ChangedTypes() {
+		// A type deleted later in this transaction fires nothing.
+		if br.Item != nil && br.Item.IsDeleted() {
+			continue
+		}
 		var ev any
 		if keys := t.ChangedKeys(br); len(keys) > 0 {
 			ev = buildMapEvent(t, br, keys)
@@ -111,37 +118,87 @@ func dispatchEvents(t *doc.TransactionMut) {
 		if ev == nil {
 			continue
 		}
-		// Shallow observers on the changed branch itself.
+		for anc := br; anc != nil; anc = ancestorBranch(anc) {
+			if _, seen := under[anc]; !seen {
+				parents = append(parents, anc)
+			}
+			under[anc] = append(under[anc], ev)
+		}
 		for _, o := range br.Observers {
 			if o != nil {
 				o(ev)
 			}
 		}
-		fired = append(fired, firedEvent{br: br, ev: ev})
 	}
 
-	// Deep pass: every event bubbles up its parent chain; each ancestor
-	// with DeepObservers receives the events under it, each carrying its
-	// path relative to that ancestor. Mirrors yjs observeDeep.
-	for _, fe := range fired {
-		// Start at the target itself: observeDeep on a type fires when
-		// the type OR any descendant changes.
-		for anc := fe.br; anc != nil; anc = ancestorBranch(anc) {
-			if len(anc.DeepObservers) == 0 {
+	// Deep observers run after every shallow one, each once, with the
+	// events of its own type and everything under it: shallower paths
+	// first, events of the same depth in the order they were recorded.
+	// Each type gets its own copy of an event with the path relative to
+	// that type, so a callback that keeps an event keeps the path it was
+	// given (yjs shares one event object and moves its path, #768).
+	// Which types get a deep call is settled before the first deep callback
+	// runs, as yjs queues them: a type that had no deep observer at that
+	// point gets no deep call in this transaction, even if a deep callback
+	// registers one on it.
+	var deepTargets []*block.Branch
+	for _, anc := range parents {
+		if hasDeepObserver(anc) && (anc.Item == nil || !anc.Item.IsDeleted()) {
+			deepTargets = append(deepTargets, anc)
+		}
+	}
+	for _, anc := range deepTargets {
+		type pathed struct {
+			ev    any
+			depth int
+		}
+		batch := make([]pathed, 0, len(under[anc]))
+		for _, ev := range under[anc] {
+			target := eventBranch(ev)
+			if target == nil || (target.Item != nil && target.Item.IsDeleted()) {
 				continue
 			}
-			path, ok := pathBetween(anc, fe.br)
+			path, ok := pathBetween(anc, target)
 			if !ok {
 				continue
 			}
-			setEventPath(fe.ev, path)
-			for _, o := range anc.DeepObservers {
-				if o != nil {
-					o([]any{fe.ev})
-				}
+			batch = append(batch, pathed{ev: withPath(ev, path), depth: len(path)})
+		}
+		sort.SliceStable(batch, func(i, j int) bool { return batch[i].depth < batch[j].depth })
+		events := make([]any, len(batch))
+		for i, p := range batch {
+			events[i] = p.ev
+		}
+		for _, o := range anc.DeepObservers {
+			if o != nil {
+				o(events)
 			}
 		}
 	}
+}
+
+// hasDeepObserver reports whether br has a live deep observer. An
+// unsubscribed observer leaves a nil slot behind.
+func hasDeepObserver(br *block.Branch) bool {
+	for _, o := range br.DeepObservers {
+		if o != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// eventBranch returns the branch an event is about.
+func eventBranch(ev any) *block.Branch {
+	switch e := ev.(type) {
+	case *MapEvent:
+		return e.Target.branch
+	case *ArrayEvent:
+		return e.Target.branch
+	case *TextEvent:
+		return e.Target.branch
+	}
+	return nil
 }
 
 // ancestorBranch returns the branch that directly contains br (the
@@ -197,17 +254,24 @@ func itemIndex(item *block.Item) int {
 	return idx
 }
 
-// setEventPath sets the Path field on whichever concrete event type ev
-// is, for the current deep-observer ancestor.
-func setEventPath(ev any, path []any) {
+// withPath returns a copy of ev carrying path, the location of its target
+// relative to the deep observer it is delivered to.
+func withPath(ev any, path []any) any {
 	switch e := ev.(type) {
 	case *MapEvent:
-		e.Path = path
+		c := *e
+		c.Path = path
+		return &c
 	case *ArrayEvent:
-		e.Path = path
+		c := *e
+		c.Path = path
+		return &c
 	case *TextEvent:
-		e.Path = path
+		c := *e
+		c.Path = path
+		return &c
 	}
+	return ev
 }
 
 // adds reports whether item was created during this transaction (the

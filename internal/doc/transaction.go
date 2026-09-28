@@ -84,6 +84,11 @@ type TransactionMut struct {
 	// Read by ChangedTypes / ChangedKeys / PositionalChanged.
 	changedTypes map[*block.Branch]*changedSet
 
+	// changedOrder holds the branches of changedTypes in the order they
+	// were first changed. Observers fire in this order, as yjs fires them
+	// in the insertion order of transaction.changed.
+	changedOrder []*block.Branch
+
 	// deletedSet is the lazily-built set form of deletedIDs, used by
 	// DeletedThisTxn for the observer event's deletes() predicate.
 	deletedSet map[block.ID]struct{}
@@ -569,6 +574,12 @@ func (t *TransactionMut) AddChangedType(parent *block.Branch, parentSub *string)
 	if parent == nil {
 		return
 	}
+	// As yjs addChangedTypeToTransaction: a nested type created in this
+	// transaction reports through its parent's event, and a deleted one
+	// reports nothing, so neither is recorded. Root types always are.
+	if it := parent.Item; it != nil && (it.ID.Clock >= t.beforeState[it.ID.Client] || it.IsDeleted()) {
+		return
+	}
 	if t.changedTypes == nil {
 		t.changedTypes = map[*block.Branch]*changedSet{}
 	}
@@ -576,6 +587,7 @@ func (t *TransactionMut) AddChangedType(parent *block.Branch, parentSub *string)
 	if cs == nil {
 		cs = &changedSet{keys: map[string]struct{}{}}
 		t.changedTypes[parent] = cs
+		t.changedOrder = append(t.changedOrder, parent)
 	}
 	if parentSub != nil {
 		cs.keys[*parentSub] = struct{}{}
@@ -652,15 +664,10 @@ func (t *TransactionMut) GetOrCreateBranch(name string) *block.Branch {
 // mutate. Primarily for tests and the future delete-set emitter.
 func (t *TransactionMut) DeletedIDs() []block.ID { return t.deletedIDs }
 
-// ChangedTypes returns the branches with recorded changes in this
-// transaction. Order is non-deterministic (map iteration). Primarily
-// for tests and the future observer dispatcher.
+// ChangedTypes returns the branches changed this transaction, in the
+// order they were first changed.
 func (t *TransactionMut) ChangedTypes() []*block.Branch {
-	out := make([]*block.Branch, 0, len(t.changedTypes))
-	for b := range t.changedTypes {
-		out = append(out, b)
-	}
-	return out
+	return append([]*block.Branch(nil), t.changedOrder...)
 }
 
 // PendingState returns the opaque pending-update state stored on

@@ -1,0 +1,1258 @@
+{
+  "generator": "gen-observers.mjs (yjs@13.6.33)",
+  "scenarios": [
+    {
+      "name": "deep-paths-multiple-deep-observers",
+      "description": "yjs testDeepEventPathsWithMultipleDeepObservers (#768): deep observers at two levels",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "a"
+          ],
+          "key": "b"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "a"
+          ],
+          "key": "c"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "deep",
+          "path": [
+            "a"
+          ],
+          "name": "a"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "a",
+            "c"
+          ],
+          "name": "c"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "a",
+            "c"
+          ],
+          "name": "c"
+        }
+      ],
+      "after_transaction": true,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "a",
+              "b"
+            ],
+            "key": "foo",
+            "value": "bar"
+          },
+          {
+            "op": "set",
+            "path": [
+              "a",
+              "c"
+            ],
+            "key": "foo",
+            "value": "bar"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe c",
+        "deep a [map[b] map[c]]",
+        "deep c [map[]]",
+        "afterTransaction"
+      ]
+    },
+    {
+      "name": "new-type-written-in-same-transaction",
+      "description": "a nested map created and written in one transaction reports only through its parent",
+      "remote": false,
+      "setup": [],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "setMap",
+            "path": [
+              "root"
+            ],
+            "key": "child"
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child"
+            ],
+            "key": "k",
+            "value": "v"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe root",
+        "deep root [map[]]"
+      ]
+    },
+    {
+      "name": "type-written-then-deleted",
+      "description": "a nested map written and then deleted in one transaction fires nothing of its own",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "child"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "child"
+          ],
+          "name": "child"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child"
+            ],
+            "key": "k",
+            "value": "v"
+          },
+          {
+            "op": "delete",
+            "path": [
+              "root"
+            ],
+            "key": "child"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe root",
+        "deep root [map[]]"
+      ]
+    },
+    {
+      "name": "siblings-in-first-change-order",
+      "description": "observers of three siblings fire in the order the siblings were first changed",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "z"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "a"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "m"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "z"
+          ],
+          "name": "z"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "a"
+          ],
+          "name": "a"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "m"
+          ],
+          "name": "m"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "z"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "a"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "m"
+            ],
+            "key": "k",
+            "value": 1
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe z",
+        "observe a",
+        "observe m",
+        "deep root [map[z] map[a] map[m]]"
+      ]
+    },
+    {
+      "name": "siblings-in-reverse-change-order",
+      "description": "the same siblings changed in the opposite order",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "z"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "a"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "m"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "z"
+          ],
+          "name": "z"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "a"
+          ],
+          "name": "a"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "m"
+          ],
+          "name": "m"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "m"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "a"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "z"
+            ],
+            "key": "k",
+            "value": 1
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe m",
+        "observe a",
+        "observe z",
+        "deep root [map[m] map[a] map[z]]"
+      ]
+    },
+    {
+      "name": "deep-events-sorted-by-path-length",
+      "description": "a deep observer gets shallower events first, whatever order the changes happened in",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "child"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root",
+            "child"
+          ],
+          "key": "grand"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child",
+              "grand"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root"
+            ],
+            "key": "x",
+            "value": 1
+          }
+        ]
+      ],
+      "expected_calls": [
+        "deep root [map[] map[child grand]]"
+      ]
+    },
+    {
+      "name": "array-index-path",
+      "description": "a map inside an array element is reached through its index",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setArray",
+          "path": [
+            "root"
+          ],
+          "key": "list"
+        },
+        {
+          "op": "push",
+          "path": [
+            "root",
+            "list"
+          ],
+          "value": "a"
+        },
+        {
+          "op": "insertMap",
+          "path": [
+            "root",
+            "list"
+          ],
+          "index": 1
+        }
+      ],
+      "observers": [
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "list",
+              1
+            ],
+            "key": "k",
+            "value": "v"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "deep root [map[list 1]]"
+      ]
+    },
+    {
+      "name": "text-in-map",
+      "description": "a text nested in a map fires its own observer and its parent's deep observer",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setText",
+          "path": [
+            "root"
+          ],
+          "key": "t"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "t"
+          ],
+          "name": "t"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "textInsert",
+            "path": [
+              "root",
+              "t"
+            ],
+            "index": 0,
+            "text": "hi"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe t",
+        "deep root [text[t]]"
+      ]
+    },
+    {
+      "name": "one-deep-call-per-transaction",
+      "description": "two transactions, one deep call each",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "child"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": true,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child"
+            ],
+            "key": "k",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child"
+            ],
+            "key": "k",
+            "value": 2
+          }
+        ]
+      ],
+      "expected_calls": [
+        "deep root [map[child]]",
+        "afterTransaction",
+        "deep root [map[child]]",
+        "afterTransaction"
+      ]
+    },
+    {
+      "name": "grandchild-written-then-child-deleted",
+      "description": "deleting a nested map also deletes what is inside it, so the grandchild's change is dropped",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "child"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root",
+            "child"
+          ],
+          "key": "grand"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "child",
+            "grand"
+          ],
+          "name": "grand"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child",
+              "grand"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "delete",
+            "path": [
+              "root"
+            ],
+            "key": "child"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "deep root [map[]]"
+      ]
+    },
+    {
+      "name": "only-changed-types-fire",
+      "description": "a change to the root map does not call observers of its children",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "child"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "child"
+          ],
+          "name": "child"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root"
+            ],
+            "key": "x",
+            "value": 1
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe root"
+      ]
+    },
+    {
+      "name": "new-map-in-array-written",
+      "description": "a map inserted into an array and written in one transaction reports only through the array",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setArray",
+          "path": [
+            "root"
+          ],
+          "key": "list"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "list"
+          ],
+          "name": "list"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "insertMap",
+            "path": [
+              "root",
+              "list"
+            ],
+            "index": 0
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "list",
+              0
+            ],
+            "key": "k",
+            "value": "v"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe list",
+        "deep root [array[list]]"
+      ]
+    },
+    {
+      "name": "array-and-element-changed",
+      "description": "an array and a map inside it both change; shallow observers in first-change order, one deep call",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setArray",
+          "path": [
+            "root"
+          ],
+          "key": "list"
+        },
+        {
+          "op": "insertMap",
+          "path": [
+            "root",
+            "list"
+          ],
+          "index": 0
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "list"
+          ],
+          "name": "list"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "list",
+            0
+          ],
+          "name": "item"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root",
+            "list"
+          ],
+          "name": "list"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "list",
+              0
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "push",
+            "path": [
+              "root",
+              "list"
+            ],
+            "value": "x"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe item",
+        "observe list",
+        "deep list [array[] map[0]]"
+      ]
+    },
+    {
+      "name": "revisited-type-keeps-first-position",
+      "description": "a type changed again later in the transaction keeps the position of its first change",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "z"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "a"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "z"
+          ],
+          "name": "z"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "a"
+          ],
+          "name": "a"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "z"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "a"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "z"
+            ],
+            "key": "k",
+            "value": 2
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe z",
+        "observe a",
+        "deep root [map[z] map[a]]"
+      ]
+    },
+    {
+      "name": "two-roots-in-change-order",
+      "description": "observers of two root maps fire in the order the roots were first changed",
+      "remote": false,
+      "setup": [],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "a"
+          ],
+          "name": "a"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "b"
+          ],
+          "name": "b"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "b"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "a"
+            ],
+            "key": "k",
+            "value": 1
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe b",
+        "observe a"
+      ]
+    },
+    {
+      "name": "array-index-after-shift",
+      "description": "the path of a map inside an array is its index after the whole transaction",
+      "remote": false,
+      "setup": [
+        {
+          "op": "setArray",
+          "path": [
+            "root"
+          ],
+          "key": "list"
+        },
+        {
+          "op": "insertMap",
+          "path": [
+            "root",
+            "list"
+          ],
+          "index": 0
+        },
+        {
+          "op": "insertMap",
+          "path": [
+            "root",
+            "list"
+          ],
+          "index": 1
+        }
+      ],
+      "observers": [
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "list",
+              1
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "insert",
+            "path": [
+              "root",
+              "list"
+            ],
+            "index": 0,
+            "value": "x"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "deep root [array[list] map[list 2]]"
+      ]
+    },
+    {
+      "name": "remote-new-type-written",
+      "description": "from a peer: a nested map created and written in one update reports only through its parent",
+      "remote": true,
+      "setup": [],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": true,
+      "txns": [
+        [
+          {
+            "op": "setMap",
+            "path": [
+              "root"
+            ],
+            "key": "child"
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child"
+            ],
+            "key": "k",
+            "value": "v"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe root",
+        "deep root [map[]]",
+        "afterTransaction"
+      ]
+    },
+    {
+      "name": "remote-siblings",
+      "description": "from a peer: three siblings changed in one update, one deep call",
+      "remote": true,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "z"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "a"
+        },
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "m"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "z"
+          ],
+          "name": "z"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "a"
+          ],
+          "name": "a"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "m"
+          ],
+          "name": "m"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "z"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "a"
+            ],
+            "key": "k",
+            "value": 1
+          },
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "m"
+            ],
+            "key": "k",
+            "value": 1
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe z",
+        "observe a",
+        "observe m",
+        "deep root [map[z] map[a] map[m]]"
+      ]
+    },
+    {
+      "name": "remote-type-written-then-deleted",
+      "description": "from a peer: a nested map written and deleted in one update fires nothing of its own",
+      "remote": true,
+      "setup": [
+        {
+          "op": "setMap",
+          "path": [
+            "root"
+          ],
+          "key": "child"
+        }
+      ],
+      "observers": [
+        {
+          "kind": "observe",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        },
+        {
+          "kind": "observe",
+          "path": [
+            "root",
+            "child"
+          ],
+          "name": "child"
+        },
+        {
+          "kind": "deep",
+          "path": [
+            "root"
+          ],
+          "name": "root"
+        }
+      ],
+      "after_transaction": false,
+      "txns": [
+        [
+          {
+            "op": "set",
+            "path": [
+              "root",
+              "child"
+            ],
+            "key": "k",
+            "value": "v"
+          },
+          {
+            "op": "delete",
+            "path": [
+              "root"
+            ],
+            "key": "child"
+          }
+        ]
+      ],
+      "expected_calls": [
+        "observe root",
+        "deep root [map[]]"
+      ]
+    }
+  ]
+}

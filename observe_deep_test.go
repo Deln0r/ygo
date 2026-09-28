@@ -1,6 +1,7 @@
 package ygo_test
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -98,5 +99,106 @@ func TestObserveDeep_FiresOnSelf(t *testing.T) {
 	}
 	if len(gotPath) != 0 {
 		t.Errorf("path = %v, want empty for self change", gotPath)
+	}
+}
+
+// A deep observer that keeps the events it was given must keep the paths it
+// was given. The same change reaches every observing ancestor; each gets its
+// own copy with the path relative to itself, so delivery to one ancestor does
+// not rewrite what another one kept (yjs shares one event object and moves its
+// path from one ancestor to the next, yjs #768).
+func TestObserveDeep_KeptEventsKeepTheirPath(t *testing.T) {
+	d := ygo.NewDoc()
+	root := ygo.NewMap(d, "root")
+	txn := d.WriteTxn()
+	child := root.SetMap(txn, "child")
+	grand := child.SetMap(txn, "grand")
+	txn.Commit()
+
+	var fromRoot, fromChild []any
+	root.ObserveDeep(func(evs []any) { fromRoot = append(fromRoot, evs...) })
+	child.ObserveDeep(func(evs []any) { fromChild = append(fromChild, evs...) })
+
+	txn = d.WriteTxn()
+	grand.Set(txn, "k", 1)
+	txn.Commit()
+
+	if len(fromRoot) != 1 || len(fromChild) != 1 {
+		t.Fatalf("got %d events at the root and %d at the child, want one each", len(fromRoot), len(fromChild))
+	}
+	if got, want := eventPath(fromRoot[0]), []any{"child", "grand"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("kept root event path = %v, want %v", got, want)
+	}
+	if got, want := eventPath(fromChild[0]), []any{"grand"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("kept child event path = %v, want %v", got, want)
+	}
+}
+
+// Observers of different types fire in the order the types were first
+// changed, on every run. They used to follow Go map iteration order.
+func TestObservers_OrderIsStable(t *testing.T) {
+	keys := []string{"q", "d", "x", "b", "m", "a", "z", "k"}
+	want := ""
+	for run := 0; run < 50; run++ {
+		d := ygo.NewDoc()
+		root := ygo.NewMap(d, "root")
+		txn := d.WriteTxn()
+		children := map[string]*ygo.Map{}
+		for _, k := range keys {
+			children[k] = root.SetMap(txn, k)
+		}
+		txn.Commit()
+
+		var order []string
+		for _, k := range keys {
+			k := k
+			children[k].Observe(func(*ygo.MapEvent) { order = append(order, k) })
+		}
+		txn = d.WriteTxn()
+		for _, k := range keys {
+			children[k].Set(txn, "v", 1)
+		}
+		txn.Commit()
+
+		got := fmt.Sprint(order)
+		if run == 0 {
+			want = fmt.Sprint(keys)
+		}
+		if got != want {
+			t.Fatalf("run %d: observers fired in order %s, want %s", run, got, want)
+		}
+	}
+}
+
+// Which types get a deep call is settled before the first deep callback runs.
+// A deep observer that a callback registers on a type that had none starts
+// with the next transaction, as in yjs 13.6.33, which queues the observing
+// types before calling any of them.
+func TestObserveDeep_RegisteredDuringDeliveryStartsNextTransaction(t *testing.T) {
+	d := ygo.NewDoc()
+	root := ygo.NewMap(d, "root")
+	txn := d.WriteTxn()
+	child := root.SetMap(txn, "child")
+	txn.Commit()
+
+	var calls []string
+	registered := false
+	child.ObserveDeep(func([]any) {
+		calls = append(calls, "deep child")
+		if !registered {
+			registered = true
+			root.ObserveDeep(func([]any) { calls = append(calls, "deep root") })
+		}
+	})
+	for i := 1; i <= 2; i++ {
+		txn = d.WriteTxn()
+		child.Set(txn, "k", i)
+		txn.Commit()
+		calls = append(calls, fmt.Sprintf("-- commit %d", i))
+	}
+
+	want := []string{"deep child", "-- commit 1", "deep child", "deep root", "-- commit 2"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Errorf("calls = %q, want %q (yjs 13.6.33)", calls, want)
 	}
 }
