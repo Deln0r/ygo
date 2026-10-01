@@ -1134,6 +1134,404 @@
       ]
     },
     {
+      "name": "delete-run-in-later-transaction",
+      "description": "delete a whole formatted run in a later transaction, then type there",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 2
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "Z"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abZef"
+        }
+      ],
+      "expected_string": "abZef",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "ab"
+          },
+          {
+            "insert": "cd",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        [
+          {
+            "retain": 2
+          },
+          {
+            "delete": 2
+          },
+          {
+            "retain": 2,
+            "attributes": {
+              "bold": null
+            }
+          }
+        ],
+        [
+          {
+            "retain": 2
+          },
+          {
+            "insert": "Z"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-leaves-overridden-marker",
+      "description": "delete leaves two markers for one key with nothing between them",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 3,
+            "length": 2,
+            "attrs": {
+              "bold": false
+            }
+          },
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 4
+          },
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "Z"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "aZf"
+        }
+      ],
+      "expected_string": "aZf",
+      "expected_length": 3,
+      "expected_events": [
+        [
+          {
+            "insert": "aZf"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-leaves-redundant-marker",
+      "description": "delete leaves a marker that sets the value already in effect",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "italic": true
+            }
+          },
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 2
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "Z"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abZef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abZef",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "abZef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-after-markers",
+      "description": "delete content that format markers sit right in front of",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 3,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 3,
+            "length": 1
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abc"
+        },
+        {
+          "insert": "ef",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abcef",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "abc"
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "retain": 3
+          },
+          {
+            "delete": 1
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-in-long-text",
+      "description": "delete across a format boundary deep in a long text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "op": "format",
+            "index": 120,
+            "length": 10,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 60,
+            "text": "y"
+          },
+          {
+            "op": "delete",
+            "index": 119,
+            "length": 13
+          },
+          {
+            "op": "insert",
+            "index": 119,
+            "text": "Z"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxZxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ],
+      "expected_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxZxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected_length": 189,
+      "expected_events": [
+        [
+          {
+            "insert": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxZxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delete-after-cached-position",
+      "description": "delete right after the opening marker, reached through a cached position",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcd"
+          },
+          {
+            "op": "format",
+            "index": 1,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "x"
+          },
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 1
+          },
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 2
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ad"
+        }
+      ],
+      "expected_string": "ad",
+      "expected_length": 2,
+      "expected_events": [
+        [
+          {
+            "insert": "ad"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-delete-across-run",
+      "description": "a delta deletes across a formatted run",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 1
+              },
+              {
+                "delete": 4
+              },
+              {
+                "insert": "Z"
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "aZf"
+        }
+      ],
+      "expected_string": "aZf",
+      "expected_length": 3,
+      "expected_events": [
+        [
+          {
+            "insert": "aZf"
+          }
+        ]
+      ]
+    },
+    {
       "name": "delta-embed-attrs",
       "description": "delta inserts an embed with attributes",
       "txns": [

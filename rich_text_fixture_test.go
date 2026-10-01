@@ -116,20 +116,6 @@ var knownRichTextDivergences = map[string]knownRichTextDivergence{
   yjs: [[{"attributes":{"bold":true},"insert":"he"},{"insert":{"image":"a"}},{"attributes":{"bold":true},"insert":"llo"}]]
 `,
 	},
-	"delete-across-boundary-then-insert": {
-		reason: "Delete leaves format markers that no longer mark anything (yjs cleanupFormattingGap removes them), so the event splits the insert",
-		result: ` events
-  ygo: [[{"insert":"a"},{"insert":"Zf"}]]
-  yjs: [[{"insert":"aZf"}]]
-`,
-	},
-	"delete-whole-run": {
-		reason: "Delete leaves format markers that no longer mark anything (yjs cleanupFormattingGap removes them), so the event splits the insert",
-		result: ` events
-  ygo: [[{"insert":"ab"},{"insert":"ef"}]]
-  yjs: [[{"insert":"abef"}]]
-`,
-	},
 	"delta-insert-partial-attrs": {
 		reason: "ApplyDelta insert keeps inherited attributes it was not given",
 		result: ` delta

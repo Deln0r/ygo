@@ -139,9 +139,12 @@ func (t *Text) Insert(txn *doc.TransactionMut, idx uint64, str string) error {
 //
 // Returns an error if the range exceeds the current Length.
 //
+// After deleting, format markers left in the gap that no longer mark
+// anything are removed, as yjs deleteText does with
+// cleanupFormattingGap.
+//
 // Mirrors yrs Text::remove_range (text.rs:361-368) → remove
-// (text.rs:806-863) for the plain-text path; the rich-text
-// clean_format_gap call is omitted.
+// (text.rs:806-863).
 func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 	total := t.Length()
 	if idx+length > total {
@@ -157,6 +160,13 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 	_, right, err := findTextPosition(t.branch, txn, idx)
 	if err != nil {
 		return err
+	}
+	// The gap starts right after the last content before idx, ahead of
+	// any format markers and tombstones in between, where yjs's cursor
+	// stops. A lookup that hit a cached position can return a later item.
+	gapStart := right
+	for gapStart != nil && gapStart.Left != nil && (gapStart.Left.IsDeleted() || gapStart.Left.Content.Kind == block.KindFormat) {
+		gapStart = gapStart.Left
 	}
 
 	remaining := length
@@ -183,7 +193,45 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 		txn.Delete(cur)
 		cur = next
 	}
+	cleanupFormattingGap(txn, t.branch, gapStart)
 	return nil
+}
+
+// cleanupFormattingGap removes the format markers in the run of markers
+// and tombstones that starts at start and ends at the next live content
+// that no longer mark anything: a marker that a later marker in the
+// run overrides for the same key, or one that sets the value already
+// in effect before the run. Ports yjs cleanupFormattingGap, including
+// its strict (identity) comparison of values. yjs builds the attributes
+// in effect from its cursor, which starts empty when it came from a
+// search marker; these are always the full ones, so a redundant marker
+// yjs would keep in that case is removed here. Nothing a reader sees
+// depends on it.
+func cleanupFormattingGap(txn *doc.TransactionMut, branch *block.Branch, start *block.Item) {
+	if start == nil {
+		return
+	}
+	last := map[string]*block.Item{}
+	end := start
+	for end != nil && (end.IsDeleted() || end.Content.Kind == block.KindFormat) {
+		if !end.IsDeleted() {
+			last[end.Content.FormatKey] = end
+		}
+		end = end.Right
+	}
+	if len(last) == 0 {
+		return
+	}
+	before := currentAttributesAt(branch, start)
+	for it := start; it != end; it = it.Right {
+		if it.IsDeleted() || it.Content.Kind != block.KindFormat {
+			continue
+		}
+		key := it.Content.FormatKey
+		if last[key] != it || strictEqual(before[key], formatValue(it)) {
+			txn.Delete(it)
+		}
+	}
 }
 
 // findTextPosition resolves a UTF-16 cursor index into the (left,
