@@ -192,21 +192,30 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 		}
 	}
 
-	// Deletions: every item tombstoned this transaction whose parent
-	// is in scope. DeletedIDs reports the head ID; we read the full
-	// Len off the resolved item.
-	for _, id := range mut.DeletedIDs() {
-		it := store.GetItem(id)
-		if it == nil {
+	// Deletions: the exact range of every Delete this transaction whose
+	// item is in scope. The range is taken when the item is tombstoned:
+	// commit-time squash runs before this hook and can merge the
+	// tombstone with an older one, and recording the merged item's extent
+	// would make undo resurrect content this transaction never deleted.
+	for _, dr := range mut.DeletedRanges() {
+		it := store.GetItem(dr.ID)
+		if it == nil || !um.itemInScope(it) {
 			continue
 		}
-		if um.itemInScope(it) {
-			si.Deletions.Insert(it.ID.Client, it.ID.Clock, it.Len)
-			// Mark the tombstoned item to keep so commit-time GC does
-			// not free the content this manager needs to resurrect it
-			// on undo (redoItem copies the original content). Runs
-			// before gcDeleted, which skips kept items.
-			it.SetKeep(true)
+		si.Deletions.Insert(dr.ID.Client, dr.ID.Clock, dr.Len)
+		// Keep every item covering the range so commit-time GC does not
+		// free the content this manager needs to resurrect it on undo
+		// (redoItem copies the original content). Runs before gcDeleted,
+		// which skips kept items.
+		for clock := dr.ID.Clock; clock < dr.ID.Clock+dr.Len; {
+			cov := store.GetItem(block.ID{Client: dr.ID.Client, Clock: clock})
+			if cov == nil {
+				break
+			}
+			cov.SetKeep(true)
+			if !advanceClock(&clock, cov.ID.Clock+cov.Len-1) {
+				break
+			}
 		}
 	}
 
@@ -306,9 +315,11 @@ func (um *UndoManager) Close() {
 
 // Undo pops the top of the undo stack and replays it against the doc:
 // items inserted during the captured window are deleted, items deleted
-// during the window are resurrected via redoItem. Returns true if a
-// StackItem was applied, false if the stack was empty or the manager
-// is closed.
+// during the window are resurrected via redoItem. A step that no longer
+// changes anything, because other edits already removed what it inserted
+// and restored what it deleted, is dropped and the next one is tried, as
+// yjs popStackItem does. Returns true if a step changed the document,
+// false if none did, the stack was empty, or the manager is closed.
 //
 // The replay runs in its own WriteTxn with Origin set to the manager,
 // so the resulting AfterTransaction is routed to the redo stack rather
@@ -318,95 +329,102 @@ func (um *UndoManager) Close() {
 // same doc, and concurrent Undo / Redo calls must be serialised by the
 // caller.
 func (um *UndoManager) Undo() bool {
-	um.mu.Lock()
-	if um.closed || len(um.undoStack) == 0 {
-		um.mu.Unlock()
-		return false
-	}
-	si := um.undoStack[len(um.undoStack)-1]
-	um.undoStack = um.undoStack[:len(um.undoStack)-1]
-	um.undoing = true
-	um.mu.Unlock()
-
-	um.applyStackItem(si)
-
-	um.mu.Lock()
-	um.undoing = false
-	um.mu.Unlock()
-	return true
+	return um.popUntilChange(&um.undoStack, &um.undoing)
 }
 
-// Redo is the mirror of Undo, replaying the top of the redo stack.
-// Returns true if a StackItem was applied.
+// Redo is the mirror of Undo, replaying the top of the redo stack and
+// skipping steps that no longer change anything. Returns true if a step
+// changed the document.
 func (um *UndoManager) Redo() bool {
-	um.mu.Lock()
-	if um.closed || len(um.redoStack) == 0 {
+	return um.popUntilChange(&um.redoStack, &um.redoing)
+}
+
+// popUntilChange pops stack entries and replays them until one changes
+// the document or the stack runs out.
+func (um *UndoManager) popUntilChange(stack *[]*StackItem, active *bool) bool {
+	for {
+		um.mu.Lock()
+		if um.closed || len(*stack) == 0 {
+			um.mu.Unlock()
+			return false
+		}
+		si := (*stack)[len(*stack)-1]
+		*stack = (*stack)[:len(*stack)-1]
+		*active = true
 		um.mu.Unlock()
-		return false
+
+		changed := um.applyStackItem(si)
+
+		um.mu.Lock()
+		*active = false
+		um.mu.Unlock()
+		if changed {
+			return true
+		}
 	}
-	si := um.redoStack[len(um.redoStack)-1]
-	um.redoStack = um.redoStack[:len(um.redoStack)-1]
-	um.redoing = true
-	um.mu.Unlock()
-
-	um.applyStackItem(si)
-
-	um.mu.Lock()
-	um.redoing = false
-	um.mu.Unlock()
-	return true
 }
 
 // applyStackItem runs the deletion-of-insertions and resurrection-of-
 // deletions for one StackItem inside a fresh WriteTxn. The umorigin
 // marker on the transaction makes the resulting AfterTransaction route
 // to the opposite stack.
-func (um *UndoManager) applyStackItem(si *StackItem) {
+func (um *UndoManager) applyStackItem(si *StackItem) bool {
 	txn := um.doc.WriteTxn()
 	txn.Origin = um
 	defer txn.Commit()
+	changed := false
 
-	// Delete everything that was inserted during the captured window.
-	// Two cases per item:
-	//   - resurrected by an earlier Undo/Redo (Redone chain set): the
-	//     live representative is a kept, never-squashed item; follow the
-	//     chain and delete it whole.
-	//   - live, never-undone: commit-time squash may have merged it with
-	//     neighbours, so delete only this range's slice via the
-	//     split-aware DeleteRange (deleting the whole merged item would
-	//     remove adjacent edits that belong to other undo steps).
+	// Delete everything that was inserted during the captured window, the
+	// way yjs popStackItem does. Each inserted item is first cut at the
+	// captured range (yjs iterateStructs), so the neighbours commit-time
+	// squash merged it with are left alone. An item that an earlier Undo
+	// or Redo resurrected is followed through the Redone chain from its
+	// start, and the live copy is cut there and deleted to its end: the
+	// copy can hold more than this range, for instance text from before
+	// the manager that had merged with it, and its start is where this
+	// range's content begins.
 	bs := txn.Store()
 	si.Insertions.Iterate(func(client uint64, ranges []encoding.Range) {
 		for _, r := range ranges {
 			clock := r.Start
-			for clock < r.End() {
+			end := r.End()
+			for clock < end {
 				cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
 				if !ok {
 					break
 				}
-				it := cell.AsItem()
+				if cell.AsItem() == nil {
+					if !advanceClock(&clock, cell.ClockEnd()) {
+						break
+					}
+					continue
+				}
+				it := txn.MaterializeCleanStart(block.ID{Client: client, Clock: clock})
 				if it == nil {
 					if !advanceClock(&clock, cell.ClockEnd()) {
 						break
 					}
 					continue
 				}
-				if it.Redone != nil {
-					live := followRedone(txn, it)
-					if live != nil && !live.IsDeleted() {
-						txn.Delete(live)
-					}
-					if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
+				if it.ID.Clock+it.Len > end {
+					_ = txn.MaterializeCleanEnd(block.ID{Client: client, Clock: end - 1})
+					if it = txn.GetItem(block.ID{Client: client, Clock: clock}); it == nil {
 						break
 					}
-					continue
 				}
-				end := r.End()
-				if itEnd := it.ID.Clock + it.Len; itEnd < end {
-					end = itEnd
+				target := it
+				if it.Redone != nil {
+					live, at := followRedoneAt(txn, it.ID)
+					if live != nil && at > live.ID.Clock {
+						live = txn.MaterializeCleanStart(block.ID{Client: live.ID.Client, Clock: at})
+					}
+					target = live
 				}
-				txn.DeleteRange(client, clock, end)
-				if !advanceClock(&clock, end-1) {
+				if target != nil && !target.IsDeleted() {
+					txn.Delete(target)
+					changed = true
+				}
+				if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
 					break
 				}
 			}
@@ -432,8 +450,8 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 					}
 					continue
 				}
-				if !si.Insertions.Contains(client, it.ID.Clock) {
-					redoItem(txn, it)
+				if !si.Insertions.Contains(client, it.ID.Clock) && um.redoItem(txn, it, si) != nil {
+					changed = true
 				}
 				if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
 					break
@@ -441,6 +459,7 @@ func (um *UndoManager) applyStackItem(si *StackItem) {
 			}
 		}
 	})
+	return changed
 }
 
 // advanceClock moves *clock past lastInclusive (the inclusive upper

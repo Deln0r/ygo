@@ -78,6 +78,12 @@ type TransactionMut struct {
 	// DeletedIDs accessor for tests and future observer dispatch.
 	deletedIDs []block.ID
 
+	// deletedRanges holds the exact clock range of every Delete, taken
+	// when the item is tombstoned. Commit-time squash may later merge the
+	// tombstone with a neighbouring one, after which the store item no
+	// longer says which clocks this transaction deleted.
+	deletedRanges []DeletedRange
+
 	// changedTypes records, per branch whose user-observable state
 	// changed this transaction, which map keys changed and whether
 	// positional content changed. Drives observer dispatch at Commit.
@@ -546,6 +552,7 @@ func (t *TransactionMut) Delete(item *block.Item) {
 	}
 	item.SetDeleted(true)
 	t.deletedIDs = append(t.deletedIDs, item.ID)
+	t.deletedRanges = append(t.deletedRanges, DeletedRange{ID: item.ID, Len: item.Len})
 	if item.Parent.IsResolved() {
 		// Record the parent (and changed key) so observers fire on
 		// deletions, mirroring yjs addChangedTypeToTransaction in
@@ -658,6 +665,18 @@ func (t *TransactionMut) GetOrCreateBranch(name string) *block.Branch {
 	t.doc.rootBranches[name] = b
 	return b
 }
+
+// DeletedRange is the clock range one Delete tombstoned: Len clocks
+// starting at ID.
+type DeletedRange struct {
+	ID  block.ID
+	Len uint64
+}
+
+// DeletedRanges returns the exact clock ranges tombstoned during this
+// transaction so far, one per Delete, as they were when deleted.
+// Returned slice aliases internal state; do not mutate.
+func (t *TransactionMut) DeletedRanges() []DeletedRange { return t.deletedRanges }
 
 // DeletedIDs returns the IDs of items tombstoned during this
 // transaction so far. Returned slice aliases internal state; do not

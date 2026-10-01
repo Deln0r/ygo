@@ -134,7 +134,8 @@ func setFlag(bits *uint16, mask uint16, on bool) {
 //     last element of self after truncation; this is the YATA-time
 //     left neighbour of the new half.
 //   - RightOrigin = self.RightOrigin (preserved; immutable per YATA).
-//   - Parent, ParentSub, Moved, Flags copied from self.
+//   - Parent, ParentSub, Moved, Flags copied from self; Redone, when
+//     set, advanced by offset.
 //   - Left = self; Right = self's original Right.
 //
 // Caller is responsible for storing the new right Item in the block
@@ -167,6 +168,13 @@ func (it *Item) Splice(offset uint64) *Item {
 		ParentSub:   it.ParentSub,
 		Moved:       it.Moved,
 		Flags:       it.Flags,
+	}
+	// A redone item's halves map to the matching halves of the item it
+	// was redone into, as yjs splitItem keeps redone: undo follows this
+	// link from a position, not only from the head of an item.
+	if it.Redone != nil {
+		r := ID{Client: it.Redone.Client, Clock: it.Redone.Clock + offset}
+		right.Redone = &r
 	}
 	if it.Right != nil {
 		it.Right.Left = right

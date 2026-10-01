@@ -105,6 +105,74 @@
       "kind": "text",
       "root": "t",
       "expected": "acd"
+    },
+    {
+      "description": "append merged with older text, delete both, undo twice",
+      "kind": "text",
+      "root": "t",
+      "expected": "a"
+    },
+    {
+      "description": "append merged with older text, delete both, undo twice, redo twice",
+      "kind": "text",
+      "root": "t",
+      "expected": ""
+    },
+    {
+      "description": "gc off: insert and delete in one step next to an older deletion, undo",
+      "kind": "text",
+      "root": "t",
+      "expected": ""
+    },
+    {
+      "description": "gc off: delete next to an older deletion, undo",
+      "kind": "text",
+      "root": "t",
+      "expected": "b"
+    },
+    {
+      "description": "append merged with older text and deleted in the same step, undo",
+      "kind": "text",
+      "root": "t",
+      "expected": "a"
+    },
+    {
+      "description": "gc off: delete in front of an older deletion, undo",
+      "kind": "text",
+      "root": "t",
+      "expected": "a"
+    },
+    {
+      "description": "undo an insertion after an untracked edit split its restored copy",
+      "kind": "text",
+      "root": "t",
+      "expected": "Xb"
+    },
+    {
+      "description": "undo an insertion whose restored copy also holds untracked text",
+      "kind": "text",
+      "root": "t",
+      "expected": ""
+    },
+    {
+      "description": "undo an insertion that an untracked append merged into",
+      "kind": "text",
+      "root": "t",
+      "expected": "b"
+    },
+    {
+      "description": "undo skips a step that no longer changes anything",
+      "kind": "text",
+      "root": "t",
+      "expected": ""
+    },
+    {
+      "description": "undo keeps a map value an untracked write set later",
+      "kind": "map",
+      "root": "m",
+      "expected": {
+        "k": "remote"
+      }
     }
   ]
 }

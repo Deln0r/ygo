@@ -5,21 +5,38 @@ import (
 	"github.com/Deln0r/ygo/internal/doc"
 )
 
-// followRedone walks the Redone chain from item to the latest live
-// representative. When an item has been resurrected (its Redone points
-// at a newer item), undoing the original insertion must act on that
-// newer item, not the stale tombstone. Returns the input unchanged if
-// it has never been redone.
-func followRedone(txn *doc.TransactionMut, item *block.Item) *block.Item {
-	cur := item
-	for cur != nil && cur.Redone != nil {
-		next := txn.MaterializeCleanStart(*cur.Redone)
-		if next == nil {
-			break
+// followRedoneAt maps the position id through the Redone chain to the
+// live item holding the same content, and returns that item with the
+// clock id now has in it. Each hop keeps the offset from the start of
+// the item containing the position, as yjs followRedone does. Returns
+// nil when a hop leads nowhere.
+func followRedoneAt(txn *doc.TransactionMut, id block.ID) (*block.Item, uint64) {
+	next := id
+	for {
+		it := txn.GetItem(next)
+		if it == nil {
+			return nil, 0
 		}
-		cur = next
+		if it.Redone == nil {
+			return it, next.Clock
+		}
+		next = block.ID{Client: it.Redone.Client, Clock: it.Redone.Clock + (next.Clock - it.ID.Clock)}
 	}
-	return cur
+}
+
+// deletedByAStack reports whether an entry still on the undo or redo
+// stack deleted id: undoing or redoing that entry would bring it back.
+func (um *UndoManager) deletedByAStack(id block.ID) bool {
+	um.mu.Lock()
+	defer um.mu.Unlock()
+	for _, stack := range [][]*StackItem{um.undoStack, um.redoStack} {
+		for _, si := range stack {
+			if si.Deletions.Contains(id.Client, id.Clock) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // redoItem resurrects a previously deleted item by inserting a fresh
@@ -33,7 +50,7 @@ func followRedone(txn *doc.TransactionMut, item *block.Item) *block.Item {
 // see docs/undo-manager-design.md.
 //
 // Caller holds the doc write lock via txn.
-func redoItem(txn *doc.TransactionMut, item *block.Item) *block.Item {
+func (um *UndoManager) redoItem(txn *doc.TransactionMut, item *block.Item, si *StackItem) *block.Item {
 	if item == nil {
 		return nil
 	}
@@ -62,19 +79,39 @@ func redoItem(txn *doc.TransactionMut, item *block.Item) *block.Item {
 	}
 
 	if item.ParentSub != nil {
-		return redoMapItem(txn, item, parent)
+		return um.redoMapItem(txn, item, parent, si)
 	}
 	return redoSequenceItem(txn, item, parent)
 }
 
 // redoMapItem resurrects a map-keyed item: the current tail under the
 // key becomes the left neighbour (mirroring Map.Set), right is nil.
-func redoMapItem(txn *doc.TransactionMut, item *block.Item, parent *block.Branch) *block.Item {
-	var left *block.Item
+func (um *UndoManager) redoMapItem(txn *doc.TransactionMut, item *block.Item, parent *block.Branch, si *StackItem) *block.Item {
+	// A later write on the key that this undo does not account for is a
+	// change someone else made; restoring over it would erase it, so the
+	// item is not restored, as in yjs redoItem. Writes this step inserted,
+	// writes an undo or redo stack deleted, and writes already redone
+	// elsewhere are stepped over.
+	left := item
+	for left != nil && left.Right != nil && (left.Right.Redone != nil ||
+		si.Insertions.Contains(left.Right.ID.Client, left.Right.ID.Clock) ||
+		um.deletedByAStack(left.Right.ID)) {
+		left = left.Right
+		for left != nil && left.Redone != nil {
+			left = txn.MaterializeCleanStart(*left.Redone)
+		}
+	}
+	if left != nil && left.Right != nil {
+		return nil
+	}
+	if left == nil || left.Parent.Branch != parent {
+		// A left from another parent would carry a misleading origin
+		// (yjs #757); attach to the key's current winner instead.
+		left = parent.Map[*item.ParentSub]
+	}
 	var origin *block.ID
-	if existing, ok := parent.Map[*item.ParentSub]; ok && existing != nil {
-		left = existing
-		lid := existing.LastID()
+	if left != nil {
+		lid := left.LastID()
 		origin = &lid
 	}
 

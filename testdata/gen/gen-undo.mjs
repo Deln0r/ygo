@@ -316,6 +316,213 @@ scenarios.push({
   },
 });
 
+// 17-18. Text written before the UndoManager existed, then an append in one
+// step (it merges with that text) and a delete of both in the next. Undoing
+// both steps must give back the text that predates the manager, and redoing
+// both must take it away again.
+scenarios.push({
+  description: "append merged with older text, delete both, undo twice",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    t.insert(0, "a");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(1, "b");
+    t.delete(0, 2);
+    um.undo();
+    um.undo();
+    return t.toString();
+  },
+});
+
+scenarios.push({
+  description: "append merged with older text, delete both, undo twice, redo twice",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    t.insert(0, "a");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(1, "b");
+    t.delete(0, 2);
+    um.undo();
+    um.undo();
+    um.redo();
+    um.redo();
+    return t.toString();
+  },
+});
+
+// 19-20. With garbage collection off, a deletion that happened before the
+// UndoManager existed sits right next to one made inside an undo step. The
+// undo must bring back only what the step deleted.
+scenarios.push({
+  description: "gc off: insert and delete in one step next to an older deletion, undo",
+  kind: "text",
+  root: "t",
+  gc: false,
+  run() {
+    const doc = new Y.Doc({ gc: false });
+    const t = doc.getText("t");
+    t.insert(0, "a");
+    t.delete(0, 1);
+    const um = new Y.UndoManager(t, { captureTimeout: 1e9 });
+    doc.transact(() => {
+      t.insert(0, "b");
+      t.delete(0, 1);
+    });
+    um.undo();
+    return t.toString();
+  },
+});
+
+scenarios.push({
+  description: "gc off: delete next to an older deletion, undo",
+  kind: "text",
+  root: "t",
+  gc: false,
+  run() {
+    const doc = new Y.Doc({ gc: false });
+    const t = doc.getText("t");
+    t.insert(0, "ab");
+    t.delete(0, 1);
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.delete(0, 1);
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 21. The same as 17, but the append and the delete fall in one capture
+// window: undo gives back only the text from before the manager.
+scenarios.push({
+  description: "append merged with older text and deleted in the same step, undo",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    t.insert(0, "a");
+    const um = new Y.UndoManager(t, { captureTimeout: 1e9 });
+    t.insert(1, "b");
+    t.delete(0, 2);
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 22. Gc off, the mirror of 20: the older deletion sits right after the one
+// the step makes, so the merged tombstone runs past the captured range.
+scenarios.push({
+  description: "gc off: delete in front of an older deletion, undo",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc({ gc: false });
+    const t = doc.getText("t");
+    t.insert(0, "ab");
+    t.delete(1, 1);
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.delete(0, 1);
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 23-24. Undoing an insertion whose restored copy was changed by edits the
+// manager does not track. yjs follows each piece of the original insertion
+// from its start and deletes the live copy from there to its end: a copy
+// split by an untracked insert loses only its first piece, and a copy that
+// also holds untracked text loses that text too.
+scenarios.push({
+  description: "undo an insertion after an untracked edit split its restored copy",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "ab");
+    t.delete(0, 2);
+    um.undo();
+    doc.transact(() => t.insert(1, "X"), "untracked");
+    um.undo();
+    return t.toString();
+  },
+});
+
+scenarios.push({
+  description: "undo an insertion whose restored copy also holds untracked text",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "a");
+    doc.transact(() => t.insert(1, "b"), "untracked");
+    t.delete(0, 2);
+    um.undo();
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 25. A tracked insertion that an untracked append merged into: undo
+// removes only what the step inserted.
+scenarios.push({
+  description: "undo an insertion that an untracked append merged into",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "a");
+    doc.transact(() => t.insert(1, "b"), "untracked");
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 26. A step whose effect an untracked edit already removed is skipped:
+// one undo goes on to the step before it.
+scenarios.push({
+  description: "undo skips a step that no longer changes anything",
+  kind: "text",
+  root: "t",
+  run() {
+    const doc = new Y.Doc();
+    const t = doc.getText("t");
+    const um = new Y.UndoManager(t, { captureTimeout: 0 });
+    t.insert(0, "a");
+    t.insert(1, "b");
+    doc.transact(() => t.delete(1, 1), "untracked");
+    um.undo();
+    return t.toString();
+  },
+});
+
+// 27. Undo does not restore a map value over a later untracked write.
+scenarios.push({
+  description: "undo keeps a map value an untracked write set later",
+  kind: "map",
+  root: "m",
+  run() {
+    const doc = new Y.Doc();
+    const m = doc.getMap("m");
+    m.set("k", "base");
+    const um = new Y.UndoManager(m, { captureTimeout: 0 });
+    m.set("k", "local");
+    doc.transact(() => m.set("k", "remote"), "untracked");
+    um.undo();
+    return mapState(m);
+  },
+});
+
 const out = {
   generator: "yjs@13.6.33 (UndoManager)",
   scenarios: scenarios.map((s) => ({

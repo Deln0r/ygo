@@ -146,6 +146,134 @@ func runByDescription(t *testing.T, desc string) interface{} {
 		um.Undo()
 		return x.String()
 
+	case "append merged with older text, delete both, undo twice",
+		"append merged with older text, delete both, undo twice, redo twice":
+		x := types.NewText(d.Branch("t"))
+		insertText(d, x, 0, "a")
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 1, "b")
+		deleteText(d, x, 0, 2)
+		um.Undo()
+		um.Undo()
+		if strings.HasSuffix(desc, "redo twice") {
+			um.Redo()
+			um.Redo()
+		}
+		return x.String()
+
+	case "append merged with older text and deleted in the same step, undo":
+		x := types.NewText(d.Branch("t"))
+		insertText(d, x, 0, "a")
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: time.Hour})
+		defer um.Close()
+		insertText(d, x, 1, "b")
+		deleteText(d, x, 0, 2)
+		um.Undo()
+		return x.String()
+
+	case "gc off: insert and delete in one step next to an older deletion, undo":
+		d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
+		x := types.NewText(d.Branch("t"))
+		insertText(d, x, 0, "a")
+		deleteText(d, x, 0, 1)
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: time.Hour})
+		defer um.Close()
+		txn := d.WriteTxn()
+		_ = x.Insert(txn, 0, "b")
+		_ = x.Delete(txn, 0, 1)
+		txn.Commit()
+		um.Undo()
+		return x.String()
+
+	case "undo an insertion after an untracked edit split its restored copy":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 0, "ab")
+		deleteText(d, x, 0, 2)
+		um.Undo()
+		txn := d.WriteTxn()
+		txn.Origin = "untracked"
+		_ = x.Insert(txn, 1, "X")
+		txn.Commit()
+		um.Undo()
+		return x.String()
+
+	case "undo an insertion whose restored copy also holds untracked text":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 0, "a")
+		txn := d.WriteTxn()
+		txn.Origin = "untracked"
+		_ = x.Insert(txn, 1, "b")
+		txn.Commit()
+		deleteText(d, x, 0, 2)
+		um.Undo()
+		um.Undo()
+		return x.String()
+
+	case "undo an insertion that an untracked append merged into":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 0, "a")
+		txn := d.WriteTxn()
+		txn.Origin = "untracked"
+		_ = x.Insert(txn, 1, "b")
+		txn.Commit()
+		um.Undo()
+		return x.String()
+
+	case "undo skips a step that no longer changes anything":
+		x := types.NewText(d.Branch("t"))
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		insertText(d, x, 0, "a")
+		insertText(d, x, 1, "b")
+		txn := d.WriteTxn()
+		txn.Origin = "untracked"
+		_ = x.Delete(txn, 1, 1)
+		txn.Commit()
+		um.Undo()
+		return x.String()
+
+	case "undo keeps a map value an untracked write set later":
+		m := types.NewMap(d.Branch("m"))
+		setMap(d, m, "k", "base")
+		um := undo.NewUndoManager(d, []*block.Branch{m.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		setMap(d, m, "k", "local")
+		txn := d.WriteTxn()
+		txn.Origin = "untracked"
+		m.Set(txn, "k", "remote")
+		txn.Commit()
+		um.Undo()
+		return mapState(m)
+
+	case "gc off: delete in front of an older deletion, undo":
+		d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
+		x := types.NewText(d.Branch("t"))
+		insertText(d, x, 0, "ab")
+		deleteText(d, x, 1, 1)
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		deleteText(d, x, 0, 1)
+		um.Undo()
+		return x.String()
+
+	case "gc off: delete next to an older deletion, undo":
+		d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
+		x := types.NewText(d.Branch("t"))
+		insertText(d, x, 0, "ab")
+		deleteText(d, x, 0, 1)
+		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})
+		defer um.Close()
+		deleteText(d, x, 0, 1)
+		um.Undo()
+		return x.String()
+
 	case "formatted insert then undo then redo":
 		x := types.NewText(d.Branch("t"))
 		um := undo.NewUndoManager(d, []*block.Branch{x.Branch()}, undo.Options{CaptureTimeout: -1})

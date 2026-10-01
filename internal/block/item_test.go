@@ -361,3 +361,30 @@ func TestParent_IsResolved(t *testing.T) {
 		})
 	}
 }
+
+// Splitting an item that was redone keeps both halves linked to the matching
+// halves of the copy it was redone into, as yjs splitItem does. Undo maps a
+// position through this link; without it the right half of a split tombstone
+// looks like it was never redone.
+func TestItem_Splice_KeepsRedoneOffset(t *testing.T) {
+	redone := ID{Client: 1, Clock: 500}
+	it := &Item{
+		ID:      ID{Client: 1, Clock: 100},
+		Len:     5,
+		Content: Content{Kind: KindString, Str: "hello"},
+		Redone:  &redone,
+	}
+	right := it.Splice(2)
+	if right == nil {
+		t.Fatal("Splice returned nil")
+	}
+	if it.Redone == nil || *it.Redone != (ID{Client: 1, Clock: 500}) {
+		t.Errorf("left.Redone = %v, want 1:500", it.Redone)
+	}
+	if right.Redone == nil || *right.Redone != (ID{Client: 1, Clock: 502}) {
+		t.Errorf("right.Redone = %v, want 1:502", right.Redone)
+	}
+	if right.Redone == it.Redone {
+		t.Error("right.Redone aliases left.Redone; the halves must not share one pointer")
+	}
+}
