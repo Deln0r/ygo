@@ -229,7 +229,12 @@ func findTextPosition(branch *block.Branch, txn *doc.TransactionMut, idx uint64)
 		if cur.IsDeleted() || cur.Content.Kind == block.KindFormat {
 			continue
 		}
-		contentLen := cur.Len
+		// The length comes from the content, not from cur.Len. The two
+		// are equal for every live item, but reading cur.Len here made the
+		// B4 editing trace 2.3 times slower (47 s against 20 s, interleaved
+		// runs on one machine) with the same number of iterations; the
+		// cause is below the language and was not pinned down.
+		contentLen := cur.Content.Len(block.OffsetUtf16)
 		if counted+contentLen == idx {
 			rememberMarker(branch, cur.Right, idx)
 			return cur, cur.Right, nil
