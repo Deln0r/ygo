@@ -14,6 +14,73 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Undo of an insertion could delete text written before the UndoManager
+  existed.** Write "a", create the manager, append "b" in one step (commit-time
+  squash merges it into "ab") and delete both in the next. Undoing both steps
+  left an empty text where yjs gives back "a": undoing the append followed the
+  restored copy of the merged item and deleted all of it. The insertion half of
+  undo is now the yjs `popStackItem` algorithm: each inserted item is cut at the
+  captured range, an item that was resurrected earlier is followed through the
+  redo chain from its start, and the live copy is cut there and deleted to its
+  end. Splitting a redone item keeps the redo link on both halves, as yjs
+  `splitItem` does. Where yjs keeps or removes untracked text that ended up
+  inside such a copy, ygo now does the same; both cases are fixtures.
+
+- **With garbage collection off, undo could resurrect a deletion older than the
+  manager.** A step that inserted and deleted text next to an older deletion
+  recorded the extent of the merged tombstone, so undo brought the older text
+  back too ("a" where yjs gives ""). Each delete now records its exact range
+  when it happens; commit-time squash runs before the UndoManager sees the
+  transaction and can no longer widen it.
+
+- **Undo stopped at a step that no longer changed anything.** If another edit
+  had already removed what a step inserted, `Undo` consumed that step, did
+  nothing and returned true. It now drops such a step and goes on to the next
+  one, as yjs `popStackItem` does, and returns true only when a step changed the
+  document; `Redo` does the same.
+
+- **Undo restored a map value over a later write it did not make.** Set a key,
+  change it in a tracked step, then have an untracked write (a remote update,
+  say) set it again: undo put the original value back over the untracked one.
+  yjs refuses to restore across a write the undo does not account for, and ygo
+  now does too.
+
+- **Text editing got 2.3 times slower in 1.20.1.** The real-world editing trace
+  in BENCHMARKS.md (259,778 edits) took 47 s instead of 20 s, interleaved runs
+  of 1.20.0 and 1.20.1 on one machine. The cause is one line in the text
+  position lookup that 1.20.1 changed to read the item's length field instead of
+  its content's length. Both give the same number for every item in the trace,
+  checked, and the loop runs the same number of iterations, counted; the
+  slowdown is below the language and was not pinned down. The content's length
+  is back and the trace takes 20 s again.
+
+- **`Delete` left format markers that no longer marked anything.** Deleting a
+  formatted run, or across a format boundary, left its opening and closing
+  markers next to each other with no content between them, so a later insert at
+  that spot was split by markers that changed nothing, and events reported it in
+  pieces. `Delete` now removes them afterwards, as yjs `deleteText` does with
+  `cleanupFormattingGap`: a marker another marker in the same run overrides, or
+  one that sets the value already in effect. The run starts right after the last
+  content before the deletion, also when the position came from the lookup
+  cache. This resolves the two `Delete` cases pinned in the rich-text fixtures
+  since 1.20.1. Values compare as everywhere else in ygo, so an `int` 1 and a
+  `float64` 1 still count as different values where JS would call them equal.
+
+### Infrastructure
+
+- Rich-text fixtures grew from 28 to 35 with the delete cases above; the pinned
+  divergences went from 10 to 8, all of them about inserting into formatted
+  text.
+
+- Undo fixtures grew from 16 to 27: every bug above in its yjs form, redo after
+  them, the same append and delete inside one capture window, the older deletion
+  on either side, and cases where untracked edits change what an undone step
+  covers.
+
 ## [1.21.0] - 2026-09-28
 
 **Upgrade impact** - Observers now fire the way yjs fires them, so an
