@@ -13,7 +13,9 @@
 //   - Slices of non-byte types (e.g. `[]any`, `[]string`) are
 //     skipped. ygo.Array.ToSlice() returns `[]any`.
 //   - Generics break the bind step entirely.
-//   - Callback registration (Sub, OnUpdate, OnChange) is skipped.
+//   - Callback registration (Sub, OnUpdate, OnChange) is skipped;
+//     this package takes listener interfaces instead (ObserveUpdates,
+//     ObserveChanges), which gomobile does bind.
 //
 // What survives:
 //
@@ -44,6 +46,7 @@ package gomobile
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/Deln0r/ygo/internal/awareness"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -63,11 +66,60 @@ import (
 // TransactionMut directly.
 type Doc struct {
 	inner *doc.Doc
+	// origin tags every edit made through this handle and the shared
+	// types taken from it ("" for none); see WithOrigin.
+	origin string
+	shared *docShared
+}
+
+// docShared is the state every handle of one document shares: the
+// current update listener, and the one document handler that calls it,
+// registered once. Replacing the listener swaps the pointer under mu,
+// so every update reaches exactly one listener, the current one;
+// unregistering and registering a handler per listener left a gap in
+// which a commit reached neither.
+type docShared struct {
+	mu              sync.Mutex
+	updateListener  UpdateListener
+	updatesObserved bool
 }
 
 // NewDoc returns a fresh Doc with a random ClientID.
 func NewDoc() *Doc {
-	return &Doc{inner: doc.NewDoc()}
+	return &Doc{inner: doc.NewDoc(), shared: &docShared{}}
+}
+
+// WithOrigin returns a handle on the same document whose edits carry
+// origin: every Text, Map, Array, rich-text and XML mutation made through
+// it, or through a shared type taken from it, commits with that origin.
+// An UndoManager created from it tracks that origin, so
+//
+//	local := doc.WithOrigin("local")
+//	um := local.NewTextUndoManager("body")
+//	local.Text("body").InsertAt(0, "hi")             // captured
+//	doc.ApplyUpdateWithOrigin(fromPeer, "remote")  // not captured
+//
+// undoes the user's own typing and never a collaborator's. The handle's
+// origin is fixed, so concurrent callers using different handles cannot
+// mislabel each other's edits. "" is the plain handle, no origin.
+func (d *Doc) WithOrigin(origin string) *Doc {
+	return &Doc{inner: d.inner, origin: origin, shared: d.shared}
+}
+
+// writeTxn opens a write transaction carrying this handle's origin.
+func (d *Doc) writeTxn() *doc.TransactionMut {
+	txn := d.inner.WriteTxn()
+	txn.Origin = originValue(d.origin)
+	return txn
+}
+
+// originValue maps the string origins of this package to transaction
+// origins: "" is no origin (nil).
+func originValue(origin string) any {
+	if origin == "" {
+		return nil
+	}
+	return origin
 }
 
 // NewDocWithClientID returns a fresh Doc with the given ClientID.
@@ -75,7 +127,7 @@ func NewDoc() *Doc {
 // per-device IDs (typical mobile pattern: derive from a stable
 // device identifier).
 func NewDocWithClientID(clientID uint64) *Doc {
-	return &Doc{inner: doc.NewDocWithOptions(doc.Options{ClientID: clientID})}
+	return &Doc{inner: doc.NewDocWithOptions(doc.Options{ClientID: clientID}), shared: &docShared{}}
 }
 
 // ClientID returns this replica's client identifier.
@@ -94,6 +146,56 @@ func (d *Doc) ApplyUpdate(rawBytes []byte) error {
 		return fmt.Errorf("ApplyUpdate: %w", err)
 	}
 	return nil
+}
+
+// ApplyUpdateWithOrigin is ApplyUpdate with origin as the transaction's
+// origin, whatever the handle's own. Apply a collaborator's updates with
+// an origin of their own ("remote", say): plain ApplyUpdate commits with
+// no origin, which a default UndoManager captures, so Undo would revert
+// the collaborator's edit. Update listeners receive the origin too.
+func (d *Doc) ApplyUpdateWithOrigin(rawBytes []byte, origin string) error {
+	if err := encoding.ApplyUpdateWithOrigin(d.inner, rawBytes, originValue(origin)); err != nil {
+		return fmt.Errorf("ApplyUpdate: %w", err)
+	}
+	return nil
+}
+
+// UpdateListener receives each committed transaction as a V1 update.
+// Implement it in Swift / Kotlin and pass it to Doc.ObserveUpdates.
+type UpdateListener interface {
+	OnUpdate(update []byte, origin string)
+}
+
+// ObserveUpdates registers l to receive, after every transaction that
+// changes the document, a V1 update holding exactly that transaction's
+// changes (the yjs doc.on('update') event): send it to peers or append
+// it to a log. origin is the transaction's origin when it is a string
+// (WithOrigin, ApplyUpdateWithOrigin) and "" otherwise, including undo
+// steps and the built-in Client's transactions.
+//
+// One listener per document: this replaces the listener registered
+// before through any handle of it, and nil detaches. Like the change
+// listeners it is called while the document lock is held: hand the
+// bytes off and return, do not call back into the document
+// synchronously.
+func (d *Doc) ObserveUpdates(l UpdateListener) {
+	sh := d.shared
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sh.updateListener = l
+	if sh.updatesObserved || l == nil {
+		return
+	}
+	sh.updatesObserved = true
+	d.inner.OnUpdate(func(update []byte, origin any) {
+		sh.mu.Lock()
+		cur := sh.updateListener
+		sh.mu.Unlock()
+		if cur != nil {
+			s, _ := origin.(string)
+			cur.OnUpdate(update, s)
+		}
+	})
 }
 
 // EncodeStateAsUpdate returns wire-encoded V1 bytes carrying the

@@ -14,7 +14,7 @@ func (m *Map) SetJSON(key string, valueJSON []byte) error {
 	if err != nil {
 		return err
 	}
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	m.inner.Set(txn, key, v)
 	return nil
@@ -46,28 +46,28 @@ func (m *Map) KeysJSON() []byte {
 
 // Clear removes every entry.
 func (m *Map) Clear() {
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	m.inner.Clear(txn)
 }
 
 // SetMap sets key to a new nested Map and returns it.
 func (m *Map) SetMap(key string) *Map {
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	return &Map{d: m.d, inner: m.inner.SetMap(txn, key)}
 }
 
 // SetArray sets key to a new nested Array and returns it.
 func (m *Map) SetArray(key string) *Array {
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	return &Array{d: m.d, inner: m.inner.SetArray(txn, key)}
 }
 
 // SetText sets key to a new nested Text and returns it.
 func (m *Map) SetText(key string) *Text {
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	return &Text{d: m.d, inner: m.inner.SetText(txn, key)}
 }

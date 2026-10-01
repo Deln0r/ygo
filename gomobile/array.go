@@ -35,7 +35,7 @@ func (a *Array) PushJSON(valueJSON []byte) error {
 	if err != nil {
 		return err
 	}
-	txn := a.d.inner.WriteTxn()
+	txn := a.d.writeTxn()
 	defer txn.Commit()
 	a.inner.Push(txn, v)
 	return nil
@@ -50,7 +50,7 @@ func (a *Array) InsertJSON(index int, valueJSON []byte) error {
 	if err != nil {
 		return err
 	}
-	txn := a.d.inner.WriteTxn()
+	txn := a.d.writeTxn()
 	defer txn.Commit()
 	a.inner.Insert(txn, uint64(index), v)
 	return nil
@@ -73,7 +73,7 @@ func (a *Array) DeleteAt(index, length int) error {
 	if index < 0 || length < 0 {
 		return fmt.Errorf("gomobile: negative index/length %d/%d", index, length)
 	}
-	txn := a.d.inner.WriteTxn()
+	txn := a.d.writeTxn()
 	defer txn.Commit()
 	a.inner.Delete(txn, uint64(index), uint64(length))
 	return nil
@@ -98,21 +98,21 @@ func (a *Array) ToJSON() []byte {
 
 // InsertText inserts a new nested Text at index and returns it.
 func (a *Array) InsertText(index int) *Text {
-	txn := a.d.inner.WriteTxn()
+	txn := a.d.writeTxn()
 	defer txn.Commit()
 	return &Text{d: a.d, inner: a.inner.InsertText(txn, uint64(index))}
 }
 
 // InsertMap inserts a new nested Map at index and returns it.
 func (a *Array) InsertMap(index int) *Map {
-	txn := a.d.inner.WriteTxn()
+	txn := a.d.writeTxn()
 	defer txn.Commit()
 	return &Map{d: a.d, inner: a.inner.InsertMap(txn, uint64(index))}
 }
 
 // InsertArray inserts a new nested Array at index and returns it.
 func (a *Array) InsertArray(index int) *Array {
-	txn := a.d.inner.WriteTxn()
+	txn := a.d.writeTxn()
 	defer txn.Commit()
 	return &Array{d: a.d, inner: a.inner.InsertArray(txn, uint64(index))}
 }

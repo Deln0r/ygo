@@ -17,8 +17,8 @@ while sync runs in the background.
   `Client` (`NewClient` / `Connect` / `Listener`) that connects to a
   yserve / Hocuspocus / y-websocket server.
 - **Wire level** — bytes-in / bytes-out (`ApplyUpdate`,
-  `EncodeStateAsUpdate`, `EncodeDiff`) for adopters bringing their own
-  transport.
+  `ApplyUpdateWithOrigin`, `EncodeStateAsUpdate`, `EncodeDiff`,
+  `ObserveUpdates`) for adopters bringing their own transport.
 
 ## Offline-first storage
 
@@ -52,6 +52,46 @@ text.ObserveChanges(listener) // listener.OnTextChange([]byte)
 Implement `TextChangeListener` / `MapChangeListener` in Swift or Kotlin.
 Callbacks run on a background goroutine while the document lock is held;
 dispatch to the main thread before touching UI.
+
+## Undo and origins
+
+Every edit commits with the origin of the `Doc` handle it was made
+through. `doc.WithOrigin("local")` returns a handle on the same document
+whose edits, and the edits of every `Text` / `Map` taken from it, carry
+`"local"`; an `UndoManager` created from that handle tracks `"local"`.
+Apply a collaborator's bytes with an origin of their own and Undo never
+reverts their work:
+
+```go
+local := doc.WithOrigin("local")
+body := local.Text("body")
+um := local.NewTextUndoManager("body")
+
+body.InsertAt(0, "hi")                       // undoable
+doc.ApplyUpdateWithOrigin(fromPeer, "remote") // not
+um.Undo()
+```
+
+On the plain handle (origin `""`, meaning none) edits carry no origin,
+and a manager created from it tracks exactly that. Plain `ApplyUpdate`
+also commits with no origin, so it is captured too, as yjs's
+`applyUpdate` without an origin is: use `ApplyUpdateWithOrigin` for
+remote bytes. `um.AddTrackedOrigin(o)` / `um.RemoveTrackedOrigin(o)`
+change the set afterwards (`""` stands for no origin). The built-in
+`Client` applies remote updates with an origin of its own, so they are
+never captured.
+
+## Sending updates over your own transport
+
+`doc.ObserveUpdates(listener)` calls `listener.OnUpdate(update, origin)`
+after every transaction that changes the document, with a V1 update
+holding exactly that transaction's changes, as yjs emits on
+`doc.on('update')` (known exceptions in the main README's status
+table). Send it to peers or append it to a log; skip the
+ones whose origin says they came from a peer. `origin` is the string
+from `WithOrigin` / `ApplyUpdateWithOrigin`, `""` otherwise. One
+listener per document; `ObserveUpdates(nil)` detaches it. Like the
+change listeners it runs while the document lock is held.
 
 ## Rich text
 

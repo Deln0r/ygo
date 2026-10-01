@@ -22,7 +22,7 @@ func (t *Text) ApplyDelta(deltaJSON []byte) error {
 	if err != nil {
 		return err
 	}
-	txn := t.d.inner.WriteTxn()
+	txn := t.d.writeTxn()
 	defer txn.Commit()
 	return t.inner.ApplyDelta(txn, ops)
 }
@@ -38,7 +38,7 @@ func (t *Text) Format(index, length int, attributesJSON []byte) error {
 	if err != nil {
 		return err
 	}
-	txn := t.d.inner.WriteTxn()
+	txn := t.d.writeTxn()
 	defer txn.Commit()
 	return t.inner.Format(txn, uint64(index), uint64(length), attrs)
 }
@@ -53,7 +53,7 @@ func (t *Text) InsertWithAttributes(index int, s string, attributesJSON []byte) 
 	if err != nil {
 		return err
 	}
-	txn := t.d.inner.WriteTxn()
+	txn := t.d.writeTxn()
 	defer txn.Commit()
 	return t.inner.InsertWithAttributes(txn, uint64(index), s, attrs)
 }
@@ -69,7 +69,7 @@ func (t *Text) InsertEmbed(index int, embedJSON []byte) error {
 	if err := json.Unmarshal(embedJSON, &v); err != nil {
 		return fmt.Errorf("gomobile: parse embed: %w", err)
 	}
-	txn := t.d.inner.WriteTxn()
+	txn := t.d.writeTxn()
 	defer txn.Commit()
 	return t.inner.InsertEmbed(txn, uint64(index), v)
 }

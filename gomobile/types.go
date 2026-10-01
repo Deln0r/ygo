@@ -30,7 +30,7 @@ func (t *Text) InsertAt(index int, s string) error {
 	if index < 0 {
 		return fmt.Errorf("gomobile: negative index %d", index)
 	}
-	txn := t.d.inner.WriteTxn()
+	txn := t.d.writeTxn()
 	defer txn.Commit()
 	return t.inner.Insert(txn, uint64(index), s)
 }
@@ -40,7 +40,7 @@ func (t *Text) DeleteAt(index, length int) error {
 	if index < 0 || length < 0 {
 		return fmt.Errorf("gomobile: negative index/length %d/%d", index, length)
 	}
-	txn := t.d.inner.WriteTxn()
+	txn := t.d.writeTxn()
 	defer txn.Commit()
 	return t.inner.Delete(txn, uint64(index), uint64(length))
 }
@@ -111,7 +111,7 @@ func (d *Doc) Map(name string) *Map {
 
 // SetString sets key to a string value.
 func (m *Map) SetString(key, value string) {
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	m.inner.Set(txn, key, value)
 }
@@ -135,7 +135,7 @@ func (m *Map) Has(key string) bool {
 
 // DeleteKey removes key.
 func (m *Map) DeleteKey(key string) {
-	txn := m.d.inner.WriteTxn()
+	txn := m.d.writeTxn()
 	defer txn.Commit()
 	m.inner.Delete(txn, key)
 }
@@ -154,17 +154,42 @@ type UndoManager struct {
 }
 
 // NewTextUndoManager returns an UndoManager watching the shared text
-// registered under name.
+// registered under name. It captures the transactions that carry this
+// handle's origin (see WithOrigin); on the plain handle, those with no
+// origin, which includes updates applied with plain ApplyUpdate.
 func (d *Doc) NewTextUndoManager(name string) *UndoManager {
 	t := types.NewText(d.inner.Branch(name))
-	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{t.Branch()}, undo.Options{})}
+	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{t.Branch()}, d.undoOptions())}
 }
 
 // NewMapUndoManager returns an UndoManager watching the shared map
-// registered under name.
+// registered under name, tracking this handle's origin as
+// NewTextUndoManager does.
 func (d *Doc) NewMapUndoManager(name string) *UndoManager {
 	m := types.NewMap(d.inner.Branch(name))
-	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{m.Branch()}, undo.Options{})}
+	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{m.Branch()}, d.undoOptions())}
+}
+
+// undoOptions tracks the handle's origin; the zero Options track nil.
+func (d *Doc) undoOptions() undo.Options {
+	if d.origin == "" {
+		return undo.Options{}
+	}
+	return undo.Options{TrackedOrigins: map[any]struct{}{d.origin: {}}}
+}
+
+// AddTrackedOrigin makes the manager also capture transactions with this
+// origin: edits through a WithOrigin handle, or updates applied with
+// ApplyUpdateWithOrigin. "" stands for no origin.
+func (u *UndoManager) AddTrackedOrigin(origin string) {
+	u.inner.AddTrackedOrigin(originValue(origin))
+}
+
+// RemoveTrackedOrigin stops capturing transactions with this origin. ""
+// stands for no origin: removing it leaves plain edits and plain
+// ApplyUpdate calls out of the history.
+func (u *UndoManager) RemoveTrackedOrigin(origin string) {
+	u.inner.RemoveTrackedOrigin(originValue(origin))
 }
 
 // Undo reverts the most recent captured local change. Returns false

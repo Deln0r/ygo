@@ -43,14 +43,14 @@ func (f *XmlFragment) Length() int {
 
 // InsertElement inserts a new <nodeName> element at index and returns it.
 func (f *XmlFragment) InsertElement(index int, nodeName string) *XmlElement {
-	txn := f.d.inner.WriteTxn()
+	txn := f.d.writeTxn()
 	defer txn.Commit()
 	return &XmlElement{d: f.d, inner: f.inner.InsertXmlElement(txn, uint64(index), nodeName)}
 }
 
 // InsertText inserts a new text node at index and returns it.
 func (f *XmlFragment) InsertText(index int) *XmlText {
-	txn := f.d.inner.WriteTxn()
+	txn := f.d.writeTxn()
 	defer txn.Commit()
 	return &XmlText{d: f.d, inner: f.inner.InsertXmlText(txn, uint64(index))}
 }
@@ -87,7 +87,7 @@ func (f *XmlFragment) DeleteAt(index, length int) {
 	if index < 0 || length < 0 {
 		return
 	}
-	txn := f.d.inner.WriteTxn()
+	txn := f.d.writeTxn()
 	defer txn.Commit()
 	f.inner.Delete(txn, uint64(index), uint64(length))
 }
@@ -104,7 +104,7 @@ func (e *XmlElement) NodeName() string { return e.inner.NodeName() }
 
 // SetAttribute sets a string attribute.
 func (e *XmlElement) SetAttribute(name, value string) {
-	txn := e.d.inner.WriteTxn()
+	txn := e.d.writeTxn()
 	defer txn.Commit()
 	e.inner.SetAttribute(txn, name, value)
 }
@@ -128,7 +128,7 @@ func (e *XmlElement) HasAttribute(name string) bool {
 
 // RemoveAttribute deletes the attribute.
 func (e *XmlElement) RemoveAttribute(name string) {
-	txn := e.d.inner.WriteTxn()
+	txn := e.d.writeTxn()
 	defer txn.Commit()
 	e.inner.RemoveAttribute(txn, name)
 }
@@ -153,14 +153,14 @@ func (e *XmlElement) Length() int {
 
 // InsertElement inserts a child <nodeName> element at index.
 func (e *XmlElement) InsertElement(index int, nodeName string) *XmlElement {
-	txn := e.d.inner.WriteTxn()
+	txn := e.d.writeTxn()
 	defer txn.Commit()
 	return &XmlElement{d: e.d, inner: e.inner.InsertXmlElement(txn, uint64(index), nodeName)}
 }
 
 // InsertText inserts a child text node at index.
 func (e *XmlElement) InsertText(index int) *XmlText {
-	txn := e.d.inner.WriteTxn()
+	txn := e.d.writeTxn()
 	defer txn.Commit()
 	return &XmlText{d: e.d, inner: e.inner.InsertXmlText(txn, uint64(index))}
 }
@@ -196,7 +196,7 @@ func (e *XmlElement) DeleteAt(index, length int) {
 	if index < 0 || length < 0 {
 		return
 	}
-	txn := e.d.inner.WriteTxn()
+	txn := e.d.writeTxn()
 	defer txn.Commit()
 	e.inner.Delete(txn, uint64(index), uint64(length))
 }
