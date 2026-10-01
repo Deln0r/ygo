@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.22.0] - 2026-10-01
 
 **Upgrade impact** - `EncodeDiff`, `EncodeDiffV2` and `DiffUpdate` produce
 smaller, different bytes when the peer already has part of a block: the bytes
@@ -1384,6 +1384,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.22.0]: https://github.com/Deln0r/ygo/releases/tag/v1.22.0
 [1.21.0]: https://github.com/Deln0r/ygo/releases/tag/v1.21.0
 [1.20.1]: https://github.com/Deln0r/ygo/releases/tag/v1.20.1
 [1.20.0]: https://github.com/Deln0r/ygo/releases/tag/v1.20.0
