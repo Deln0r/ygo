@@ -55,70 +55,57 @@ func EncodeStateAsUpdateV2(d *doc.Doc) []byte {
 }
 
 // EncodeDiffV2 returns V2 wire bytes for the blocks the local doc
-// has that the remote (per remoteSV) does not. Slice-trimming at
-// the SV boundary is deferred (same as V1's EncodeDiff — see
-// tech-debt.md "EncodeDiff doesn't slice at SV boundary").
-//
-// Per-client run order is DESCENDING clientID, matching
-// writeClientsStructs in yjs/src/utils/encoding.js (the comment
-// there reads "heavily improves the conflict algorithm").
+// has that the remote (per remoteSV) does not: the V2 form of
+// EncodeDiff, each client from the remote's clock with the first
+// struct cut at that clock, then the whole store's delete set.
 func EncodeDiffV2(d *doc.Doc, txn *doc.Transaction, remoteSV store.StateVector) []byte {
 	bs := txn.Store()
-	localSV := bs.GetStateVector()
-
-	type clientRun struct {
-		client     uint64
-		startClock uint64
-	}
-	var diff []clientRun
-	for c, localClock := range localSV {
-		remoteClock := uint64(0)
-		if remoteSV != nil {
-			remoteClock = remoteSV[c]
-		}
-		if localClock > remoteClock {
-			diff = append(diff, clientRun{client: c, startClock: remoteClock})
-		}
-	}
-	sort.Slice(diff, func(i, j int) bool { return diff[i].client > diff[j].client })
-
 	enc := NewEncoderV2()
-	enc.WriteVarUint(uint64(len(diff)))
-	for _, run := range diff {
-		clientList := bs.GetClient(run.client)
-		startIdx := firstUnknownCell(clientList, run.startClock)
-		count := clientList.Len() - startIdx
-		enc.WriteVarUint(uint64(count))
-		enc.WriteClient(run.client)
-		first, _ := clientList.Get(startIdx)
-		enc.WriteVarUint(first.ClockStart())
-		for i := startIdx; i < clientList.Len(); i++ {
-			cell, _ := clientList.Get(i)
-			encodeCellV2(enc, cell)
-		}
-	}
-
+	writeClientsStructsV2(enc, bs, remoteSV)
 	// Delete set goes into the V2 rest stream as a V2-flavoured
 	// diff stream (cumulative clock + len-1) — see writeDeleteSetV2.
-	ds := buildDeleteSetFromStore(bs, localSV)
-	writeDeleteSetV2(enc, ds)
-
+	writeDeleteSetV2(enc, buildDeleteSetFromStore(bs, bs.GetStateVector()))
 	return enc.Bytes()
 }
 
-// encodeCellV2 writes one cell (Item or GC) via the column API.
+// writeClientsStructsV2 is writeClientsStructs through the V2 column
+// API.
+func writeClientsStructsV2(enc *EncoderV2, bs *store.BlockStore, remoteSV store.StateVector) {
+	runs := diffRuns(bs, remoteSV)
+	enc.WriteVarUint(uint64(len(runs)))
+	for _, run := range runs {
+		enc.WriteVarUint(uint64(run.list.Len() - run.idx))
+		enc.WriteClient(run.client)
+		enc.WriteVarUint(run.clock)
+		first, _ := run.list.Get(run.idx)
+		encodeCellV2From(enc, first, run.clock-first.ClockStart())
+		for i := run.idx + 1; i < run.list.Len(); i++ {
+			cell, _ := run.list.Get(i)
+			encodeCellV2(enc, cell)
+		}
+	}
+}
+
+// encodeCellV2 writes one whole cell (Item or GC) via the column API.
 func encodeCellV2(enc *EncoderV2, cell store.BlockCell) {
+	encodeCellV2From(enc, cell, 0)
+}
+
+// encodeCellV2From writes cell from offset, as encodeCellFrom does for
+// V1. GC.write: writeInfo(0) + writeLen(length - offset).
+func encodeCellV2From(enc *EncoderV2, cell store.BlockCell, offset uint64) {
 	switch cell.Kind {
 	case store.CellKindGC:
-		// GC.write: writeInfo(0) + writeLen(length-offset). No
-		// offset support yet (parity with V1's encodeCell — first-
-		// block trim deferred).
 		enc.WriteInfo(0)
-		enc.WriteLen(cell.GC.Len())
+		enc.WriteLen(cell.GC.Len() - offset)
 	case store.CellKindItem:
-		encodeItemV2(enc, cell.Item)
+		it := cell.Item
+		if offset > 0 {
+			it = itemFrom(it, offset)
+		}
+		encodeItemV2(enc, it)
 	default:
-		panic(fmt.Sprintf("encoding.encodeCellV2: unknown cell kind %d", cell.Kind))
+		panic(fmt.Sprintf("encoding.encodeCellV2From: unknown cell kind %d", cell.Kind))
 	}
 }
 
@@ -554,11 +541,18 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 // V1 and V2 wire formats are NOT interchangeable. Calling
 // ApplyUpdateV2 on V1 bytes (or vice versa) is undefined behaviour.
 func ApplyUpdateV2(d *doc.Doc, raw []byte) error {
+	return ApplyUpdateV2WithOrigin(d, raw, nil)
+}
+
+// ApplyUpdateV2WithOrigin is ApplyUpdateV2 with origin as the
+// transaction's Origin.
+func ApplyUpdateV2WithOrigin(d *doc.Doc, raw []byte, origin any) error {
 	upd, err := DecodeUpdateV2(raw)
 	if err != nil {
 		return fmt.Errorf("ApplyUpdateV2 decode: %w", err)
 	}
 	txn := d.WriteTxn()
+	txn.Origin = origin
 	defer txn.Commit()
 	return upd.Apply(txn)
 }

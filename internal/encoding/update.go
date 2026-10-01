@@ -64,108 +64,111 @@ func EncodeStateAsUpdate(d *doc.Doc) []byte {
 // has that the remote doc (per remoteSV) does not. A nil remoteSV is
 // treated as the empty SV — emit everything.
 //
-// In this first port pass EncodeDiff emits whole blocks (no slicing
-// at the SV boundary). yrs's Store::write_blocks_from clamps the
-// first block of each client run via find_pivot + slice-trim; we
-// emit the entire client list. The wire format is identical when
-// the remote SV either knows the client fully (we skip them) or
-// not at all (we emit from clock 0). Partial-knowledge clients
-// (remote knows clocks [0, k) but not [k, end)) still get all
-// blocks for that client emitted, so the receiver may see redundant
-// blocks for clocks it already has. Those are silently rejected by
-// integrate (state-vector check) so the result is correct, just
-// chattier than yrs. Tracked in tech-debt.md.
-//
-// Block runs are emitted in DESCENDING clientID order per
-// docs/yrs-port-notes/update-v1.md gotcha 1.
+// Mirrors yjs writeStateAsUpdate: the structs from writeClientsStructs
+// (each client from the remote's clock, the first struct cut at that
+// clock) and the delete set of the whole store.
 func EncodeDiff(d *doc.Doc, txn *doc.Transaction, remoteSV store.StateVector) []byte {
 	bs := txn.Store()
-	localSV := bs.GetStateVector()
+	buf := writeClientsStructs(nil, bs, remoteSV)
+	ds := buildDeleteSetFromStore(bs, bs.GetStateVector())
+	return ds.Encode(buf)
+}
 
-	// diff = clients to emit. For each client present in localSV with
-	// localClock > remoteClock, include with the remote clock as the
-	// run start. Clients absent from remoteSV start at 0.
-	type clientRun struct {
-		client     uint64
-		startClock uint64
-	}
-	var diff []clientRun
-	for c, localClock := range localSV {
-		remoteClock := uint64(0)
-		if remoteSV != nil {
-			remoteClock = remoteSV[c]
-		}
-		if localClock > remoteClock {
-			diff = append(diff, clientRun{client: c, startClock: remoteClock})
-		}
-	}
-	// Descending by clientID.
-	sort.Slice(diff, func(i, j int) bool { return diff[i].client > diff[j].client })
+// clientRun is one client's part of an update: its structs from clock
+// on, where clock falls inside the cell at list index idx.
+type clientRun struct {
+	client uint64
+	clock  uint64
+	list   *store.ClientBlockList
+	idx    int
+}
 
-	buf := lib0.WriteVarUint(nil, uint64(len(diff)))
-	for _, run := range diff {
-		clientList := bs.GetClient(run.client)
-		startIdx := firstUnknownCell(clientList, run.startClock)
-		count := clientList.Len() - startIdx
-		buf = lib0.WriteVarUint(buf, uint64(count))
+// diffRuns returns a run for every client whose local clock is ahead of
+// remoteSV, starting at the remote's clock (yjs writeStructs: never
+// before the client's first struct). Runs are in DESCENDING clientID
+// order, as yjs writeClientsStructs sorts them ("heavily improves the
+// conflict algorithm").
+func diffRuns(bs *store.BlockStore, remoteSV store.StateVector) []clientRun {
+	var runs []clientRun
+	for c, localClock := range bs.GetStateVector() {
+		if localClock <= remoteSV[c] {
+			continue
+		}
+		list := bs.GetClient(c)
+		if list == nil || list.Len() == 0 {
+			continue
+		}
+		first, _ := list.Get(0)
+		clock := max(remoteSV[c], first.ClockStart())
+		idx, ok := list.FindPivot(clock)
+		if !ok {
+			continue
+		}
+		runs = append(runs, clientRun{client: c, clock: clock, list: list, idx: idx})
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].client > runs[j].client })
+	return runs
+}
+
+// writeClientsStructs appends the struct section of an update holding
+// everything the store has beyond remoteSV. Mirrors yjs
+// writeClientsStructs / writeStructs: per client the struct count, the
+// client, the first clock, then the first struct written from that
+// clock (encodeCellFrom) and the rest whole.
+func writeClientsStructs(buf []byte, bs *store.BlockStore, remoteSV store.StateVector) []byte {
+	runs := diffRuns(bs, remoteSV)
+	buf = lib0.WriteVarUint(buf, uint64(len(runs)))
+	for _, run := range runs {
+		buf = lib0.WriteVarUint(buf, uint64(run.list.Len()-run.idx))
 		buf = lib0.WriteVarUint(buf, run.client)
-		first, _ := clientList.Get(startIdx)
-		buf = lib0.WriteVarUint(buf, first.ClockStart())
-		for i := startIdx; i < clientList.Len(); i++ {
-			cell, _ := clientList.Get(i)
+		buf = lib0.WriteVarUint(buf, run.clock)
+		first, _ := run.list.Get(run.idx)
+		buf = encodeCellFrom(buf, first, run.clock-first.ClockStart())
+		for i := run.idx + 1; i < run.list.Len(); i++ {
+			cell, _ := run.list.Get(i)
 			buf = encodeCell(buf, cell)
 		}
 	}
-
-	// Emit delete set: scan all cells, collect deleted ranges.
-	ds := buildDeleteSetFromStore(bs, localSV)
-	buf = ds.Encode(buf)
-
 	return buf
 }
 
-// firstUnknownCell returns the index of the first cell in clientList
-// whose clock range contains at least one clock the remote does not
-// yet have. remoteClock follows state-vector semantics: it is the
-// exclusive upper bound of the remote's known range, i.e. the remote
-// has clocks [0, remoteClock). ClockEnd is inclusive.
-//
-// A cell is fully known to the remote iff cell.ClockEnd() <
-// remoteClock. Cells that straddle remoteClock (ClockStart <
-// remoteClock <= ClockEnd) are emitted whole; the receiver's
-// integrate path silently rejects per-Item duplicates via the
-// state-vector check, so the redundancy costs bandwidth but not
-// correctness. Per-cell partial trim (split at remoteClock, emit
-// only the right half) would match yrs's wire-byte output exactly
-// for the straddling case; deferred — tracked in
-// docs/tech-debt.md.
-//
-// Returns 0 if remoteClock is 0 (the remote has nothing for this
-// client; full emission). Returns clientList.Len() if every cell
-// is already known to the remote (no emission needed; caller
-// should have filtered the client out of `diff` upstream, this is
-// a defensive zero-block fallback).
-func firstUnknownCell(clientList *store.ClientBlockList, remoteClock uint64) int {
-	if remoteClock == 0 {
-		return 0
+// encodeCellFrom writes cell as if it began offset clocks later, the
+// way yjs GC.write / Item.write(encoder, offset) write the first struct
+// of a client run: a GC range shortened by offset, an item cut by
+// itemFrom.
+func encodeCellFrom(buf []byte, cell store.BlockCell, offset uint64) []byte {
+	if offset == 0 {
+		return encodeCell(buf, cell)
 	}
-	n := clientList.Len()
-	for i := 0; i < n; i++ {
-		cell, _ := clientList.Get(i)
-		if cell.ClockEnd() >= remoteClock {
-			return i
-		}
+	switch cell.Kind {
+	case store.CellKindGC:
+		buf = lib0.WriteVarUint(buf, uint64(0)) // BLOCK_GC_REF_NUMBER
+		return lib0.WriteVarUint(buf, cell.GC.Len()-offset)
+	case store.CellKindItem:
+		return encodeItem(buf, itemFrom(cell.Item, offset))
+	default:
+		panic(fmt.Sprintf("encoding.encodeCellFrom: unknown cell kind %d", cell.Kind))
 	}
-	return n
 }
 
-// encodeCell writes one cell's wire record (info byte + conditional
-// fields + content).
-//
-// Mirrors yrs ItemSlice::encode (slice.rs:181-233) for the
-// adjacent-on-both-sides case. We do not yet support partial slices
-// (start > 0 or end < len-1); first-block trimming is deferred per
-// EncodeDiff's docstring.
+// itemFrom returns a copy of it holding only its clocks from offset on,
+// as yjs Item.write(encoder, offset) writes it: the origin becomes the
+// clock just before (so the parent is not written) and the content
+// drops its first offset elements. A string cut inside a surrogate
+// pair starts with U+FFFD, as the lone half yjs writes encodes. The
+// store's item is not modified: Content.Split only reassigns the
+// copy's string and slice headers.
+func itemFrom(it *block.Item, offset uint64) *block.Item {
+	cp := *it
+	if err := sliceWireItemRight(&cp, offset); err != nil {
+		panic(fmt.Sprintf("encoding.itemFrom: cannot write %v from offset %d: %v", it.ID, offset, err))
+	}
+	return &cp
+}
+
+// encodeCell writes one whole cell's wire record (info byte +
+// conditional fields + content). encodeCellFrom writes a cell from an
+// offset.
 func encodeCell(buf []byte, cell store.BlockCell) []byte {
 	switch cell.Kind {
 	case store.CellKindGC:
@@ -545,11 +548,19 @@ func getOrCreatePending(txn *doc.TransactionMut) *Pending {
 // pending buffer absorbs any missing-dependency items silently;
 // inspect with GetPending afterwards if the caller cares.
 func ApplyUpdate(d *doc.Doc, raw []byte) error {
+	return ApplyUpdateWithOrigin(d, raw, nil)
+}
+
+// ApplyUpdateWithOrigin is ApplyUpdate with origin as the transaction's
+// Origin, which observers, update handlers and UndoManager origin
+// filters see (yjs applyUpdate's transactionOrigin).
+func ApplyUpdateWithOrigin(d *doc.Doc, raw []byte, origin any) error {
 	upd, _, err := DecodeUpdate(raw)
 	if err != nil {
 		return fmt.Errorf("ApplyUpdate decode: %w", err)
 	}
 	txn := d.WriteTxn()
+	txn.Origin = origin
 	defer txn.Commit()
 	return upd.Apply(txn)
 }

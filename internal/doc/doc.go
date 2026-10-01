@@ -92,12 +92,24 @@ type Doc struct {
 	// TransactionMut).
 	pendingState any
 
-	// afterTxnHandlers fires in registration order at the end of
-	// TransactionMut.Commit, after the write-lock state is finalised
-	// but before the mutex is released. UndoManager and any other
-	// observer (logging, sync provider broadcast, etc.) subscribe
-	// via OnAfterTransaction. Guarded by the doc write lock.
+	// handlersMu guards the handler lists below, which Commit runs in
+	// registration order before the write lock is released. It is not
+	// the doc lock: Commit calls the handlers with the doc lock held,
+	// and a handler may register or unsubscribe one, itself included,
+	// or close an UndoManager, from inside the call. Commit runs a
+	// snapshot taken under handlersMu.
+	handlersMu sync.Mutex
+
+	// afterTxnHandlers fire at the end of TransactionMut.Commit, after
+	// the write-lock state is finalised. UndoManager and any other
+	// observer (logging, sync provider broadcast, etc.) subscribe via
+	// OnAfterTransaction.
 	afterTxnHandlers []*registeredAfterTxn
+
+	// updateHandlers / updateV2Handlers receive each committed
+	// transaction's update (OnUpdate / OnUpdateV2).
+	updateHandlers   []*registeredUpdate
+	updateV2Handlers []*registeredUpdate
 }
 
 // registeredAfterTxn wraps a handler so each registration has a
@@ -119,17 +131,20 @@ type AfterTransactionHandler func(*TransactionMut)
 // the handler; calling it more than once is a no-op.
 //
 // Registration order is preserved; handlers fire in registration
-// order. Panics in a handler propagate and are NOT caught — they
-// leave the doc write lock held by the panicking goroutine, which is
-// the same behaviour as any other panic during Commit.
+// order. A handler may register or unsubscribe handlers, itself
+// included, or close an UndoManager, from inside the call; the change
+// applies from the next transaction. Panics in a handler propagate
+// and are NOT caught — they leave the doc write lock held by the
+// panicking goroutine, which is the same behaviour as any other panic
+// during Commit.
 func (d *Doc) OnAfterTransaction(fn AfterTransactionHandler) func() {
 	h := &registeredAfterTxn{fn: fn}
-	d.mu.Lock()
+	d.handlersMu.Lock()
 	d.afterTxnHandlers = append(d.afterTxnHandlers, h)
-	d.mu.Unlock()
+	d.handlersMu.Unlock()
 	return func() {
-		d.mu.Lock()
-		defer d.mu.Unlock()
+		d.handlersMu.Lock()
+		defer d.handlersMu.Unlock()
 		for i, r := range d.afterTxnHandlers {
 			if r == h {
 				d.afterTxnHandlers = append(d.afterTxnHandlers[:i], d.afterTxnHandlers[i+1:]...)
@@ -145,10 +160,106 @@ func (d *Doc) OnAfterTransaction(fn AfterTransactionHandler) func() {
 // OnAfterTransaction (registers a new observer) does not see itself
 // added mid-iteration.
 func (d *Doc) fireAfterTransactionHandlers(mut *TransactionMut) {
+	d.handlersMu.Lock()
 	handlers := make([]*registeredAfterTxn, len(d.afterTxnHandlers))
 	copy(handlers, d.afterTxnHandlers)
+	d.handlersMu.Unlock()
 	for _, h := range handlers {
 		h.fn(mut)
+	}
+}
+
+// UpdateHandler receives one committed transaction as an update and the
+// transaction's Origin. The bytes are shared by every handler of that
+// transaction; do not modify them.
+type UpdateHandler func(update []byte, origin any)
+
+// registeredUpdate gives each update registration a stable identity for
+// unsubscribe, as registeredAfterTxn does.
+type registeredUpdate struct {
+	fn UpdateHandler
+}
+
+// UpdateEncoder encodes a committed transaction as the update yjs emits
+// for it ('update' when v2 is false, 'updateV2' when true), or returns
+// nil when the transaction changed nothing. The encoding package
+// installs it in an init: doc cannot import encoding, which imports
+// doc. Every package that exposes OnUpdate imports encoding.
+var UpdateEncoder func(t *TransactionMut, v2 bool) []byte
+
+// OnUpdate registers fn to receive, after every write transaction that
+// changed the document, a V1 update holding exactly that transaction's
+// changes, and the transaction's Origin. It is the yjs
+// doc.on('update') event: structs created from the transaction's start
+// state on (the first of each client cut at that clock) and the delete
+// set of what the transaction deleted, byte for byte as yjs writes them
+// apart from three pinned cases (docs/tech-debt.md, "Remaining
+// update-event divergences": deleting a nested type lists only the
+// type's own item, yjs's extra cleanup update after concurrent
+// formatting is not emitted, undo restores kept tombstones as separate
+// structs) and the Any values ygo writes differently (objects with
+// several keys, written with sorted keys, and whole-number float64s).
+// Local edits, applied updates and UndoManager steps all emit one; a
+// transaction that changed nothing emits none.
+//
+// fn runs at the end of Commit, after observers, after-transaction
+// handlers and garbage collection, with the write lock still held, so
+// updates arrive in commit order even with concurrent writers. Like an
+// after-transaction handler it must not open a transaction on the same
+// doc; send or queue the bytes. It may register or unsubscribe
+// handlers, itself included, or close an UndoManager; a change applies
+// from the next transaction. Returns an unsubscribe function; calling
+// it more than once is a no-op.
+func (d *Doc) OnUpdate(fn UpdateHandler) func() {
+	return d.addUpdateHandler(&d.updateHandlers, fn)
+}
+
+// OnUpdateV2 is OnUpdate with V2 wire bytes, the yjs
+// doc.on('updateV2') event.
+func (d *Doc) OnUpdateV2(fn UpdateHandler) func() {
+	return d.addUpdateHandler(&d.updateV2Handlers, fn)
+}
+
+func (d *Doc) addUpdateHandler(list *[]*registeredUpdate, fn UpdateHandler) func() {
+	h := &registeredUpdate{fn: fn}
+	d.handlersMu.Lock()
+	*list = append(*list, h)
+	d.handlersMu.Unlock()
+	return func() {
+		d.handlersMu.Lock()
+		defer d.handlersMu.Unlock()
+		for i, r := range *list {
+			if r == h {
+				*list = append((*list)[:i:i], (*list)[i+1:]...)
+				return
+			}
+		}
+	}
+}
+
+// fireUpdateHandlers encodes the committed transaction once per wire
+// version that has a handler and calls those handlers in registration
+// order. Called from Commit under the write lock. Both handler lists
+// are copied before any call, so handlers can change them.
+func (d *Doc) fireUpdateHandlers(t *TransactionMut) {
+	if UpdateEncoder == nil {
+		return
+	}
+	d.handlersMu.Lock()
+	v1 := append([]*registeredUpdate(nil), d.updateHandlers...)
+	v2 := append([]*registeredUpdate(nil), d.updateV2Handlers...)
+	d.handlersMu.Unlock()
+	for i, handlers := range [][]*registeredUpdate{v1, v2} {
+		if len(handlers) == 0 {
+			continue
+		}
+		update := UpdateEncoder(t, i == 1)
+		if update == nil {
+			return // the transaction changed nothing, in either version
+		}
+		for _, h := range handlers {
+			h.fn(update, t.Origin)
+		}
 	}
 }
 

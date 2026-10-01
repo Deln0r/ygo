@@ -192,6 +192,9 @@ func (t *TransactionMut) Commit() {
 	// Garbage-collect deleted content (free payloads, merge deleted
 	// runs), skipping items marked keep by an observer.
 	t.gcDeleted()
+	// Update events last, as yjs emits 'update' / 'updateV2' after GC
+	// and the struct merge: the bytes describe the final layout.
+	t.doc.fireUpdateHandlers(t)
 	t.doc.mu.Unlock()
 }
 

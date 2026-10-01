@@ -144,8 +144,13 @@ func NewXmlText(d *Doc, name string) *XmlText {
 //
 // Scope is given as the typed wrappers themselves (a Map, Array, Text,
 // or XML type). Only mutations under one of the scoped types, made by
-// a tracked origin (local edits by default), are captured. Bursty edits
-// within the capture-timeout window collapse into a single undo step.
+// a tracked origin, are captured. The default tracks the nil origin:
+// local edits made without one, but also updates applied with plain
+// ApplyUpdate, exactly as yjs does. Apply a peer's updates with
+// ApplyUpdateWithOrigin to keep them out of the history, or track only
+// your own origin (AddTrackedOrigin, RemoveTrackedOrigin(nil)). Bursty
+// edits within the capture-timeout window collapse into a single undo
+// step.
 //
 //	m := ygo.NewMap(d, "settings")
 //	um := ygo.NewUndoManager(d, m)
@@ -155,7 +160,7 @@ func NewXmlText(d *Doc, name string) *XmlText {
 type UndoManager = undo.UndoManager
 
 // UndoManagerOptions configures an UndoManager. A zero value selects
-// the defaults: 500 ms capture timeout, track local (nil) origin only.
+// the defaults: 500 ms capture timeout, track the nil origin only.
 type UndoManagerOptions = undo.Options
 
 // SubdocsEvent carries the subdocument lifecycle changes of one
@@ -373,6 +378,11 @@ var ErrSnapshotGC = errors.New("ygo: RestoreSnapshot requires the source Doc to 
 // EncodeDiff returns the wire-encoded V1 update covering the
 // blocks d has that the remote (per remoteSVBytes) does not. A
 // nil remoteSVBytes is treated as the empty SV — emit everything.
+// Each client's first block is cut at the remote's clock, so the
+// bytes are those of Y.encodeStateAsUpdate(doc, sv), except that yjs
+// also appends updates its pending buffer holds; the delete set is
+// the whole document's, as there. For one transaction's changes alone,
+// use Doc.OnUpdate.
 //
 // remoteSVBytes is the V1 wire-encoded form of the remote's state
 // vector (the same shape EncodeStateVector produces).
@@ -423,6 +433,24 @@ func ApplyUpdate(d *Doc, raw []byte) error {
 	return encoding.ApplyUpdate(d, raw)
 }
 
+// ApplyUpdateWithOrigin is ApplyUpdate with origin as the transaction's
+// Origin, the third argument of yjs Y.applyUpdate. Observers, OnUpdate
+// handlers and UndoManager origin filters see it, which is how a sync
+// provider keeps from sending a peer's update back out:
+//
+//	d.OnUpdate(func(update []byte, origin any) {
+//		if origin != peer {
+//			broadcast(update)
+//		}
+//	})
+//	err := ygo.ApplyUpdateWithOrigin(d, fromPeer, peer)
+//
+// origin must be a comparable value (a string, a pointer, a struct of
+// comparable fields) if an UndoManager tracks origins by it.
+func ApplyUpdateWithOrigin(d *Doc, raw []byte, origin any) error {
+	return encoding.ApplyUpdateWithOrigin(d, raw, origin)
+}
+
 // ApplyUpdateV2 decodes V2 wire bytes and integrates them into d.
 // Pending-buffer semantics identical to ApplyUpdate (V1) — items
 // missing causal dependencies queue silently and drain on
@@ -441,6 +469,12 @@ func ApplyUpdate(d *Doc, raw []byte) error {
 // which version they have via the surrounding transport metadata.
 func ApplyUpdateV2(d *Doc, raw []byte) error {
 	return encoding.ApplyUpdateV2(d, raw)
+}
+
+// ApplyUpdateV2WithOrigin is ApplyUpdateV2 with origin as the
+// transaction's Origin; see ApplyUpdateWithOrigin.
+func ApplyUpdateV2WithOrigin(d *Doc, raw []byte, origin any) error {
+	return encoding.ApplyUpdateV2WithOrigin(d, raw, origin)
 }
 
 // ValidateUpdate returns an error unless raw is a well-formed V1 update that
@@ -585,9 +619,12 @@ func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
 // EncodeStateVectorFromUpdate) is missing. Mirrors yjs diffUpdate: trim a
 // stored update before sending it to a peer that already has part of it.
 //
-// It reconstructs the update's state and diffs against remoteSV, emitting
-// whole blocks like EncodeDiff. Blocks whose dependencies are absent from
-// the input are DROPPED rather than carried: unlike MergeUpdates, this
+// It reconstructs the update's state and diffs against remoteSV, cutting
+// the first block of each client at the remote clock like EncodeDiff. The
+// update is integrated first, so blocks commit-time squash can merge come
+// out merged, where yjs diffUpdate keeps the input's blocks. Blocks whose
+// dependencies are absent from the input are DROPPED rather than
+// carried: unlike MergeUpdates, this
 // does not preserve the pending buffer. That is fine for the intended use
 // - trimming a self-contained update before sending it - and lossy for
 // anything else, including the output of MergeUpdates over an incomplete

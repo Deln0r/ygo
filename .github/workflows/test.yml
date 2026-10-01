@@ -256,6 +256,9 @@ jobs:
       - name: regenerate observer fixtures
         working-directory: testdata/gen
         run: node gen-observers.mjs
+      - name: regenerate update-event fixtures
+        working-directory: testdata/gen
+        run: node gen-update-events.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff
@@ -279,6 +282,7 @@ jobs:
           go test . -run TestWireEdge_CrossLanguage
           go test . -run TestRichText_Fixtures
           go test . -run TestObservers_Fixtures
+          go test . -run TestUpdateEvents_Fixtures
       - name: validate reverse fixtures (JS applies Go-encoded bytes)
         working-directory: testdata/gen
         run: node validate-go-fixtures.mjs
