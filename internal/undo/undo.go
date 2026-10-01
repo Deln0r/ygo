@@ -1,6 +1,8 @@
 package undo
 
 import (
+	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -51,7 +53,9 @@ type UndoManager struct {
 	// matching scope entry.
 	scope []*block.Branch
 
-	captureTimeout         time.Duration
+	captureTimeout time.Duration
+	// trackedOrigins is replaced, never written, by AddTrackedOrigin /
+	// RemoveTrackedOrigin; read and swapped under mu.
 	trackedOrigins         map[any]struct{}
 	ignoreRemoteMapChanges bool //nolint:unused // wired in nested-type follow-up
 
@@ -100,9 +104,14 @@ func NewUndoManager(d *doc.Doc, scope []*block.Branch, opts ...Options) *UndoMan
 		captureTimeout = DefaultCaptureTimeout
 	}
 
-	trackedOrigins := opt.TrackedOrigins
-	if trackedOrigins == nil {
-		trackedOrigins = map[any]struct{}{nil: {}}
+	// A copy: the caller keeps its map, and Add/RemoveTrackedOrigin
+	// replace ours instead of writing to it.
+	trackedOrigins := map[any]struct{}{nil: {}}
+	if opt.TrackedOrigins != nil {
+		trackedOrigins = make(map[any]struct{}, len(opt.TrackedOrigins))
+		for o := range opt.TrackedOrigins {
+			trackedOrigins[o] = struct{}{}
+		}
 	}
 
 	um := &UndoManager{
@@ -300,17 +309,69 @@ func (um *UndoManager) Clear() {
 // to do).
 func (um *UndoManager) Close() {
 	um.mu.Lock()
-	defer um.mu.Unlock()
 	if um.closed {
+		um.mu.Unlock()
 		return
 	}
 	um.closed = true
 	um.undoStack = nil
 	um.redoStack = nil
-	if um.unsubscribe != nil {
-		um.unsubscribe()
-		um.unsubscribe = nil
+	unsubscribe := um.unsubscribe
+	um.unsubscribe = nil
+	um.mu.Unlock()
+	// Unsubscribe takes the doc lock, so it runs after um.mu is
+	// released: a commit on another goroutine holds the doc lock and
+	// takes um.mu in onAfterTransaction, and holding both the other
+	// way round deadlocked. A commit already past the closed check
+	// finds the stacks gone and records nothing.
+	if unsubscribe != nil {
+		unsubscribe()
 	}
+}
+
+// AddTrackedOrigin makes the manager capture transactions whose Origin
+// is origin, as yjs addTrackedOrigin does. Origins are compared with ==,
+// so origin must be comparable (a string, number, pointer, or struct of
+// such fields); AddTrackedOrigin panics on a slice, map or func, which
+// could never match.
+func (um *UndoManager) AddTrackedOrigin(origin any) {
+	if !comparableOrigin(origin) {
+		panic(fmt.Sprintf("undo: AddTrackedOrigin: origin of type %T is not comparable", origin))
+	}
+	um.mu.Lock()
+	defer um.mu.Unlock()
+	next := make(map[any]struct{}, len(um.trackedOrigins)+1)
+	for o := range um.trackedOrigins {
+		next[o] = struct{}{}
+	}
+	next[origin] = struct{}{}
+	um.trackedOrigins = next
+}
+
+// RemoveTrackedOrigin stops capturing transactions whose Origin is
+// origin, as yjs removeTrackedOrigin does. Removing nil leaves plain
+// local edits, and updates applied without an origin, uncaptured.
+func (um *UndoManager) RemoveTrackedOrigin(origin any) {
+	if !comparableOrigin(origin) {
+		return // never tracked
+	}
+	um.mu.Lock()
+	defer um.mu.Unlock()
+	next := make(map[any]struct{}, len(um.trackedOrigins))
+	for o := range um.trackedOrigins {
+		if o != origin {
+			next[o] = struct{}{}
+		}
+	}
+	um.trackedOrigins = next
+}
+
+// comparableOrigin reports whether origin can be a map key: nil, or a
+// value that is comparable all the way down. The value is checked, not
+// its type: a struct with an interface field holding a slice has a
+// comparable type and still panics when hashed.
+func comparableOrigin(origin any) bool {
+	return origin == nil || reflect.ValueOf(origin).Comparable()
 }
 
 // Undo pops the top of the undo stack and replays it against the doc:
@@ -485,7 +546,15 @@ func (um *UndoManager) isTrackedOrigin(origin any) bool {
 	if origin == um {
 		return true
 	}
-	_, ok := um.trackedOrigins[origin]
+	// A transaction may carry any Origin; one that cannot be a map key
+	// (a slice, say) is never tracked, and must not panic the commit.
+	if !comparableOrigin(origin) {
+		return false
+	}
+	um.mu.Lock()
+	tracked := um.trackedOrigins
+	um.mu.Unlock()
+	_, ok := tracked[origin]
 	return ok
 }
 

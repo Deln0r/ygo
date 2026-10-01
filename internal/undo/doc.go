@@ -11,7 +11,9 @@
 // match in this first cut; nested-type ancestry is planned) AND its
 // Origin is in the configured trackedOrigins set. The default
 // trackedOrigins is {nil}, which matches local edits made without an
-// explicit origin.
+// explicit origin, and also updates applied without one (yjs behaves
+// the same): apply a peer's updates with an origin to keep them out of
+// the undo history.
 //
 // Capture-timeout grouping: bursty edits within captureTimeout collapse
 // into a single StackItem so a single Undo restores a recognisable unit
