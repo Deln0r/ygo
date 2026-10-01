@@ -288,6 +288,28 @@ func itemMissingDep(bs *store.BlockStore, it *block.Item) bool {
 	return false
 }
 
+// collectedDep reports whether an item whose references are all in the
+// store hangs off something garbage collection removed: its origin or
+// right origin lies in a GC run, or its parent by ID is a GC run or an
+// item that no longer holds a type (a collected type keeps only a
+// ContentDeleted marker). Mirrors the cases yjs Item.getMissing turns
+// into a null parent.
+func collectedDep(txn *doc.TransactionMut, it *block.Item) bool {
+	if it.Origin != nil && txn.GetItem(*it.Origin) == nil {
+		return true
+	}
+	if it.RightOrigin != nil && txn.GetItem(*it.RightOrigin) == nil {
+		return true
+	}
+	if it.Parent.Kind == block.ParentID {
+		p := txn.GetItem(it.Parent.ID)
+		if p == nil || p.Content.Kind != block.KindType || p.Content.Branch == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // foldUpdate merges every block and delete-set entry from u into p.
 // Items that the local store already has are silently dropped (no
 // need to retry them).
@@ -305,7 +327,9 @@ func (p *Pending) foldUpdate(u *Update, bs *store.BlockStore) {
 				}
 				p.addBlock(client, b)
 			case WireBlockGC, WireBlockSkip:
-				if bs.Contains(b.ID) {
+				// Keep unless fully known; a run whose start the store
+				// has is trimmed at Drain time, like an item.
+				if b.ID.Clock+b.Len <= bs.GetClock(client) {
 					continue
 				}
 				p.addBlock(client, b)
@@ -350,10 +374,19 @@ func (p *Pending) Drain(txn *doc.TransactionMut) int {
 		for _, b := range list {
 			switch b.Kind {
 			case WireBlockGC:
-				if bs.Contains(b.ID) {
-					continue
+				known := bs.GetClock(c)
+				if b.ID.Clock+b.Len <= known {
+					continue // fully known
 				}
-				if b.ID.Clock > bs.GetClock(c) {
+				if b.ID.Clock < known {
+					// The store has the start of the run: keep the
+					// unknown tail, as yjs GC.integrate does with an
+					// offset. Dropping the whole run left this
+					// client's clock behind for good.
+					b.Len -= known - b.ID.Clock
+					b.ID.Clock = known
+				}
+				if b.ID.Clock > known {
 					// Gap ahead of what we have for this client;
 					// PushGC has PushBlock's monotonicity
 					// precondition, so queue rather than punch a
@@ -391,6 +424,17 @@ func (p *Pending) Drain(txn *doc.TransactionMut) int {
 				}
 				if itemMissingDep(bs, it) {
 					remaining = append(remaining, b)
+					continue
+				}
+				if collectedDep(txn, it) {
+					// What the item hangs off was garbage-collected:
+					// it integrates as a GC run of its length, so the
+					// client's clock moves on (yjs Item.getMissing sets
+					// the parent to null, Item.integrate writes a GC).
+					// Left queued, it blocked every later block of its
+					// client forever.
+					bs.PushGC(c, it.ID.Clock, it.ID.Clock+it.Len-1)
+					progress++
 					continue
 				}
 				if err := block.Repair(it, txn); err != nil {
@@ -459,8 +503,12 @@ func applyDeleteRange(txn *doc.TransactionMut, client, start, end uint64) (int, 
 			// Unseen — re-queue from here.
 			return deleted, Range{Start: clock, Length: end - clock}
 		}
-		if cell.AsItem() == nil {
-			// GC cell — already tombstoned, just step past.
+		if it := cell.AsItem(); it == nil || it.IsDeleted() {
+			// GC cell or an item already deleted: step past it whole.
+			// Cutting a deleted item would leave its pieces apart for
+			// good (nothing in this transaction re-merges them), so the
+			// store and every later encoding would differ from yjs,
+			// whose readAndApplyDeleteSet only splits live items.
 			if !advanceClock(&clock, cell.ClockEnd()) {
 				break
 			}

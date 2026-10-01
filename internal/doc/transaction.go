@@ -303,22 +303,29 @@ func (t *TransactionMut) SubdocsLoaded() []string { return t.subdocsLoaded }
 // commit-time GC (tryGcDeleteSet + tryMergeDeleteSet). A deleted item's
 // payload is replaced with a ContentDeleted marker of the same length,
 // so the wire form becomes ContentDeleted (ref 1), byte-aligned with
-// what yjs emits for a deleted item. Skipped when GC is disabled
-// (snapshots / time-travel need the content) and for items marked keep
-// (the UndoManager preserves them to support redo).
+// what yjs emits for a deleted item. Freeing is skipped when GC is
+// disabled (snapshots / time-travel need the content) and for items
+// marked keep (the UndoManager preserves them to support redo); the
+// merge runs either way.
 func (t *TransactionMut) gcDeleted() {
-	if !t.doc.gc {
-		return
-	}
 	bs := t.doc.store
-	touched := map[uint64]uint64{} // client -> smallest GC'd clock
+	touched := map[uint64]uint64{} // client -> smallest deleted clock
 	for _, id := range t.deletedIDs {
 		cell, ok := bs.GetBlock(id)
 		if !ok {
 			continue
 		}
 		it := cell.AsItem()
-		if it == nil || !it.IsDeleted() || it.IsKeep() {
+		if it == nil || !it.IsDeleted() {
+			continue
+		}
+		// The merge pass below runs whether or not the content is
+		// collected: yjs tryMergeDeleteSet merges the deleted ranges
+		// with GC off too, so a block cut by deletions rejoins.
+		if cur, ok := touched[it.ID.Client]; !ok || it.ID.Clock < cur {
+			touched[it.ID.Client] = it.ID.Clock
+		}
+		if !t.doc.gc || it.IsKeep() {
 			continue
 		}
 		// A deleted shared type collapses its whole subtree: every child
@@ -335,9 +342,6 @@ func (t *TransactionMut) gcDeleted() {
 			// item honours the invariant at block/item.go (a deleted
 			// marker never contributes to parent length totals).
 			it.SetCountable(false)
-		}
-		if cur, ok := touched[it.ID.Client]; !ok || it.ID.Clock < cur {
-			touched[it.ID.Client] = it.ID.Clock
 		}
 	}
 	// Merge adjacent deleted/GC'd cells per affected client, starting at
@@ -441,8 +445,10 @@ func (t *TransactionMut) DeleteRange(client, start, end uint64) int {
 		if !ok {
 			return deleted // unseen tail
 		}
-		if cell.AsItem() == nil {
-			if !advanceClock(&clock, cell.ClockEnd()) { // GC cell: already gone
+		if it := cell.AsItem(); it == nil || it.IsDeleted() {
+			// GC cell or already deleted: nothing to do, and cutting a
+			// deleted item would leave its pieces apart for good.
+			if !advanceClock(&clock, cell.ClockEnd()) {
 				break
 			}
 			continue

@@ -233,11 +233,11 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 	// Content-specific integrate actions.
 	switch i.Content.Kind {
 	case KindDeleted:
-		// The item is tombstoned at construction. Mark the flag and
-		// record into the txn's delete set — InsertDeleteSet API
-		// arrives with the IdSet layer; for now we just set the flag.
-		// TODO: ctx.InsertDeleteSet(i.ID, i.Len).
-		i.SetDeleted(true)
+		// Content that arrives already deleted is tombstoned and its
+		// range goes into the transaction's delete set, as yjs
+		// ContentDeleted.integrate does (addToDeleteSet + markDeleted),
+		// so the transaction's update and GC merge see it.
+		ctx.Delete(i)
 	case KindMove, KindDoc, KindFormat:
 		// Defer per tech-debt.md (Move integration, subdoc
 		// registration, format searchmarker).
