@@ -110,11 +110,7 @@ func EncodeContent(buf []byte, c block.Content) []byte {
 		// yjs ContentDoc.write. opts is always an object (possibly
 		// empty), never nil, so the Any tag is the object tag.
 		buf = lib0.WriteVarString(buf, c.DocGuid)
-		opts := c.DocOpts
-		if opts == nil {
-			opts = map[string]any{}
-		}
-		return EncodeAny(buf, opts)
+		return EncodeDocOpts(buf, c.DocOpts)
 	default:
 		panic(fmt.Sprintf("encoding.EncodeContent: unsupported kind %d (supported: Any, String, Binary, Deleted, Type, Doc)", c.Kind))
 	}

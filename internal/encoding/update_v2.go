@@ -203,6 +203,12 @@ func EncodeContentV2(enc *EncoderV2, c block.Content) {
 		case block.TypeRefXmlElement, block.TypeRefXmlHook:
 			enc.WriteKey(c.Branch.Name)
 		}
+	case block.KindDoc:
+		// ContentDoc.write: writeString(guid) + writeAny(opts), the
+		// same payload as V1 through the V2 string column and rest
+		// stream. opts is always an object, never nil.
+		enc.WriteString(c.DocGuid)
+		enc.rest = EncodeDocOpts(enc.rest, c.DocOpts)
 	default:
 		panic(fmt.Sprintf("encoding.EncodeContentV2: unsupported kind %d", c.Kind))
 	}
@@ -482,6 +488,21 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 			br.Name = name
 		}
 		return block.Content{Kind: block.KindType, Branch: br}, nil
+	case block.KindDoc:
+		// readContentDoc: readString(guid) + readAny(opts).
+		guid, err := dec.ReadString()
+		if err != nil {
+			return block.Content{}, fmt.Errorf("DecodeContentV2 doc guid: %w", err)
+		}
+		optsAny, err := dec.ReadAny()
+		if err != nil {
+			return block.Content{}, fmt.Errorf("DecodeContentV2 doc opts: %w", err)
+		}
+		opts, _ := optsAny.(map[string]any)
+		if opts == nil {
+			opts = map[string]any{}
+		}
+		return block.Content{Kind: block.KindDoc, DocGuid: guid, DocOpts: opts}, nil
 	default:
 		return block.Content{}, fmt.Errorf("DecodeContentV2: unsupported content kind %d", refNum)
 	}
