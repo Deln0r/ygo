@@ -72,6 +72,12 @@ file.
 
 ### Infrastructure
 
+- CI sends coverage to Coveralls (badge in the README). It counts every library
+  package from every test binary (`-coverpkg`), because much of `internal/...`
+  is exercised through the public API tests in the root package; commands,
+  examples and benchmarks are left out. 85.1% of statements, measured locally
+  with `-race` before the first upload.
+
 - Rich-text fixtures grew from 28 to 35 with the delete cases above; the pinned
   divergences went from 10 to 8, all of them about inserting into formatted
   text.

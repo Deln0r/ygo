@@ -2,6 +2,7 @@
 
 [![Official Yjs port](https://img.shields.io/badge/Yjs%20docs-official%20port-7c3aed.svg)](https://docs.yjs.dev/ecosystem/ports-to-other-languages)
 [![CI](https://github.com/Deln0r/ygo/actions/workflows/test.yml/badge.svg)](https://github.com/Deln0r/ygo/actions/workflows/test.yml)
+[![Coverage](https://coveralls.io/repos/github/Deln0r/ygo/badge.svg?branch=main)](https://coveralls.io/github/Deln0r/ygo?branch=main)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Deln0r/ygo.svg)](https://pkg.go.dev/github.com/Deln0r/ygo)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)

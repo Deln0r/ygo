@@ -38,13 +38,31 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: go test
-        run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+        if: matrix.go != 'stable'
+        run: go test -race ./...
+      - name: go test with coverage
+        if: matrix.go == 'stable'
+        # Coverage counts every library package from every test binary
+        # (-coverpkg), not only each package's own tests: much of
+        # internal/... is exercised through the public API tests in the
+        # root package. Commands, examples and benchmarks are left out.
+        run: |
+          pkgs=$(go list ./... | grep -v -E '/(cmd|examples|benchmarks)(/|$)' | paste -sd, -)
+          go test -race -coverpkg="$pkgs" -coverprofile=coverage.txt -covermode=atomic ./...
+          go tool cover -func=coverage.txt | tail -1
       - name: upload coverage
         if: matrix.go == 'stable'
         uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.txt
+      - name: send coverage to Coveralls
+        if: matrix.go == 'stable' && github.event_name == 'push'
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: coverage.txt
+          format: golang
 
   backplane-nats:
     name: backplane-nats (nested module)
