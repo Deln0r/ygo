@@ -18,14 +18,17 @@ file.
 
 **Upgrade impact** - `EncodeDiff`, `EncodeDiffV2` and `DiffUpdate` produce
 smaller, different bytes when the peer already has part of a block: the bytes
-yjs produces. An application that applies peers' updates with plain
-`ApplyUpdate` and uses an UndoManager should apply them with
-`ApplyUpdateWithOrigin`, since plain apply commits with no origin and the
-default manager captures that, as in yjs. A non-integral `float64` that a
-float32 holds exactly is now written as a float32, and -2^31 decodes as a
-`float64`. With GC off, deleted pieces of a block merge, so such documents
-encode to different bytes. `Undo` and `Redo` return true only when a step
-changed the document, and undo no longer restores a map value over a later
+yjs produces. A diff no longer carries the earlier part of that block, so a
+receiver that missed an earlier update holds the later one pending until the
+missing update arrives or it syncs against its state vector, as with yjs;
+before, the re-sent block filled the gap by accident. An application that
+applies peers' updates with plain `ApplyUpdate` and uses an UndoManager should
+apply them with `ApplyUpdateWithOrigin`, since plain apply commits with no
+origin and the default manager captures that, as in yjs. A non-integral
+`float64` that a float32 holds exactly is now written as a float32, and -2^31
+decodes as a `float64`. With GC off, deleted pieces of a block merge, so such
+documents encode to different bytes. `Undo` and `Redo` return true only when a
+step changed the document, and undo no longer restores a map value over a later
 untracked write.
 
 ### Added
@@ -88,8 +91,11 @@ with its keys sorted, where yjs keeps their insertion order, and a whole-number
   block whole, and because commit-time squash merges a writer's appends into one
   block, every diff carried the writer's whole history: a third-party evaluation
   measured 27 bytes growing to 1720 over 200 appends, and chose the other Go
-  port for it. Receivers already discarded the overlap, so only the size
-  changes.
+  port for it. Receivers already discarded the overlap. What changes besides the
+  size: a receiver that missed an earlier update used to find its part of the
+  block inside the next diff; now, as with yjs, the next diff waits in the
+  pending buffer until the missing update arrives or a state-vector sync fills
+  the gap.
 
 - **Numbers in Any content are classified as lib0 `writeAny` classifies them.**
   A non-integral `float64` that a float32 holds exactly (0.5, 2.5, ±Inf) is

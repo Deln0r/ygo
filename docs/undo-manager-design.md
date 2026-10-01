@@ -14,7 +14,7 @@ The grouping of rapid edits into a single "undo step" (the `captureTimeout` mech
 
 In scope for the first cut:
 
-- Track local-origin mutations only (default `trackedOrigins = {nil}`)
+- Track local-origin mutations only (default `trackedOrigins = {nil}`). Note added in 1.22.0: `{nil}` also matches updates applied without an origin, exactly as yjs's default `{null}` does, so remote updates belong under an origin of their own (`ApplyUpdateWithOrigin`); `AddTrackedOrigin` / `RemoveTrackedOrigin` change the set after construction.
 - Track configurable scope: a slice of root branches (typically the Map / Array / Text the application cares about)
 - Two stacks: undo and redo
 - Capture-timeout grouping (default 500 ms)
@@ -40,7 +40,7 @@ type UndoManager struct {
 
 type UndoManagerOptions struct {
     CaptureTimeout time.Duration       // default 500 * time.Millisecond
-    TrackedOrigins map[any]struct{}    // default {nil} = local only
+    TrackedOrigins map[any]struct{}    // default {nil}: untagged local edits and untagged applies
     IgnoreRemoteMapChanges bool        // default false
 }
 

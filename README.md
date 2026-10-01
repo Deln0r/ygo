@@ -21,6 +21,7 @@ Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients 
 - **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native y-websocket/Hocuspocus provider: handshake, incremental updates, awareness, reconnect with backoff. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
 - **Complete CRDT type set.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments.
 - **Change observers.** `Map.Observe` / `Array.Observe` / `Text.Observe` deliver Quill-style deltas of exactly what changed; `ObserveDeep` bubbles events from nested types with their path. Semantic parity with yjs's YMapEvent / YArrayEvent / YTextEvent. On mobile, `ObserveChanges` hands a native editor the delta as JSON.
+- **One update per transaction.** `Doc.OnUpdate` / `OnUpdateV2` hand you each committed transaction as an update holding just its changes, the bytes yjs emits on `doc.on('update')` (known exceptions in the status table), with the transaction's origin; an append costs about 20 bytes however long the history. `ApplyUpdateWithOrigin` tags a peer's update so an echo guard and the UndoManager can tell it apart, and `EncodeDiff` catches a peer up from its own clock.
 - **Compact encoding.** Commit-time block squash collapses per-character edits into single items (about 1 byte per character in V1), and garbage collection frees deleted content at commit. On a real-world editing trace V1 document size drops from ~1.97 MB to ~223 KB, competitive with V2.
 - **Forward-looking wire handling.** ygo handles 53-bit client IDs throughout (byte-verified above 2^32), the confirmed wire-level change in the `yjs@14` release candidate, and decodes Skip structs in the update stream as no-op gaps (part of the wire format since yjs v13.5). Full attribution / IdMap support waits for the v14 format to stabilize.
 - **Ready-to-run server: [yserve](docs/yserve.md).** A self-hosted Yjs server in a single static binary — a Hocuspocus alternative with no Node, no Redis, no CGO. Same wire protocol, so existing `@hocuspocus/provider` / `y-websocket` clients connect unchanged; SQLite persistence and periodic document versioning built in. Also embeds as a plain `http.Handler` inside an existing Go backend.
@@ -89,7 +90,7 @@ d.OnUpdate(func(update []byte, origin any) {
 err := ygo.ApplyUpdateWithOrigin(d, received, from)
 ```
 
-`OnUpdateV2` gives the V2 bytes. Handlers run at the end of the commit with the document lock held, in commit order; they must not open a transaction on the same document. To catch up a peer that has been away, send `ygo.EncodeDiff(d, peerStateVector)`: it starts exactly at the peer's clock, as `Y.encodeStateAsUpdate(doc, sv)` does. Unlike yjs it does not append updates still waiting in the pending buffer for a missing dependency.
+`OnUpdateV2` gives the V2 bytes, and `ApplyUpdateV2WithOrigin` applies V2 bytes with an origin. Handlers run at the end of the commit with the document lock held, in commit order; they must not open a transaction on the same document. To catch up a peer that has been away, send `ygo.EncodeDiff(d, peerStateVector)`: it starts exactly at the peer's clock, as `Y.encodeStateAsUpdate(doc, sv)` does. Unlike yjs it does not append updates still waiting in the pending buffer for a missing dependency.
 
 ### Undo / Redo
 
@@ -274,7 +275,7 @@ A direct head-to-head harness against native yrs under identical hardware is on 
 
 ## Roadmap
 
-Shipped since v1.0 (June 2026): a full Hocuspocus-compatible sync server (connection lifecycle hooks, read-only viewers, resource caps, a stats snapshot), horizontal scaling across instances with cross-cluster cursors, an offline-first Go client, WAL-backed SQLite persistence, continuous fuzzing, and the yjs update-level utilities. See the [CHANGELOG](CHANGELOG.md), the [releases](https://github.com/Deln0r/ygo/releases), and [examples/](examples).
+Shipped since v1.0 (June 2026): a full Hocuspocus-compatible sync server (connection lifecycle hooks, read-only viewers, resource caps, a stats snapshot), horizontal scaling across instances with cross-cluster cursors, an offline-first Go client, WAL-backed SQLite persistence, continuous fuzzing, the yjs update-level utilities, and per-transaction update events with origins (1.22.0). See the [CHANGELOG](CHANGELOG.md), the [releases](https://github.com/Deln0r/ygo/releases), and [examples/](examples).
 
 Open: a documentation site, an external security audit, and yjs v14 wire features (attribution / IdMap) once v14 reaches GA.
 
@@ -288,7 +289,7 @@ Runnable examples in [examples/](examples):
 - [collab-client](examples/collab-client) — a Go-native sync client: connect, observe remote changes, edit, converge.
 - [offline-first](examples/offline-first) — client-side offline persistence with a `LocalStore`: usable with no network, edits survive restarts and sync up on reconnect.
 
-The core CRDT API also has output-verified [runnable examples on pkg.go.dev](https://pkg.go.dev/github.com/Deln0r/ygo#pkg-examples) (Map, Array, Text, two-document sync, UndoManager).
+The core CRDT API also has output-verified [runnable examples on pkg.go.dev](https://pkg.go.dev/github.com/Deln0r/ygo#pkg-examples) (Map, Array, Text, two-document sync, per-transaction updates, UndoManager).
 
 ## Documentation
 

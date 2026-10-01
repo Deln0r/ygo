@@ -12,7 +12,8 @@ while sync runs in the background.
 ## API levels
 
 - **App level** — editable `Text` (`InsertAt` / `DeleteAt` / `String`,
-  UTF-16 indices) and `Map` (string keys/values), `UndoManager`,
+  UTF-16 indices) and `Map` (string keys/values), `UndoManager` (with
+  origin-scoped `WithOrigin` handles),
   cursor anchors (`Text.EncodeCursor` / `ResolveCursor`), and a sync
   `Client` (`NewClient` / `Connect` / `Listener`) that connects to a
   yserve / Hocuspocus / y-websocket server.

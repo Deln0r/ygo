@@ -8,8 +8,8 @@
 // observed inside a Transaction (read).
 //
 // See docs/yrs-port-notes/transaction.md for the per-method contract
-// and the 11-step commit lifecycle yrs runs at TransactionMut.Commit.
-// Most of that lifecycle is not yet implemented; see tech-debt.md.
+// and the commit lifecycle yrs runs at TransactionMut.Commit; the
+// lifecycle ygo runs is listed on Commit.
 package doc
 
 import (

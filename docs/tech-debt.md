@@ -344,19 +344,10 @@
 
 ## Doc / Transaction layer
 
-### TransactionMut.Commit lifecycle is a stub
+### TransactionMut.Commit lifecycle (resolved)
 
-- **Where:** `internal/doc/transaction.go` `(*TransactionMut).Commit`.
-- **What:** yrs runs an 11-step commit lifecycle (squash mergeBlocks, GC eligible deleted, fire pre-emit observers, emit V1 update event, emit subdoc events, fire after-commit observers, etc. — see `docs/yrs-port-notes/transaction.md` § "Commit lifecycle"). We currently only release the write lock and mark the txn closed.
-- **Why deferred:** every step depends on a layer that does not yet exist (squash needs `Item.TrySquash` + `ClientBlockList.SquashLeft`; GC needs `gc.go`; observers need an observer subsystem; update emit needs the V1 encoder; subdocs need subdoc support).
-- **Impact today:** `mergeBlocks`, `deletedIDs`, `changedTypes` accumulate across the transaction but are dropped at Commit. Memory leak per transaction; no observer notifications; updates not emitted. None of this matters until callers exist.
-- **Concrete bandwidth impact** (B4 workload, see [BENCHMARKS.md](/BENCHMARKS.md)): without commit-time squash, each per-character Text.Insert in the LaTeX trace produces a separate Item, none of which merge with same-client adjacent-clock neighbours. V1 doc size after applying 259,778 edits is 1.97 MB vs yjs's 160 KB (~12× bloat). V2 is unaffected because per-column RLE encoding effectively dedupes the per-item overhead at the wire layer (V2 doc size 227 KB ~ 1.4× yjs's V1).
-- **Implementation is two paired pieces, not one** (discovered during a failed first-pass attempt on `17 May 2026` night):
-  1. **Commit-time squash** itself: add `ClientBlockList.SquashLeft(idx)` (drop cell at idx, merge with idx-1 via `Item.TrySquash`), then `(*TransactionMut).Commit` walks `mergeBlocks` calling `SquashLeft` for each. ~100-150 LOC.
-  2. **Apply-side partial-overlap handling**: current `Pending.foldUpdate` does `if bs.Contains(b.Item.ID) { continue }` — checks the block's STARTING clock. After squash a peer might emit a block with `Len=N` covering some clocks the receiver already has + some it doesn't. The current Apply path drops the whole block on first-clock-known instead of slicing at the state-vector boundary and integrating the unknown right half. yrs's `Update::integrate` handles this via explicit slice-then-integrate. ~200-400 LOC + cross-language fixtures for partial-overlap scenarios.
-- **Order matters:** ship #2 first (Apply-side slicing). #1 alone breaks `TestServer_ConcurrentEdits_AllConverge` because peers emit squashed blocks that the receivers' current Apply can't decompose; verified by the 17 May 2026 attempt (`7 items received vs 15 expected` across 5 clients). With Apply-side slicing in place, #1 ships safely.
-- **Scope:** the paired work is naturally a single grant milestone ("Commit lifecycle completion + Apply-side partial-overlap"). Estimated 400-600 LOC + tests. Should subsume the existing "Transaction commit lifecycle is a no-op" tech-debt entry above when shipped.
-- **When to address:** unblock each step as the underlying layer lands. Squash first (right after Item.Integrate, since squash is what consumes mergeBlocks). Update emission second (with V1 encoder). Observers third. GC and subdocs last.
+- **Was:** Commit only released the write lock; squash, GC, observers, subdocument events and update emission were all missing.
+- **Resolved by:** each step as its layer landed: commit-time squash with apply-side partial-overlap slicing (June 2026), GC of deleted content and nested subtrees, observers ordered as yjs fires them (1.21.0), subdocument lifecycle events, and per-transaction update events (`Doc.OnUpdate` / `OnUpdateV2`, 1.22.0). The order is documented on `TransactionMut.Commit`; the one difference from yjs's order is the entry "Commit-time squash runs before after-transaction handlers" above.
 
 ### GC of deleted nested-type subtrees (resolved)
 

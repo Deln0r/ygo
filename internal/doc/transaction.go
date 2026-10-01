@@ -58,10 +58,8 @@ func (t *Transaction) PendingState() any { return t.doc.pendingState }
 //
 // Mirrors yrs TransactionMut<'doc>. Accumulates change-tracking state
 // during the transaction; consumes it at Commit time to run the
-// post-commit lifecycle (squash, GC, observers, update emission).
-//
-// Most lifecycle steps are not yet implemented — see tech-debt.md.
-// Commit currently only releases the lock and marks the txn closed.
+// post-commit lifecycle (observers, squash, after-transaction handlers,
+// GC, update events); see Commit.
 type TransactionMut struct {
 	doc    *Doc
 	closed bool
@@ -72,10 +70,10 @@ type TransactionMut struct {
 	// from updates applied via ApplyUpdate.
 	Origin any
 
-	// deletedIDs records items tombstoned during this transaction
-	// via Delete. Used at Commit time (not yet) to build the wire
-	// DeleteSet and drive squash of adjacent deleted runs. Read by
-	// DeletedIDs accessor for tests and future observer dispatch.
+	// deletedIDs records items tombstoned during this transaction via
+	// Delete. Commit's GC pass walks it to free content and merge
+	// deleted runs, and observers use it for an event's deletes()
+	// predicate. The wire delete set comes from deletedRanges.
 	deletedIDs []block.ID
 
 	// deletedRanges holds the exact clock range of every Delete, taken
@@ -117,11 +115,9 @@ type TransactionMut struct {
 	subdocsRemoved []string
 	subdocsLoaded  []string
 
-	// mergeBlocks would accumulate item IDs that should be
-	// considered for try_squash at Commit. Will be added back when
-	// Item.Integrate gains a MarkForMerge call site and Commit
-	// gains a squash pass; both deferred (see tech-debt.md).
-	// Field intentionally absent for now to keep the type lint-clean.
+	// There is no mergeBlocks list: squashNewBlocks walks every client
+	// whose clock moved in this transaction, from its start state on,
+	// and gcDeleted merges around the deleted items.
 }
 
 // WriteTxn acquires the doc's write lock and returns a TransactionMut.
@@ -144,15 +140,22 @@ func (d *Doc) WriteTxn() *TransactionMut {
 // Commit runs the post-commit lifecycle and releases the write lock.
 // Safe to call more than once; subsequent calls are no-ops.
 //
-// Lifecycle steps (mostly stubbed today; tech-debt.md tracks each):
-//  1. Squash mergeBlocks against their left neighbours.
-//  2. GC fully-observed deleted items if Doc.GC is true.
-//  3. Fire pre-emit observers on changedTypes.
-//  4. Emit the update event with V1 (or V2) bytes for the diff.
-//  5. Emit subdoc events.
-//  6. Fire after-commit observers.
+// Lifecycle, in order, all with the write lock held:
+//  1. Snapshot the after-state.
+//  2. Shared-type observers (Observe / ObserveDeep), on the layout as
+//     the transaction left it.
+//  3. Squash: merge this transaction's new blocks into their left
+//     neighbours.
+//  4. Record subdocument changes.
+//  5. After-transaction handlers (the UndoManager, OnSubdocs, sync
+//     clients), which may mark deleted items kept.
+//  6. GC: free deleted content (unless GC is off or the item is kept)
+//     and merge deleted runs.
+//  7. Update handlers (OnUpdate, OnUpdateV2), on the final layout.
 //
-// Today: only step 0 (release the lock) runs.
+// yjs runs its merge after GC rather than before the after-transaction
+// handlers; docs/tech-debt.md ("Commit-time squash runs before
+// after-transaction handlers") has the one case where that shows.
 func (t *TransactionMut) Commit() {
 	if t.closed {
 		return
@@ -552,9 +555,11 @@ func (t *TransactionMut) MaterializeCleanEnd(id block.ID) *block.Item {
 // transaction's eventual delete-set emission. The Item must already
 // be in the store.
 //
-// Note: the recursive-delete-of-Type-children path is not yet
-// implemented (tracked in tech-debt.md). This implementation handles
-// the simple case integrate uses for map-key LWW tombstoning.
+// Note: deleting a nested type does not delete the items inside it,
+// as yjs ContentType.delete does (docs/tech-debt.md, "Remaining
+// update-event divergences"). GC collects them together with the
+// type; with GC off, or when an UndoManager keeps the type's item,
+// they stay live.
 func (t *TransactionMut) Delete(item *block.Item) {
 	if item == nil || item.IsDeleted() {
 		return

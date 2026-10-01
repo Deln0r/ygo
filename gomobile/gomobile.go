@@ -32,11 +32,14 @@
 //     Client — a complete background sync provider (WebSocket,
 //     handshake, reconnect) so a Swift / Kotlin app only renders UI
 //     and edits the Doc. Reads run under internal read transactions,
-//     safe against the background client.
+//     safe against the background client. Doc.WithOrigin gives a
+//     handle whose edits carry an origin, which an UndoManager made
+//     from it tracks.
 //
 //   - Wire level (this file): bytes-in/bytes-out y-protocols flow —
-//     encode local state to bytes, apply remote bytes, bring your
-//     own transport.
+//     encode local state to bytes, apply remote bytes (with an origin
+//     via ApplyUpdateWithOrigin), receive each transaction's update
+//     through ObserveUpdates, bring your own transport.
 //
 // gomobile bind verification: actual `gomobile bind -target=ios`
 // or `-target=android` requires the corresponding toolchain (Xcode

@@ -93,6 +93,61 @@ func Example_sync() {
 	// Hello Ada
 }
 
+// Example_updates shows Doc.OnUpdate: every committed transaction arrives
+// as one update holding just that transaction's changes, the bytes yjs
+// emits on doc.on('update'). A sync provider forwards its own and skips
+// what a peer sent, which it recognises by the origin it applied it with.
+func Example_updates() {
+	type peer struct{ name string }
+	remote := &peer{name: "ws-1"}
+
+	d := ygo.NewDoc()
+	text := ygo.NewText(d, "notes")
+	var outgoing [][]byte
+	d.OnUpdate(func(update []byte, origin any) {
+		if origin == remote {
+			return // came from that peer, do not send it back
+		}
+		outgoing = append(outgoing, update)
+	})
+
+	for _, s := range []string{"hello", " world"} {
+		txn := d.WriteTxn()
+		if err := text.Insert(txn, text.Length(), s); err != nil {
+			panic(err)
+		}
+		txn.Commit()
+	}
+
+	// The peer replays what was sent, then appends "!" itself.
+	p := ygo.NewDoc()
+	pt := ygo.NewText(p, "notes")
+	for _, u := range outgoing {
+		if err := ygo.ApplyUpdate(p, u); err != nil {
+			panic(err)
+		}
+	}
+	since := ygo.EncodeStateVector(p)
+	txn := p.WriteTxn()
+	if err := pt.Insert(txn, pt.Length(), "!"); err != nil {
+		panic(err)
+	}
+	txn.Commit()
+	fromPeer, err := ygo.EncodeDiff(p, since)
+	if err != nil {
+		panic(err)
+	}
+	if err := ygo.ApplyUpdateWithOrigin(d, fromPeer, remote); err != nil {
+		panic(err)
+	}
+
+	fmt.Println(len(outgoing), "updates sent")
+	fmt.Println(text.String())
+	// Output:
+	// 2 updates sent
+	// hello world!
+}
+
 // Example_undo shows the built-in UndoManager: track a shared type, edit
 // it, then step backward and forward through the edit history.
 func Example_undo() {
