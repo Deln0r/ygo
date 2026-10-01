@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/Deln0r/ygo/internal/lib0"
@@ -38,11 +39,16 @@ var ErrUnsupportedAnyTag = errors.New("encoding: unsupported Any tag")
 //   - nil → null (tag 126)
 //   - bool → true/false (tags 120/121)
 //   - string → string (tag 119, varstring payload)
-//   - int / int32 / int64 fitting in 32 bits → integer (tag 125, varint payload)
-//   - int / int64 outside 32-bit range → float64 (tag 123, 8-byte BE payload)
-//     — matches lib0's BITS31 sniff for safe-integer range
+//   - int / int32 / int64 with |v| <= 2^31-1 → integer (tag 125, varint
+//     payload), lib0's BITS31 test
+//   - any other integer → float32 (tag 124) when float32 holds it
+//     exactly, else float64 (tag 123), as lib0 classifies the same number
 //   - float32 → float32 (tag 124, 4-byte BE payload)
-//   - float64 → float64 (tag 123, 8-byte BE payload)
+//   - float64 → float32 (tag 124) when it is not an integer and float32
+//     holds it exactly (0.5, 2.5, ±Inf), else float64 (tag 123, 8-byte
+//     BE payload). lib0 also writes an integral double such as 3.0 as a
+//     varint; ygo keeps it a float64 so it decodes back as a float64.
+//     That integral case is the one number class whose bytes differ.
 //   - []byte → binary (tag 116, varuint length + bytes)
 //   - []any → array (tag 117, varuint count + each element recursively)
 //   - map[string]any → object (tag 118, varuint count + each (varstring key + Any value)).
@@ -78,8 +84,7 @@ func EncodeAny(buf []byte, v any) []byte {
 		buf = append(buf, AnyTagFloat32)
 		return lib0.WriteFloat32(buf, x)
 	case float64:
-		buf = append(buf, AnyTagFloat64)
-		return lib0.WriteFloat64(buf, x)
+		return encodeFloatAny(buf, x)
 	case []byte:
 		buf = append(buf, AnyTagBinary)
 		return lib0.WriteVarUint8Array(buf, x)
@@ -113,16 +118,59 @@ func EncodeAny(buf []byte, v any) []byte {
 	}
 }
 
-// encodeIntAny picks between AnyTagInteger (varint, 32-bit cap) and
-// AnyTagFloat64 (precision-preserving fallback for larger values).
-// Mirrors lib0 writeAny's `BITS31` sniff.
+// EncodeDocOpts appends a subdocument's options as the lib0 Any object
+// yjs writes for them. yjs builds that object in a fixed order, gc,
+// autoLoad, meta (ContentDoc's constructor), where EncodeAny sorts keys,
+// so with two or more options the bytes would differ. Keys yjs never
+// writes follow, sorted.
+func EncodeDocOpts(buf []byte, opts map[string]any) []byte {
+	keys := make([]string, 0, len(opts))
+	for _, k := range []string{"gc", "autoLoad", "meta"} {
+		if _, ok := opts[k]; ok {
+			keys = append(keys, k)
+		}
+	}
+	var rest []string
+	for k := range opts {
+		if k != "gc" && k != "autoLoad" && k != "meta" {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
+	buf = append(buf, AnyTagObject)
+	buf = lib0.WriteVarUint(buf, uint64(len(keys)))
+	for _, k := range keys {
+		buf = lib0.WriteVarString(buf, k)
+		buf = EncodeAny(buf, opts[k])
+	}
+	return buf
+}
+
+// encodeIntAny writes an integer the way lib0 writeAny writes the same
+// JS number: a varint when |x| <= 2^31-1 (lib0's BITS31 test, so -2^31
+// is not one), otherwise a float through encodeFloatAny.
 func encodeIntAny(buf []byte, x int64) []byte {
-	if isInt32(x) {
+	if x >= -0x7FFFFFFF && x <= 0x7FFFFFFF {
 		buf = append(buf, AnyTagInteger)
 		return lib0.WriteVarInt(buf, x)
 	}
+	return encodeFloatAny(buf, float64(x))
+}
+
+// encodeFloatAny writes f as float32 (tag 124) when float32 holds it
+// exactly, as lib0's isFloat32 test does, else as float64 (tag 123).
+// DecodeAny widens either back to the same float64. An integral f
+// within int31 stays a float64 (see EncodeAny). A NaN keeps its bits,
+// as lib0 keeps those of a NaN it decoded.
+func encodeFloatAny(buf []byte, f float64) []byte {
+	integral := f == math.Trunc(f) && math.Abs(f) <= 0x7FFFFFFF
+	if f32 := float32(f); !integral && float64(f32) == f {
+		buf = append(buf, AnyTagFloat32)
+		return lib0.WriteFloat32(buf, f32)
+	}
 	buf = append(buf, AnyTagFloat64)
-	return lib0.WriteFloat64(buf, float64(x))
+	return lib0.WriteFloat64(buf, f)
 }
 
 // DecodeAny reads one lib0-Any-encoded value from buf and returns the
@@ -243,9 +291,4 @@ func DecodeAny(buf []byte) (any, []byte, error) {
 	default:
 		return nil, buf, fmt.Errorf("%w: tag=%d", ErrUnsupportedAnyTag, tag)
 	}
-}
-
-func isInt32(v int64) bool {
-	const min32, max32 = int64(-1) << 31, int64(1)<<31 - 1
-	return v >= min32 && v <= max32
 }

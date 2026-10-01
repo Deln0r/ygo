@@ -1,6 +1,7 @@
 package encoding
 
 import (
+	"encoding/hex"
 	"errors"
 	"math"
 	"reflect"
@@ -19,7 +20,7 @@ func TestAny_RoundTrip_BasicTypes(t *testing.T) {
 		int64(1),
 		int64(-1),
 		int64(math.MaxInt32),
-		int64(math.MinInt32),
+		int64(-math.MaxInt32),
 		float64(0),
 		float64(3.14),
 		float64(-0.5),
@@ -42,8 +43,9 @@ func TestAny_RoundTrip_BasicTypes(t *testing.T) {
 }
 
 func TestAny_LargeIntegerPromotesToFloat64(t *testing.T) {
-	// Outside int32 range → encoded as float64 per lib0 writeAny.
-	in := int64(math.MaxInt32) + 1
+	// Outside lib0's BITS31 range an integer is written as a float, and
+	// decodes as a float64.
+	in := int64(math.MaxInt32) + 2
 	buf := EncodeAny(nil, in)
 	if buf[0] != AnyTagFloat64 {
 		t.Errorf("expected Float64 tag (123), got %d", buf[0])
@@ -54,6 +56,37 @@ func TestAny_LargeIntegerPromotesToFloat64(t *testing.T) {
 	}
 	if got, ok := out.(float64); !ok || got != float64(in) {
 		t.Errorf("got %v (%T), want %v as float64", out, out, float64(in))
+	}
+}
+
+// TestAny_NumbersAsLib0Writes compares EncodeAny with the bytes lib0
+// 0.2.118 writeAny produces for the same number (captured with node from
+// testdata/gen). The one class that differs on purpose is an integral
+// float64 within int31, which lib0 writes as a varint and ygo keeps a
+// float64 so that it decodes back as one.
+func TestAny_NumbersAsLib0Writes(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{int64(0x7FFFFFFF), "7dbfffffff0f"},
+		{int64(-0x7FFFFFFF), "7dffffffff0f"},
+		{int64(-0x80000000), "7ccf000000"},
+		{int64(0x80000000), "7c4f000000"},
+		{int64(0x80000001), "7b41e0000000200000"},
+		{int64(1) << 40, "7c53800000"},
+		{2.5, "7c40200000"},
+		{-0.5, "7cbf000000"},
+		{0.1, "7b3fb999999999999a"},
+		{math.Inf(1), "7c7f800000"},
+		{math.Float64frombits(0x7FF8000000000000), "7b7ff8000000000000"},
+		{math.Float64frombits(0x7FF8000000000001), "7b7ff8000000000001"}, // lib0 keeps a decoded NaN's bits
+		{float64(3), "7b4008000000000000"},                               // lib0: 7d03
+	}
+	for _, c := range cases {
+		if got := hex.EncodeToString(EncodeAny(nil, c.in)); got != c.want {
+			t.Errorf("EncodeAny(%v %T) = %s, want %s", c.in, c.in, got, c.want)
+		}
 	}
 }
 
