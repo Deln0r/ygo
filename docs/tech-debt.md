@@ -50,11 +50,10 @@
 - **Impact today:** none — no observers exist.
 - **When to address:** with the observer subsystem. Restructure to `map[*Branch]map[string]struct{}` (nil sub-key for positional changes) or a `[]changeRecord` slice.
 
-### TransactionMut.deletedIDs is too narrow for the wire delete set
+### TransactionMut.deletedIDs is too narrow for the wire delete set (resolved)
 
-- **Where:** `internal/doc/transaction.go` `TransactionMut.deletedIDs` field.
-- **What:** the wire delete set is RLE-encoded `(clientID, []ClockRange{Start, Len})` per client. Our `[]block.ID` records individual IDs, losing run information; squashing on emit is possible but suboptimal.
-- **When to address:** with the IdSet layer. Replace with a real `IdSet` value and have `Delete(item)` insert `(item.ID, item.Len)` ranges directly.
+- **Was:** the transaction recorded deleted item IDs only, losing their lengths, so no wire delete set could be built from it.
+- **Resolved by:** `TransactionMut.DeletedRanges` records `(ID, Len)` at each `Delete`, before squash can merge the tombstone with a neighbour; content that arrives already deleted (`ContentDeleted`) goes through `Delete` too, as yjs `ContentDeleted.integrate` adds it to the delete set. `EncodeTransactionUpdate` builds the per-transaction delete set from it, and the UndoManager captures from it.
 
 ## Types layer (Map and beyond)
 
@@ -121,13 +120,28 @@
 - **Why this is a real gap, not a paranoia:** per `update-v1.md` gotcha 1, sort direction asymmetry is the easiest place to silently produce bytes JS Yjs rejects. Our determinism choice (sort ascending) matches yrs's BTreeMap iteration for IdSet but differs from JS Yjs's HashMap insertion order for StateVector. Decoding either way works (varuint-pair list is order-independent on read); encoding direction matters only for byte-equality, which is what fixtures would catch.
 - **When to address:** with the Update encode/decode commit. Once Update bytes round-trip against JS Yjs, SV and IdSet are exercised end-to-end through real wire updates and the gap closes naturally.
 
-### Update encode / decode partial — full client list, no slicing at SV boundary
+### Update encode / decode partial — no slicing at SV boundary (resolved 2026-10-01)
 
-- **Where:** `internal/encoding/update.go` `EncodeDiff`, `internal/encoding/update_v2.go` `EncodeDiffV2`.
-- **What's done:** whole-cell skip via `firstUnknownCell` — for every per-client run, cells fully covered by `remoteClock` (i.e., `cell.ClockEnd() < remoteClock`) are dropped before emission. The "block count" header is recomputed against the trimmed range, and the "clock start" header points at the first emitted cell. Tests in `internal/encoding/diff_trim_test.go` verify diff < full and end-state convergence. Both V1 and V2 paths share the helper. Empty remote SV unchanged (no trim) so bytes are byte-identical to `EncodeStateAsUpdate`.
-- **What's still simplified vs yrs:**
-  - **No partial-cell trim on the boundary cell.** When `remoteClock` falls strictly inside a cell's range (ClockStart < remoteClock <= ClockEnd), we emit the whole cell. yrs splits at `remoteClock` and emits only the right half, using a synthesized `origin = (client, remoteClock - 1)` per `update-v1.md` gotcha 4. Wire is still valid (integrate de-dups), redundancy is at most one cell's worth per per-client run.
-- **When to address:** the partial-cell trim closes the last bandwidth gap vs yrs and produces byte-identical wire output for the straddling case (useful if a future fixture demands byte-equality with `Y.encodeStateAsUpdate` against a non-empty SV). Low priority — whole-cell skip captures 90%+ of the bandwidth saving for typical sync patterns.
+- **Was:** `EncodeDiff` / `EncodeDiffV2` dropped cells the remote fully knew but wrote the boundary cell whole. Marked low priority in May; commit-time squash (June) then merged a writer's appends into one growing cell, so every "incremental" diff carried the writer's whole history: 27 bytes growing to 1720 over 200 appends, measured by a third-party evaluation that chose the other Go port for it.
+- **Resolved by:** `writeClientsStructs` (`internal/encoding/update.go`, V2 twin in `update_v2.go`), the yjs `writeStructs` algorithm: per client the header clock is `max(remoteClock, first cell start)`, found with `FindPivot`, and the first cell is written from that offset (`encodeCellFrom` / `itemFrom`: a copy whose origin is the clock before the cut and whose content drops the prefix; a GC run shortened by the offset). `Doc.OnUpdate` / `OnUpdateV2` reuse it from the transaction's start state. Byte-identical to `Y.encodeStateAsUpdate(doc, sv)` / V2 for every state vector on a grid over each scenario's clocks, including inside a surrogate pair and inside a collected run (`testdata/update-event-fixtures.json`).
+
+### Remaining update-event divergences (pinned, 2026-10-01)
+
+- **Where:** `knownUpdateEventDivergences` in `update_event_fixture_test.go`.
+- **What:** (1) `TransactionMut.Delete` does not delete the items inside a deleted nested type (yjs `ContentType.delete` does), so that transaction's delete set lists only the type's own item; the same gap means deleting a nested type cannot be undone (`redoItem` refuses a `KindType` item and a parent whose item is deleted) and, with GC off, the children stay live in the store. (2) No `cleanupYTextAfterTransaction`: after a remote update that duplicates a format, yjs emits a second transaction (origin nil) deleting the redundant marker; ygo does not. (3) `TrySquash` refuses kept items, so undo restores a run of kept tombstones as several structs where yjs (`Item.mergeWith`, which carries `keep`) restores one. Allowing the merge needs the restore pass to cut at the range ends first; without that it restores whole merged items and four undo fixtures fail (measured).
+- **When to address:** (1) is the next undo item: recursive delete, `keepItem` up the parent chain, `redoItem` for types and through a redone parent. (2) belongs with the rich-text insert work. (3) after (1).
+
+### Commit-time squash runs before after-transaction handlers
+
+- **Where:** `TransactionMut.Commit` (`internal/doc/transaction.go`): observers, then `squashNewBlocks`, then after-transaction handlers, then GC. yjs merges after GC.
+- **What:** a handler that marks only some of a transaction's tombstones kept sees them already merged. Insert and delete "a", then insert and delete "b" in one transaction, and keep only the second: ygo keeps the merged "ab", yjs keeps "b" and collects "a", so the stores and their encodings differ. The bundled UndoManager keeps every in-scope deletion of a transaction and never hits this; it takes a handler that calls `Item.SetKeep` itself.
+- **When to address:** together with the kept-tombstone merge above; moving the squash changes what the UndoManager's capture sees, which the 1.22.0 undo fixes rely on.
+
+### State encodings ignore the pending buffer
+
+- **Where:** `EncodeDiff` / `EncodeDiffV2` (and so `EncodeStateAsUpdate`); `EncodeStateAsUpdateWithPending` exists separately.
+- **What:** yjs `encodeStateAsUpdateV2` appends `pendingDs` and the pending structs diffed against the target state vector, so a replica relays what it holds but cannot integrate yet. ygo's state encodings leave the pending buffer out; per-transaction updates correctly exclude it in both.
+- **When to address:** with the sync-provider work.
 
 ### Item.Repair ParentID (resolved)
 

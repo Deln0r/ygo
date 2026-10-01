@@ -16,7 +16,139 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact** - `EncodeDiff`, `EncodeDiffV2` and `DiffUpdate` produce
+smaller, different bytes when the peer already has part of a block: the bytes
+yjs produces. An application that applies peers' updates with plain
+`ApplyUpdate` and uses an UndoManager should apply them with
+`ApplyUpdateWithOrigin`, since plain apply commits with no origin and the
+default manager captures that, as in yjs. A non-integral `float64` that a
+float32 holds exactly is now written as a float32, and -2^31 decodes as a
+`float64`. With GC off, deleted pieces of a block merge, so such documents
+encode to different bytes. `Undo` and `Redo` return true only when a step
+changed the document, and undo no longer restores a map value over a later
+untracked write.
+
+### Added
+
+- **`Doc.OnUpdate` / `Doc.OnUpdateV2`: one update per transaction**, the yjs
+  `doc.on('update')` / `doc.on('updateV2')` events, byte for byte outside the
+  cases listed at the end of this section. After every write transaction that
+  changed the document (local edits, applied updates, undo steps) the handler
+  receives the update holding exactly that transaction's changes, and the
+  transaction's origin: the structs it created, each client's first block cut at
+  the clock the transaction started from, and the delete set of what it deleted.
+  A transaction that changes nothing emits nothing. Handlers run at the end of
+  the commit, after observers and garbage collection, with the document lock
+  held, so they receive updates in commit order; a handler may unsubscribe
+  itself. An append costs about 20 bytes with a 32-bit client ID, however long
+  the history. Until now the only incremental update was `EncodeDiff` against a
+  saved state vector, which re-sent the whole boundary block (see Changed).
+
+- **`ApplyUpdateWithOrigin` / `ApplyUpdateV2WithOrigin`**: apply an update with
+  an origin that observers, update handlers and the UndoManager see, the third
+  argument of yjs `Y.applyUpdate`. A sync provider's echo guard keys on it.
+
+- **`UndoManager.AddTrackedOrigin` / `RemoveTrackedOrigin`**, as in yjs.
+
+- **gomobile: origins and per-transaction updates.** `Doc.WithOrigin(origin)`
+  returns a handle on the same document whose edits, and those of every shared
+  type taken from it, carry the origin; an `UndoManager` created from it tracks
+  that origin, so a collaborator's update applied with
+  `Doc.ApplyUpdateWithOrigin(bytes, "remote")` stays out of the user's undo.
+  The gomobile `UndoManager` gains `AddTrackedOrigin` / `RemoveTrackedOrigin`
+  (strings, `""` for no origin), and `Doc.ObserveUpdates(listener)` delivers
+  each transaction's V1 update with its origin to an app with its own
+  transport. The origin belongs to the handle, so two callers using different
+  handles cannot mislabel each other's edits.
+
+- **V2 subdocuments.** The V2 codec reads and writes `ContentDoc` (GUID and
+  options), byte-identical to yjs. Encoding one panicked before, and with an
+  `OnUpdateV2` handler registered it would have panicked inside the commit.
+  Subdocument options are now written in the order yjs writes them (`gc`,
+  `autoLoad`, `meta`), in V1 too, where the sorted keys put `autoLoad` first.
+
+Three cases of the update events still differ from yjs, each pinned by
+fixtures with the exact bytes ygo emits: deleting a nested type lists only the
+type's own item in the delete set, where yjs also lists every item inside it;
+after a remote update that duplicates a format yjs emits a second, cleanup
+update that ygo does not; and undo restores a run of kept tombstones as several
+structs where yjs restores one. The update events and the diffs also inherit
+the Any codec's known differences: an object with more than one key is written
+with its keys sorted, where yjs keeps their insertion order, and a whole-number
+`float64` (or -0) stays a float64, where lib0 writes a varint.
+
+### Changed
+
+- **`EncodeDiff`, `EncodeDiffV2` and `DiffUpdate` cut each client's first block
+  at the remote's clock**, as yjs `writeStructs` does, and are now
+  byte-identical to `Y.encodeStateAsUpdate(doc, sv)` / V2 for state vectors that
+  end inside a block, when nothing is pending (yjs also appends updates its
+  pending buffer holds, and ygo does not) and the Any values involved are
+  written as lib0 writes them (see the end of Added). They used to send that
+  block whole, and because commit-time squash merges a writer's appends into one
+  block, every diff carried the writer's whole history: a third-party evaluation
+  measured 27 bytes growing to 1720 over 200 appends, and chose the other Go
+  port for it. Receivers already discarded the overlap, so only the size
+  changes.
+
+- **Numbers in Any content are classified as lib0 `writeAny` classifies them.**
+  A non-integral `float64` that a float32 holds exactly (0.5, 2.5, ±Inf) is
+  written as a float32, as yjs writes it, and an integer outside ±(2^31-1),
+  -2^31 included, as a float32 when one holds it, else a float64. Decoded types
+  do not change (both float tags decode to `float64`), except for -2^31, which
+  now decodes as a `float64` like every other integer beyond 31 bits. An
+  integral `float64` such as 3.0 is still written as a float64 so that it
+  decodes back as one, where lib0 writes the same number as a varint.
+
 ### Fixed
+
+- **A peer's write into a nested type another peer had deleted blocked that
+  peer for good.** The write could not integrate, its parent having been
+  garbage-collected, so it stayed in the pending buffer, and every later update
+  from the same client queued behind it: the documents never converged again.
+  yjs integrates such a write as a garbage-collected run, and ygo now does too,
+  also for an item whose left or right neighbour was collected.
+
+- **A collected run whose start the receiver already had was dropped whole**,
+  so the receiver's clock for that client stayed behind and its next updates
+  waited forever. The unknown tail now integrates, as in yjs. Diffs no longer
+  produce such a run, since they start at the receiver's clock, but a full
+  state can.
+
+- **Content that arrived already deleted was left out of the transaction's
+  delete set** (a TODO in `Integrate`). It is now recorded, as yjs
+  `ContentDeleted.integrate` records it, so the update of a transaction that
+  applies a peer's state carries it and garbage collection merges it.
+
+- **Applying an old update again fragmented tombstones.** Its delete set cut
+  items that were already deleted at its boundaries, and nothing merged the
+  pieces back, so the store and every later encoding differed from yjs.
+  Deleted items are now skipped whole, as yjs `readAndApplyDeleteSet` skips
+  them.
+
+- **With garbage collection off, the pieces of a block deleted in separate
+  steps stayed apart.** yjs merges deleted runs with or without GC; ygo now
+  does too.
+
+- **`UndoManager.Close` could deadlock against a commit on another
+  goroutine.** Close unsubscribed, which takes the document lock, while holding
+  the manager's lock, and a commit takes them in the other order. A mobile app
+  closing a manager on the UI thread while the sync client applied an update
+  could hit it.
+
+- **An origin that cannot be a map key**, a slice or a struct holding one,
+  panicked the commit when an UndoManager checked it, with the document still
+  locked. Such an origin is now never tracked, and `AddTrackedOrigin` rejects
+  one.
+
+- **Closing an UndoManager, or unsubscribing any handler, from inside a
+  handler that a commit runs deadlocked**: the unsubscribe took the document
+  lock the commit holds. Handler lists now have a lock of their own.
+
+- **The README said updates applied with `ApplyUpdate` are not captured by the
+  UndoManager. They are**: plain `ApplyUpdate` commits with no origin, which the
+  default manager tracks, exactly as in yjs. The docs now say so and point to
+  `ApplyUpdateWithOrigin`.
 
 - **Undo of an insertion could delete text written before the UndoManager
   existed.** Write "a", create the manager, append "b" in one step (commit-time
@@ -86,6 +218,17 @@ file.
   them, the same append and delete inside one capture window, the older deletion
   on either side, and cases where untracked edits change what an undone step
   covers.
+
+- New fixtures for per-transaction updates, 34 scenarios from yjs 13.6.33: every
+  `update` / `updateV2` event, and `encodeStateAsUpdate` / V2 against every
+  state vector on a grid over each scenario's clocks, inside surrogate pairs and
+  collected runs included, run forward and backward with a check that encoding
+  leaves the document unchanged. Five are pinned divergences: deleting a nested
+  type (three; yjs deletes its contents in the same transaction and ygo does
+  not, which also means such a deletion cannot be undone yet), the missing
+  rich-text cleanup transaction after concurrent formatting, and undo restoring
+  kept tombstones as separate structs. Like the rich-text and observer
+  fixtures, the set stays out of the README totals while it has pins.
 
 ## [1.21.0] - 2026-09-28
 
