@@ -8,7 +8,7 @@
     "gen": "node gen-lib0.mjs"
   },
   "dependencies": {
-    "lib0": "0.2.118",
+    "lib0": "0.2.119",
     "y-protocols": "1.0.7",
     "yjs": "13.6.33"
   },
