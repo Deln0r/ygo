@@ -14,6 +14,15 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Infrastructure
+
+- Fixtures are generated from lib0 0.2.119. It adds bounds checks to the JS
+  decoder (`readFromDataView`, base64 decoding); ygo's decoders already
+  reject out-of-range reads. Every generator produced the same bytes; only
+  the recorded generator name in `testdata/lib0.json` changed.
+
 ## [1.22.0] - 2026-10-01
 
 **Upgrade impact** - `EncodeDiff`, `EncodeDiffV2` and `DiffUpdate` produce

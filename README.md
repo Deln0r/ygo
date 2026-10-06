@@ -180,7 +180,7 @@ defer unsub()
 
 | Layer | Status |
 |---|---|
-| `internal/lib0` varint + RLE encoding | done; verified byte-equivalent vs JS `lib0@0.2.118` (40 + 16 fixtures) |
+| `internal/lib0` varint + RLE encoding | done; verified byte-equivalent vs JS `lib0@0.2.119` (40 + 16 fixtures) |
 | `internal/block` (Item, Content, Branch, Splice, Integrate-YATA, TrySquash, Repair, search markers) | done; full YATA conflict resolution + per-branch LRU position cache |
 | `internal/store` (BlockStore, ItemSlice, Materialize) | done |
 | `internal/doc` (Doc, Transaction, TransactionMut) | done; lock semantics + root-branch registry |
@@ -239,7 +239,7 @@ The single most-important guarantee of this project is byte-level wire compatibi
 
 Three more fixture sets compare behaviour and bytes with yjs but stay out of these totals while any of their scenarios is a pinned divergence: per-transaction updates and diffs (34 scenarios, every `OnUpdate` / `OnUpdateV2` event and `EncodeDiff` / `EncodeDiffV2` against state vectors that end inside a block; 5 pinned), rich text (35; 8 pinned) and observers (19; 1 pinned). Each pin is listed with its cause in the test and fails the build when the behaviour changes, in either direction.
 
-The fixtures regenerate from pinned `yjs@13.6.33` + `lib0@0.2.118` + `y-protocols@1.0.7` on every CI run; `git diff --exit-code testdata/` catches byte-level regressions.
+The fixtures regenerate from pinned `yjs@13.6.33` + `lib0@0.2.119` + `y-protocols@1.0.7` on every CI run; `git diff --exit-code testdata/` catches byte-level regressions.
 
 ## How is this different from Hocuspocus / y-websocket / y-leveldb?
 
