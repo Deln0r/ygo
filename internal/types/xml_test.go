@@ -115,7 +115,9 @@ func TestXml_Element_Children_NestedDOM(t *testing.T) {
 	}
 }
 
-func TestXml_Element_ToString_EmptyElementSelfCloses(t *testing.T) {
+// An empty element is written with a closing tag, never self-closing,
+// and the tag in lower case, as yjs YXmlElement.toString writes it.
+func TestXml_Element_ToString_EmptyElementAsYjs(t *testing.T) {
 	d := doc.NewDocWithOptions(doc.Options{ClientID: 104})
 	frag := types.NewXmlFragment(d.Branch("page"))
 
@@ -125,7 +127,7 @@ func TestXml_Element_ToString_EmptyElementSelfCloses(t *testing.T) {
 	txn.Commit()
 
 	got := frag.ToString()
-	want := `<br class="clearfix"/>`
+	want := `<br class="clearfix"></br>`
 	if got != want {
 		t.Errorf("ToString = %q, want %q", got, want)
 	}

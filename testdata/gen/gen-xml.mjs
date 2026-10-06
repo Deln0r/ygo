@@ -7,9 +7,9 @@
 //   js_client_id    — pinned clientID
 //   root_name       — the root XmlFragment name
 //   update_hex      — Y.encodeStateAsUpdate(doc) as lowercase hex
-//   expected_xml    — HTML-like string produced by JS toString()
-//                     with attributes sorted ascending (matches
-//                     our ygo XmlFragment.ToString output)
+//   expected_xml    — yjs's own XmlFragment.toString(): elements as
+//                     <tag attrs>children</tag> with the tag lower-cased,
+//                     attributes sorted, empty elements with a closing tag
 //
 // Run: node gen-xml.mjs (after npm install in this directory).
 
@@ -21,37 +21,11 @@ import * as Y from "yjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const outPath = resolve(here, "..", "yjs-xml-fixtures.json");
 
-// renderXml emits an HTML-like serialization mirroring our Go
-// XmlFragment.ToString — attribute keys sorted ascending, no
-// escaping (test inputs avoid quotes), empty elements self-close.
+// renderXml is yjs's own serialization. It used to be a renderer written
+// to mirror ygo's ToString, empty elements self-closing, which made the
+// fixture agree with ygo instead of checking it against yjs.
 function renderXml(node) {
-  if (node instanceof Y.XmlFragment && !(node instanceof Y.XmlElement)) {
-    let out = "";
-    node.forEach((child) => {
-      out += renderXml(child);
-    });
-    return out;
-  }
-  if (node instanceof Y.XmlElement) {
-    let out = "<" + node.nodeName;
-    const attrs = node.getAttributes();
-    const keys = Object.keys(attrs).sort();
-    for (const k of keys) {
-      out += ` ${k}="${attrs[k]}"`;
-    }
-    if (node.length === 0) {
-      return out + "/>";
-    }
-    out += ">";
-    node.forEach((child) => {
-      out += renderXml(child);
-    });
-    return out + "</" + node.nodeName + ">";
-  }
-  if (node instanceof Y.XmlText) {
-    return node.toString();
-  }
-  return "";
+  return node.toString();
 }
 
 function capture(description, clientID, rootName, mutate) {

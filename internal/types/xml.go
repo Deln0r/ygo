@@ -207,22 +207,19 @@ func (e *XmlElement) Range(fn func(idx uint64, child any) bool) {
 	rangeXmlChildren(e.branch, fn)
 }
 
-// ToString renders the element as an XML-like string:
+// ToString renders the element as yjs YXmlElement.toString does:
 //
-//	<nodeName attr1="value1" attr2="value2">children…</nodeName>
+//	<nodename attr1="value1" attr2="value2">...children...</nodename>
 //
-// or, for empty elements:
-//
-//	<nodeName attr1="value1"/>
-//
-// Attribute keys are sorted ascending for deterministic output.
-// Attribute values are inlined without escaping — tests should
-// avoid attribute values containing quotes; a real HTML encoder
-// would XML-escape them.
+// The tag is lower-cased, an empty element still gets a closing tag
+// (never self-closing), and attribute keys are sorted. Attribute
+// values are inlined without escaping, as in yjs; an HTML encoder
+// would escape them.
 func (e *XmlElement) ToString() string {
 	var sb strings.Builder
+	name := strings.ToLower(e.branch.Name)
 	sb.WriteString("<")
-	sb.WriteString(e.branch.Name)
+	sb.WriteString(name)
 
 	attrs := e.Attributes()
 	keys := make([]string, 0, len(attrs))
@@ -238,17 +235,13 @@ func (e *XmlElement) ToString() string {
 		sb.WriteString(`"`)
 	}
 
-	if e.branch.BlockLen == 0 {
-		sb.WriteString("/>")
-		return sb.String()
-	}
 	sb.WriteString(">")
 	e.Range(func(_ uint64, child any) bool {
 		sb.WriteString(stringifyXmlChild(child))
 		return true
 	})
 	sb.WriteString("</")
-	sb.WriteString(e.branch.Name)
+	sb.WriteString(name)
 	sb.WriteString(">")
 	return sb.String()
 }

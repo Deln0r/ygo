@@ -4,14 +4,14 @@
     "js_client_id": 400,
     "root_name": "page",
     "update_hex": "01019003000701047061676503017000",
-    "expected_xml": "<p/>"
+    "expected_xml": "<p></p>"
   },
   {
     "description": "element with attribute",
     "js_client_id": 401,
     "root_name": "page",
     "update_hex": "0102910300070104706167650303646976280091030005636c617373017709636f6e7461696e657200",
-    "expected_xml": "<div class=\"container\"/>"
+    "expected_xml": "<div class=\"container\"></div>"
   },
   {
     "description": "nested element with text child",
@@ -32,6 +32,6 @@
     "js_client_id": 404,
     "root_name": "page",
     "update_hex": "010394030007010470616765030161280094030004687265660177012f280094030005636c6173730177046c696e6b00",
-    "expected_xml": "<a class=\"link\" href=\"/\"/>"
+    "expected_xml": "<a class=\"link\" href=\"/\"></a>"
   }
 ]

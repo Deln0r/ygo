@@ -111,6 +111,12 @@
 - **Why deferred:** premature; falls out of the broader storage-layout decision above.
 - **When to address:** with the storage layout benchmark.
 
+### XmlElement.ToString lower-cases tags without context
+
+- **Where:** `XmlElement.ToString`.
+- **What:** it uses `strings.ToLower`; yjs uses `toLocaleLowerCase`, which applies contextual rules such as the Greek final sigma (`ΟΣ` gives `ος` in yjs, `οσ` here). ASCII tag names, which is what HTML and editor schemas use, come out the same.
+- **When to address:** if a document uses non-ASCII tag names.
+
 ## Encoding layer (V1 wire format)
 
 ### StateVector / IdSet have no JS Yjs cross-language byte-equality fixtures
@@ -309,7 +315,7 @@
 ### Resolved: XmlFragment / XmlElement / XmlText shipped
 
 - **Was:** missing XML wrapper layer; ProseMirror / Tiptap / BlockNote unusable as JS clients against a ygo server.
-- **Resolved by:** `internal/types/xml.go` ships `XmlFragment`, `XmlElement`, `XmlText` wrappers. XmlElement carries nodeName + attributes (Map-like via `branch.Map`) + positional children (Array-like via `branch.Start`); XmlText embeds the regular Text wrapper to inherit all rich-text methods. ToString renderers produce HTML-like output with sorted attribute keys. 11 tests cover Element/Attribute/RemoveAttribute, nested DOM round-trip, self-closing render for empty elements, rich-text inside XmlText, wire round-trip preserves structure, cross-client structural-edit convergence, Range over children. The wire-format machinery (`ContentType` with optional nodeName) was already in place from the nested-type commit.
+- **Resolved by:** `internal/types/xml.go` ships `XmlFragment`, `XmlElement`, `XmlText` wrappers. XmlElement carries nodeName + attributes (Map-like via `branch.Map`) + positional children (Array-like via `branch.Start`); XmlText embeds the regular Text wrapper to inherit all rich-text methods. ToString renderers produce HTML-like output with sorted attribute keys. 11 tests cover Element/Attribute/RemoveAttribute, nested DOM round-trip, empty-element render (self-closing until 1.23.0, which writes `<p></p>` as yjs does), rich-text inside XmlText, wire round-trip preserves structure, cross-client structural-edit convergence, Range over children. The wire-format machinery (`ContentType` with optional nodeName) was already in place from the nested-type commit.
 - **Remaining:** `XmlHook` (legacy JS Yjs embed type carrying an arbitrary opaque value) is deferred — yrs marks it as legacy too. No adopter has asked.
 
 ## Encoding layer

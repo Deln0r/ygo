@@ -18,7 +18,8 @@ file.
 
 **Upgrade impact** - ygo now needs Go 1.26. modernc.org/sqlite 1.60, which
 the SQLite store uses, requires it, and Go 1.25 left upstream support when
-Go 1.27 shipped. On Go 1.25, stay on ygo 1.22.x.
+Go 1.27 shipped. On Go 1.25, stay on ygo 1.22.x. `XmlElement.ToString` no
+longer self-closes an empty element, and it lower-cases the tag.
 
 ### Changed
 
@@ -29,6 +30,12 @@ Go 1.27 shipped. On Go 1.25, stay on ygo 1.22.x.
   memory-mapped `-shm` file now fails the statement with a disk I/O error
   instead of crashing the process. The nested NATS and Matrix modules move to
   Go 1.26 with it. The CI matrix is Go 1.26 and the current stable release.
+
+- **`XmlElement.ToString` writes an empty element with a closing tag, and the
+  tag in lower case**, as yjs `YXmlElement.toString` does: `<br
+  class="clearfix"></br>`, not `<br class="clearfix"/>`. The XML fixtures had
+  been generated with a renderer written to mirror ygo's output; they now use
+  yjs's own `toString`.
 
 ### Infrastructure
 
