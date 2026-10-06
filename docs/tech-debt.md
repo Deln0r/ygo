@@ -111,6 +111,12 @@
 - **Why deferred:** premature; falls out of the broader storage-layout decision above.
 - **When to address:** with the storage layout benchmark.
 
+### Shared types embedded in a text are invisible to Range and ToDelta
+
+- **Where:** `Text.Range` / `ToDelta` (`internal/types/text_format.go`).
+- **What:** a shared type inserted into a text (yjs allows a Y.Map as an embed) counts in `Length` but `Range` skips `KindType` items, so `ToDelta` leaves it out: yjs text "ab" with a map embedded at index 1 has length 3 in both, and ygo's delta is "ab" where yjs gives "a", the map, "b" (measured with a yjs 13.6.33 update).
+- **When to address:** with the rich-text insert work.
+
 ### XmlElement.ToString lower-cases tags without context
 
 - **Where:** `XmlElement.ToString`.
