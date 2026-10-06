@@ -1,6 +1,6 @@
 module github.com/Deln0r/ygo/integration/matrix
 
-go 1.25.0
+go 1.26.0
 
 require (
 	// v1.18.0 is the first core release containing ygo.ValidateUpdate, which
@@ -26,7 +26,7 @@ require (
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20260813180055-c1d0aacb2297 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
 

@@ -16,6 +16,20 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact** - ygo now needs Go 1.26. modernc.org/sqlite 1.60, which
+the SQLite store uses, requires it, and Go 1.25 left upstream support when
+Go 1.27 shipped. On Go 1.25, stay on ygo 1.22.x.
+
+### Changed
+
+- **Go 1.26 or newer is required**, and `modernc.org/sqlite` moves from 1.59.0
+  to 1.60.1 (libc v1.75.7 to v1.77.1, the version sqlite's own go.mod pins, as
+  upstream requires of downstream modules). The change that matters for ygo's
+  SQLite store, which runs in WAL mode: a fault while reading the
+  memory-mapped `-shm` file now fails the statement with a disk I/O error
+  instead of crashing the process. The nested NATS and Matrix modules move to
+  Go 1.26 with it. The CI matrix is Go 1.26 and the current stable release.
+
 ### Infrastructure
 
 - Fixtures are generated from lib0 0.2.119. It adds bounds checks to the JS

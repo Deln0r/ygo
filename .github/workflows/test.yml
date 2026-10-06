@@ -23,11 +23,11 @@ jobs:
         # the cost is that a new Go release can turn this red without a
         # commit, which for a library is the early warning we want.
         #
-        # The floor stays pinned because it is a promise: go.mod says 1.25 and
-        # nothing in the dependency graph needs more (sqlite and libc both
-        # declare 1.25). Note 1.25 itself no longer receives upstream fixes;
-        # raising the floor is a separate, adopter-visible decision.
-        go: ["1.25", "stable"]
+        # The floor stays pinned because it is a promise: go.mod says 1.26.
+        # It moved up from 1.25 when modernc.org/sqlite 1.60 started to
+        # require 1.26, after 1.25 had left upstream support with the 1.27
+        # release. Raising it again is a separate, adopter-visible decision.
+        go: ["1.26", "stable"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
