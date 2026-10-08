@@ -1,6 +1,8 @@
 package doc
 
 import (
+	"sort"
+
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/store"
 )
@@ -70,10 +72,11 @@ type TransactionMut struct {
 	// from updates applied via ApplyUpdate.
 	Origin any
 
-	// deletedIDs records items tombstoned during this transaction via
-	// Delete. Commit's GC pass walks it to free content and merge
-	// deleted runs, and observers use it for an event's deletes()
-	// predicate. The wire delete set comes from deletedRanges.
+	// deletedIDs records the head ID of every item tombstoned during this
+	// transaction via Delete. Subdocument tracking reads it; GC, the
+	// observers' deletes() predicate and the wire delete set go by
+	// deletedRanges, because a later split in the same transaction cuts a
+	// deleted item into pieces whose heads are not here.
 	deletedIDs []block.ID
 
 	// deletedRanges holds the exact clock range of every Delete, taken
@@ -93,9 +96,9 @@ type TransactionMut struct {
 	// in the insertion order of transaction.changed.
 	changedOrder []*block.Branch
 
-	// deletedSet is the lazily-built set form of deletedIDs, used by
-	// DeletedThisTxn for the observer event's deletes() predicate.
-	deletedSet map[block.ID]struct{}
+	// deletedByClient is deletedRanges per client, sorted and merged,
+	// built lazily by DeletedThisTxn and gcDeleted and dropped by Delete.
+	deletedByClient map[uint64][]clockRange
 
 	// beforeState is the per-client clock head snapshot taken when
 	// this transaction acquired the write lock. afterState is the
@@ -324,38 +327,32 @@ func (t *TransactionMut) SubdocsLoaded() []string { return t.subdocsLoaded }
 func (t *TransactionMut) gcDeleted() {
 	bs := t.doc.store
 	touched := map[uint64]uint64{} // client -> smallest deleted clock
-	for _, id := range t.deletedIDs {
-		cell, ok := bs.GetBlock(id)
-		if !ok {
-			continue
-		}
-		it := cell.AsItem()
-		if it == nil || !it.IsDeleted() {
-			continue
-		}
-		// The merge pass below runs whether or not the content is
-		// collected: yjs tryMergeDeleteSet merges the deleted ranges
-		// with GC off too, so a block cut by deletions rejoins.
-		if cur, ok := touched[it.ID.Client]; !ok || it.ID.Clock < cur {
-			touched[it.ID.Client] = it.ID.Clock
-		}
-		if !t.doc.gc || it.IsKeep() {
-			continue
-		}
-		// A deleted shared type collapses its whole subtree: every child
-		// becomes a garbage-collected range (yjs ContentType.gc under
-		// parentGCd), while the reference item itself becomes a
-		// ContentDeleted marker below. Collect the children before the
-		// content swap destroys the branch pointer.
-		if it.Content.Kind == block.KindType && it.Content.Branch != nil {
-			t.gcNestedChildren(it.Content.Branch, touched)
-		}
-		if it.Content.Kind != block.KindDeleted {
-			it.Content = block.Content{Kind: block.KindDeleted, DeletedLen: it.Len}
-			// ContentDeleted is not countable; clear the flag so the
-			// item honours the invariant at block/item.go (a deleted
-			// marker never contributes to parent length totals).
-			it.SetCountable(false)
+	// Every cell inside the deleted ranges, as yjs tryGcDeleteSet walks
+	// the structs of transaction.deleteSet: a deleted item that a later
+	// integration split has pieces whose heads no Delete call saw.
+	t.deletedRangesOf(0)
+	clients := make([]uint64, 0, len(t.deletedByClient))
+	for c := range t.deletedByClient {
+		clients = append(clients, c)
+	}
+	sort.Slice(clients, func(i, j int) bool { return clients[i] < clients[j] })
+	for _, c := range clients {
+		for _, r := range t.deletedByClient[c] {
+			// Each cell is looked up afresh: collecting a type replaces
+			// its children's cells with GC runs, possibly further along
+			// this walk.
+			for clock := r.start; clock < r.end; {
+				cell, ok := bs.GetBlock(block.ID{Client: c, Clock: clock})
+				if !ok {
+					break
+				}
+				if it := cell.AsItem(); it != nil && it.IsDeleted() {
+					t.gcDeletedItem(it, touched)
+				}
+				if !advanceClock(&clock, cell.ClockEnd()) {
+					break
+				}
+			}
 		}
 	}
 	// Merge adjacent deleted/GC'd cells per affected client, starting at
@@ -372,6 +369,35 @@ func (t *TransactionMut) gcDeleted() {
 			startIdx = 1
 		}
 		list.SquashFrom(startIdx)
+	}
+}
+
+// gcDeletedItem records it for the merge pass and, with GC on and it not
+// kept, frees its content (collapsing a shared type's subtree).
+func (t *TransactionMut) gcDeletedItem(it *block.Item, touched map[uint64]uint64) {
+	// The merge pass below runs whether or not the content is
+	// collected: yjs tryMergeDeleteSet merges the deleted ranges
+	// with GC off too, so a block cut by deletions rejoins.
+	if cur, ok := touched[it.ID.Client]; !ok || it.ID.Clock < cur {
+		touched[it.ID.Client] = it.ID.Clock
+	}
+	if !t.doc.gc || it.IsKeep() {
+		return
+	}
+	// A deleted shared type collapses its whole subtree: every child
+	// becomes a garbage-collected range (yjs ContentType.gc under
+	// parentGCd), while the reference item itself becomes a
+	// ContentDeleted marker below. Collect the children before the
+	// content swap destroys the branch pointer.
+	if it.Content.Kind == block.KindType && it.Content.Branch != nil {
+		t.gcNestedChildren(it.Content.Branch, touched)
+	}
+	if it.Content.Kind != block.KindDeleted {
+		it.Content = block.Content{Kind: block.KindDeleted, DeletedLen: it.Len}
+		// ContentDeleted is not countable; clear the flag so the
+		// item honours the invariant at block/item.go (a deleted
+		// marker never contributes to parent length totals).
+		it.SetCountable(false)
 	}
 }
 
@@ -581,6 +607,7 @@ func (t *TransactionMut) Delete(item *block.Item) {
 	item.SetDeleted(true)
 	t.deletedIDs = append(t.deletedIDs, item.ID)
 	t.deletedRanges = append(t.deletedRanges, DeletedRange{ID: item.ID, Len: item.Len})
+	t.deletedByClient = nil
 	if item.Parent.IsResolved() {
 		// Record the parent (and changed key) so observers fire on
 		// deletions, mirroring yjs addChangedTypeToTransaction in
@@ -681,19 +708,45 @@ func (t *TransactionMut) PositionalChanged(b *block.Branch) bool {
 	return false
 }
 
-// DeletedThisTxn reports whether the item at id was tombstoned during
-// this transaction, the y-protocols "deletes(struct)" predicate the
-// observer event logic needs. Built lazily from deletedIDs on first
-// call. For map-key items (Len 1) the head-ID match is exact.
+// DeletedThisTxn reports whether the clock at id was deleted during this
+// transaction, the deletes(struct) predicate of observer events. Like
+// yjs's isDeleted(transaction.deleteSet, id) it goes by the deleted clock
+// ranges, not by item identity: an item deleted whole and then split by
+// a later integration in the same transaction counts as deleted in every
+// piece.
 func (t *TransactionMut) DeletedThisTxn(id block.ID) bool {
-	if t.deletedSet == nil {
-		t.deletedSet = make(map[block.ID]struct{}, len(t.deletedIDs))
-		for _, did := range t.deletedIDs {
-			t.deletedSet[did] = struct{}{}
+	ranges := t.deletedRangesOf(id.Client)
+	i := sort.Search(len(ranges), func(i int) bool { return ranges[i].end > id.Clock })
+	return i < len(ranges) && ranges[i].start <= id.Clock
+}
+
+// clockRange is the half-open clock range [start, end) of one client.
+type clockRange struct{ start, end uint64 }
+
+// deletedRangesOf returns the clock ranges this transaction deleted for
+// client, sorted and merged.
+func (t *TransactionMut) deletedRangesOf(client uint64) []clockRange {
+	if t.deletedByClient == nil {
+		t.deletedByClient = map[uint64][]clockRange{}
+		for _, r := range t.deletedRanges {
+			t.deletedByClient[r.ID.Client] = append(t.deletedByClient[r.ID.Client], clockRange{r.ID.Clock, r.ID.Clock + r.Len})
+		}
+		for c, rs := range t.deletedByClient {
+			sort.Slice(rs, func(i, j int) bool { return rs[i].start < rs[j].start })
+			merged := rs[:1]
+			for _, r := range rs[1:] {
+				if last := &merged[len(merged)-1]; r.start <= last.end {
+					if r.end > last.end {
+						last.end = r.end
+					}
+					continue
+				}
+				merged = append(merged, r)
+			}
+			t.deletedByClient[c] = merged
 		}
 	}
-	_, ok := t.deletedSet[id]
-	return ok
+	return t.deletedByClient[client]
 }
 
 // changedSet is the per-branch record of what changed this
