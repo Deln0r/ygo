@@ -220,7 +220,9 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 	if len(updates) == 0 {
 		return nil, nil
 	}
-	d := doc.NewDoc()
+	// GC off: a merge carries deleted content, as yjs mergeUpdates does;
+	// whoever applies the result collects it, or keeps it with GC off.
+	d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
 	wtxn := d.WriteTxn()
 	for i, raw := range updates {
 		upd, _, err := encoding.DecodeUpdate(raw)

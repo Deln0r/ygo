@@ -76,3 +76,28 @@ func TestCommit_CollectsBeforeMergingIntoKept(t *testing.T) {
 		t.Errorf("state\n got  %s\n want %s", s, state)
 	}
 }
+
+// MergeUpdates carries deleted content, as yjs mergeUpdates does, so a
+// receiver with GC off (version history, snapshots) keeps it; the merge
+// used to run through a document with GC on and collect it. Bytes from
+// yjs 13.6.33: a GC-off document writes "abc" and deletes "b"; the
+// receiver applies the merge of the two update events.
+func TestMergeUpdates_KeepsDeletedContent(t *testing.T) {
+	const receiver = "01030100040101740161840100016284010101630101010101"
+	var ups [][]byte
+	for _, u := range []string{"01010100040101740361626300", "000101010101"} {
+		b, _ := hex.DecodeString(u)
+		ups = append(ups, b)
+	}
+	merged, err := ygo.MergeUpdates(ups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := ygo.NewDocWithOptions(ygo.Options{ClientID: 9, DisableGC: true})
+	if err := ygo.ApplyUpdate(r, merged); err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(ygo.EncodeStateAsUpdate(r)); got != receiver {
+		t.Errorf("receiver state\n got  %s\n want %s", got, receiver)
+	}
+}
