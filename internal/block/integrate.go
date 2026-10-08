@@ -330,20 +330,20 @@ func (i *Item) TrySquash(other *Item) bool {
 	if i.Redone != nil || other.Redone != nil {
 		return false
 	}
-	// Items the UndoManager marked to keep (resurrected via redoItem)
-	// must not merge: undo/redo tracks them by exact identity, and a
-	// merge would let one Undo delete a neighbour. Live, never-undone
-	// items are not kept and squash freely.
-	if i.IsKeep() || other.IsKeep() {
-		return false
-	}
 	if i.IsLinked() || other.IsLinked() {
 		return false
 	}
 	if !i.Content.TrySquash(&other.Content) {
 		return false
 	}
-	// Merge: extend i to cover other's clocks; rewire neighbours.
+	// Merge: extend i to cover other's clocks; rewire neighbours. A kept
+	// item merges like any other and the merged item stays kept, as yjs
+	// mergeWith carries keep: the UndoManager restores by clock range and
+	// cuts items at the range ends, so a merged tombstone is never
+	// restored beyond what a step deleted.
+	if other.IsKeep() {
+		i.SetKeep(true)
+	}
 	i.Len += other.Len
 	i.Right = other.Right
 	if other.Right != nil {

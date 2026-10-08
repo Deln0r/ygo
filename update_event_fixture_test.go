@@ -184,15 +184,6 @@ var knownUpdateEventDivergences = map[string]struct {
 			"14|0|<um:0>|0104cdcc83da0b01a7cdcc83da0b00012800cdcc83da0b01016d0177024d312800cdcc83da0b01017a01770248312800cdcc83da0b0101610177024c3200|000006cd9987b4170304000201000003a7002806036d7a6141010100010102410101040177024d317702483177024c3200",
 		),
 	},
-	"undo-grouped-deletes": {
-		reason: "tombstones an UndoManager keeps are not merged (yjs Item.mergeWith merges them and carries keep), so undo restores \"ab\" as two structs where yjs restores one; the text is the same. Merging them needs the restore pass to cut at the range ends first",
-		events: pinnedEvents(
-			"0|0|setup|0101cdcc83da0b000401017402616200|0000058d9987b41700000104060374616201020101000001010000",
-			"1|0|nil|0001cdcc83da0b010101|00000000000001000000000001cdcc83da0b010100",
-			"2|0|nil|0001cdcc83da0b010001|00000000000001000000000001cdcc83da0b010000",
-			"3|0|<undo-manager>|0102cdcc83da0b0244cdcc83da0b000161c4cdcc83da0b00cdcc83da0b01016200|000006cd9987b417020100020002034400c405026162410000000001020200",
-		),
-	},
 }
 
 // pinnedEvents parses "step|doc|origin|v1|v2" lines, origin "nil" for none.

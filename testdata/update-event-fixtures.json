@@ -19847,6 +19847,767 @@
       ]
     },
     {
+      "name": "undo-insertion-merged-into-restored-copy",
+      "description": "text typed right after a restored copy merges with it in yjs, kept or not, so undoing the original insertion deletes the typed text with it",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "t",
+              "kind": "text"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": ""
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "t": ""
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": [
+                "map:m",
+                "t"
+              ],
+              "index": 0,
+              "text": "c"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": "c"
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "t"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "t": "c"
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "insert",
+              "path": [
+                "map:m",
+                "t"
+              ],
+              "index": 1,
+              "text": "xyz"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": "cxyz"
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "t": ""
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d01740200",
+          "v2": "0000058d9987b4170000012705026d744100010101020001010000"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b010400cdcc83da0b00016300",
+          "v2": "000006cd9987b417000100000104030163010100000001010100"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010002",
+          "v2": "00000000000001000000000001cdcc83da0b010001"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0102cdcc83da0b02a7cdcc83da0b00020400cdcc83da0b02016300",
+          "v2": "000006cd9987b417010200040003a7000403016301010001020001020200"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0101cdcc83da0b0484cdcc83da0b030378797a00",
+          "v2": "000006cd9987b417000106000184050378797a0300000001010400"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0001cdcc83da0b010304",
+          "v2": "00000000000001000000000001cdcc83da0b010303"
+        }
+      ]
+    },
+    {
+      "name": "undo-deletes-merged-restored-copy",
+      "description": "a restore brings back an insertion and text typed after it as one struct in yjs; undoing the insertion through the other manager deletes the whole merged copy",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        },
+        {
+          "doc": 0,
+          "scope": "map:m",
+          "origins": [
+            "b"
+          ]
+        }
+      ],
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "t",
+              "kind": "text"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": ""
+              }
+            }
+          ],
+          "stacks": [
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "t": ""
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "manage": 1,
+          "state": [
+            {
+              "map:m": {
+                "t": ""
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "b",
+          "ops": [
+            {
+              "op": "insert",
+              "path": [
+                "map:m",
+                "t"
+              ],
+              "index": 0,
+              "text": "c"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": "c"
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "set",
+              "path": "map:m",
+              "key": "z",
+              "value": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": "c",
+                "z": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insert",
+              "path": [
+                "map:m",
+                "t"
+              ],
+              "index": 1,
+              "text": "xyz"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "t": "cxyz",
+                "z": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "t"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "z": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "t": "cxyz",
+                "z": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 1
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "t": "",
+                "z": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d01740200",
+          "v2": "0000058d9987b4170000012705026d744100010101020001010000"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "b",
+          "v1": "0101cdcc83da0b010400cdcc83da0b00016300",
+          "v2": "000006cd9987b417000100000104030163010100000001010100"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b022801016d017a017d0100",
+          "v2": "0000058d9987b4170000012805026d7a410001010001010101027d0100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0384cdcc83da0b010378797a00",
+          "v2": "000006cd9987b417000102000184050378797a0300000001010300"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b0200020303",
+          "v2": "00000000000001000000000001cdcc83da0b0200010102"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0102cdcc83da0b06a7cdcc83da0b00020400cdcc83da0b06046378797a00",
+          "v2": "000006cd9987b4170102000c0003a7000406046378797a04010001020001020600"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "<um:1>",
+          "v1": "0001cdcc83da0b010704",
+          "v2": "00000000000001000000000001cdcc83da0b010703"
+        }
+      ]
+    },
+    {
+      "name": "undo-array-restored-copy-merge",
+      "description": "an array element restored by undo merges with an element pushed right after it, as yjs merges kept items, so undoing the push deletes both",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "array:a"
+        }
+      ],
+      "root_keys": [
+        "array:a"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "push",
+              "path": "array:a",
+              "values": [
+                "a",
+                "b"
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b"
+              ]
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b"
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "push",
+              "path": "array:a",
+              "values": [
+                "c"
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b",
+                "c"
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "array:a",
+              "index": 2,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b"
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b",
+                "c"
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 3,
+              "values": [
+                "x"
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b",
+                "c",
+                "x"
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "array:a": [
+                "a",
+                "b"
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b00080101610277016177016200",
+          "v2": "0000058d9987b4170000010803016101010100010201010077016177016200"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0288cdcc83da0b010177016300",
+          "v2": "000006cd9987b41700010200018801000000010101010277016300"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010201",
+          "v2": "00000000000001000000000001cdcc83da0b010200"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0101cdcc83da0b03c8cdcc83da0b01cdcc83da0b020177016300",
+          "v2": "000006cd9987b417010102010401c801000000010101010377016300"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0101cdcc83da0b04c8cdcc83da0b03cdcc83da0b020177017800",
+          "v2": "000006cd9987b417010106010401c801000000010101010477017800"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0001cdcc83da0b010302",
+          "v2": "00000000000001000000000001cdcc83da0b010301"
+        }
+      ]
+    },
+    {
       "name": "array-insert-after-undo",
       "description": "an undo deletes an array element before the one a search marker sits on; the next insert by index lands where yjs puts it (yjs popStackItem resets the markers)",
       "gc": true,

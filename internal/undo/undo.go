@@ -576,7 +576,10 @@ func (um *UndoManager) applyStackItem(si *StackItem) bool {
 	// except what the same window inserted. Typing "abc" and deleting the
 	// "b" is one step; undoing it must leave nothing behind, not the "b".
 	// yjs popStackItem skips those items for the same reason.
-	// Clients in the order they deleted, as yjs walks its delete set.
+	// Clients in the order they deleted, as yjs walks its delete set. Each
+	// deleted item is first cut at the step's range (yjs iterateStructs):
+	// a tombstone merged with a neighbour this step did not delete must
+	// bring back only what the step deleted.
 	for _, client := range si.deletionClients() {
 		for _, r := range si.Deletions.ClientRanges(client) {
 			clock := r.Start
@@ -591,6 +594,17 @@ func (um *UndoManager) applyStackItem(si *StackItem) bool {
 						break
 					}
 					continue
+				}
+				if it.ID.Clock < clock {
+					if it = txn.MaterializeCleanStart(block.ID{Client: client, Clock: clock}); it == nil {
+						break
+					}
+				}
+				if it.ID.Clock+it.Len > r.End() {
+					_ = txn.MaterializeCleanEnd(block.ID{Client: client, Clock: r.End() - 1})
+					if it = txn.GetItem(block.ID{Client: client, Clock: clock}); it == nil {
+						break
+					}
 				}
 				if !si.Insertions.Contains(client, it.ID.Clock) && um.redoItem(txn, it, si) != nil {
 					changed = true
