@@ -679,14 +679,37 @@ func (um *UndoManager) setKeep(mut *doc.TransactionMut, si *StackItem, keep bool
 				if !ok {
 					break
 				}
-				if it := cell.AsItem(); it != nil && um.itemInScope(it) {
+				it := cell.AsItem()
+				if it == nil {
+					if !advanceClock(&clock, cell.ClockEnd()) {
+						break
+					}
+					continue
+				}
+				// Exactly the step's clocks, as yjs clearUndoManagerStackItem
+				// walks them (iterateDeletedStructs): a tombstone merged with
+				// a neighbour another step deleted is cut at the range ends,
+				// so the neighbour keeps its own keep. The commit merges the
+				// pieces back, carrying keep.
+				if it.ID.Clock < clock {
+					if it = mut.MaterializeCleanStart(block.ID{Client: client, Clock: clock}); it == nil {
+						break
+					}
+				}
+				if it.ID.Clock+it.Len > r.End() {
+					_ = mut.MaterializeCleanEnd(block.ID{Client: client, Clock: r.End() - 1})
+					if it = mut.GetItem(block.ID{Client: client, Clock: clock}); it == nil {
+						break
+					}
+				}
+				if um.itemInScope(it) {
 					if keep {
 						keepWithAncestors(it)
 					} else {
 						keepItem(it, false)
 					}
 				}
-				if !advanceClock(&clock, cell.ClockEnd()) {
+				if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
 					break
 				}
 			}

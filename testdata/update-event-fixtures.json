@@ -21042,6 +21042,931 @@
       ]
     },
     {
+      "name": "undo-split-tombstone-restored-once",
+      "description": "a no-op undo cuts a merged kept tombstone, and yjs merges the pieces back at the end of that transaction, so a later undo restores it as one copy and a concurrent insert lands where yjs puts it",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "text:t",
+          "group": true
+        },
+        {
+          "doc": 0,
+          "scope": "text:t",
+          "origins": [
+            "b"
+          ]
+        },
+        {
+          "doc": 0,
+          "scope": "text:t",
+          "origins": [
+            null,
+            "b"
+          ],
+          "group": true
+        }
+      ],
+      "root_keys": [
+        "text:t"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "pq"
+            }
+          ],
+          "state": [
+            {
+              "text:t": "pq"
+            },
+            {
+              "text:t": ""
+            }
+          ],
+          "stacks": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "text:t": "pq"
+            },
+            {
+              "text:t": ""
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 1,
+          "state": [
+            {
+              "text:t": "pq"
+            },
+            {
+              "text:t": ""
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "xy"
+            }
+          ],
+          "state": [
+            {
+              "text:t": "pxyq"
+            },
+            {
+              "text:t": ""
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0103cdcc83da0b0004010174017084cdcc83da0b000171c4cdcc83da0b00cdcc83da0b0102787900"
+          },
+          "state": [
+            {
+              "text:t": "pxyq"
+            },
+            {
+              "text:t": "pxyq"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ],
+          "state": [
+            {
+              "text:t": "pxyq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "manage": 2,
+          "state": [
+            {
+              "text:t": "pxyq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "text:t",
+              "index": 2,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "text:t": "pxq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "stop": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "text:t": "pxq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "b",
+          "ops": [
+            {
+              "op": "delete",
+              "path": "text:t",
+              "index": 1,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "text:t": "pq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": false,
+          "state": [
+            {
+              "text:t": "pq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 2
+          },
+          "result": true,
+          "state": [
+            {
+              "text:t": "pxyq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015a00"
+          },
+          "state": [
+            {
+              "text:t": "pxyZq"
+            },
+            {
+              "text:t": "pxZyq"
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b000401017402707100",
+          "v2": "0000058d9987b41700000104060374707101020101000001010000"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b02c4cdcc83da0b00cdcc83da0b0102787900",
+          "v2": "000006cd9987b417010100010201c4040278790200000001010200"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0103cdcc83da0b0004010174017084cdcc83da0b000171c4cdcc83da0b00cdcc83da0b0102787900",
+          "v2": "000006cd9987b4170202010001020504008400c4090574707178794101020101000001030000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015a00",
+          "v2": "00000b96939e8302cd9987b417000104010601c403015a0100000001010000"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010301",
+          "v2": "00000000000001000000000001cdcc83da0b010300"
+        },
+        {
+          "step": 9,
+          "doc": 0,
+          "origin": "b",
+          "v1": "0001cdcc83da0b010201",
+          "v2": "00000000000001000000000001cdcc83da0b010200"
+        },
+        {
+          "step": 11,
+          "doc": 0,
+          "origin": "<um:2>",
+          "v1": "0101cdcc83da0b04c4cdcc83da0b00cdcc83da0b0202787900",
+          "v2": "000006cd9987b417010100010401c4040278790200000001010400"
+        },
+        {
+          "step": 12,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015a00",
+          "v2": "00000b96939e8302cd9987b417000104010601c403015a0100000001010000"
+        }
+      ]
+    },
+    {
+      "name": "undo-clear-merged-keep-parent",
+      "description": "clearing one manager releases exactly its own deletions inside a tombstone merged with another manager's: the other part stays kept, and its later release still walks up to the parent, so an untracked delete of the parent collects the subtree as in yjs",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": [
+            "map:m",
+            "nt"
+          ]
+        },
+        {
+          "doc": 0,
+          "scope": [
+            "map:m",
+            "nt"
+          ],
+          "origins": [
+            "b"
+          ]
+        },
+        {
+          "doc": 0,
+          "scope": [
+            "map:m",
+            "nt"
+          ],
+          "origins": [
+            "c"
+          ]
+        }
+      ],
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "nt",
+              "kind": "text"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "nt": ""
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insert",
+              "path": [
+                "map:m",
+                "nt"
+              ],
+              "index": 0,
+              "text": "abcd"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "nt": "abcd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "nt": "abcd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 1,
+          "state": [
+            {
+              "map:m": {
+                "nt": "abcd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "manage": 2,
+          "state": [
+            {
+              "map:m": {
+                "nt": "abcd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "nt"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "nt": "bcd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "b",
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "nt"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "nt": "cd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 1
+          },
+          "state": [
+            {
+              "map:m": {
+                "nt": "cd"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "c",
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "nt"
+              ],
+              "index": 1,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "nt": "c"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "nt": "c"
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "u",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "nt"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "mirror",
+            "what": "state",
+            "update": "0102cdcc83da0b002101016d026e7401000401cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d026e740200",
+          "v2": "0000058d9987b4170000012706036d6e740102010101020001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b010400cdcc83da0b00046162636400",
+          "v2": "000006cd9987b417000100000104060461626364040100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010101",
+          "v2": "00000000000001000000000001cdcc83da0b010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "b",
+          "v1": "0001cdcc83da0b010201",
+          "v2": "00000000000001000000000001cdcc83da0b010200"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "c",
+          "v1": "0001cdcc83da0b010401",
+          "v2": "00000000000001000000000001cdcc83da0b010400"
+        },
+        {
+          "step": 10,
+          "doc": 0,
+          "origin": "u",
+          "v1": "0001cdcc83da0b0200010301",
+          "v2": "00000000000001000000000001cdcc83da0b0200000200"
+        },
+        {
+          "step": 11,
+          "doc": 1,
+          "origin": "mirror",
+          "v1": "0102cdcc83da0b002101016d026e7401000401cdcc83da0b010001",
+          "v2": "0000058d9987b41700000321000006036d6e74010201010002010401020001cdcc83da0b010000"
+        }
+      ]
+    },
+    {
       "name": "array-insert-after-undo",
       "description": "an undo deletes an array element before the one a search marker sits on; the next insert by index lands where yjs puts it (yjs popStackItem resets the markers)",
       "gc": true,
