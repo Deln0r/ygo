@@ -150,3 +150,22 @@ func TestApply_DeleteSetInWireOrder(t *testing.T) {
 		t.Errorf("state\n got  %s\n want %s", got, state)
 	}
 }
+
+// A V1 delete set that lists a client twice deletes the ranges of both
+// entries, as yjs applies each entry it reads; the second used to replace
+// the first. Bytes from yjs 13.6.33: client 1 pushes [10], [20], [30]; the
+// delete set lists client 1 with [0,1) and again with [2,1); yjs ends with
+// [20].
+func TestApply_DeleteSetClientListedTwice(t *testing.T) {
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 99})
+	a := ygo.NewArray(d, "a")
+	for _, u := range []string{"0101010008010161037d0a7d147d1e00", "00020101000101010201"} {
+		b, _ := hex.DecodeString(u)
+		if err := ygo.ApplyUpdate(d, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := fmt.Sprint(a.ToSlice()); got != "[20]" {
+		t.Errorf("array %s, want [20]", got)
+	}
+}

@@ -220,9 +220,15 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 			}
 			ranges[j] = Range{Start: start, Length: length}
 		}
-		if _, known := s.clients[clientID]; !known {
-			s.order = append(s.order, clientID)
+		if _, known := s.clients[clientID]; known {
+			// A client written twice keeps both entries' ranges, as yjs
+			// readDeleteSet and readAndApplyDeleteSet read every entry.
+			for _, r := range ranges {
+				s.Insert(clientID, r.Start, r.Length)
+			}
+			continue
 		}
+		s.order = append(s.order, clientID)
 		s.clients[clientID] = ranges
 	}
 	return s, buf, nil
