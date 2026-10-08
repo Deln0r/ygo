@@ -117,7 +117,7 @@ type Doc struct {
 
 	// queued holds one-shot functions the next Commit runs before its
 	// next after-transaction handler or its garbage collection
-	// (QueueInCommit).
+	// (QueueUnderLock).
 	queued []func(*TransactionMut)
 }
 
@@ -174,7 +174,7 @@ func (d *Doc) fireAfterTransactionHandlers(mut *TransactionMut) {
 	copy(handlers, d.afterTxnHandlers)
 	d.handlersMu.Unlock()
 	for _, h := range handlers {
-		// Work queued before this handler (QueueInCommit), from outside
+		// Work queued before this handler (QueueUnderLock), from outside
 		// the commit or from an earlier handler, runs first, as if it had
 		// run when it was queued.
 		d.runQueued(mut)
@@ -278,24 +278,25 @@ func (d *Doc) fireUpdateHandlers(t *TransactionMut) {
 	}
 }
 
-// QueueInCommit queues fn to run once inside the next Commit of d (the
-// one in progress when called from one of its handlers), with the write
-// lock held: before the next after-transaction handler runs, or, when
-// none is left, before that commit collects deleted content. A plain
-// function rather than a method, so it stays off the public ygo.Doc.
+// QueueUnderLock queues fn to run once with d's write lock held, at the
+// first point where anything could keep or collect an item: when the next
+// write transaction opens, before its body; before each after-transaction
+// handler of the commit in progress; or right before that commit's GC. A
+// plain function rather than a method, so it stays off the public
+// ygo.Doc.
 //
 // The UndoManager releases what a cleared step kept this way. yjs clear
 // releases at once, so nothing that runs after it can be undone by it:
-// here no handler keeps an item, and no GC collects one, between the
-// Clear and its release. Called from a handler, the release reaches the
-// GC of that very commit, as in yjs.
-func QueueInCommit(d *Doc, fn func(*TransactionMut)) {
+// here no transaction body, handler or GC keeps or collects an item
+// between the Clear and its release. Called from an after-transaction
+// handler, the release reaches the GC of that very commit, as in yjs.
+func QueueUnderLock(d *Doc, fn func(*TransactionMut)) {
 	d.handlersMu.Lock()
 	d.queued = append(d.queued, fn)
 	d.handlersMu.Unlock()
 }
 
-// runQueued runs and forgets the functions queued with QueueInCommit.
+// runQueued runs and forgets the functions queued with QueueUnderLock.
 func (d *Doc) runQueued(t *TransactionMut) {
 	d.handlersMu.Lock()
 	fns := d.queued

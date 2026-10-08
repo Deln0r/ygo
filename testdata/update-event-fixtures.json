@@ -13528,6 +13528,382 @@
       ]
     },
     {
+      "name": "undo-clear-then-other-manager-undo",
+      "description": "one manager's clear, then another manager's undo restoring into the parent both kept: yjs releases at clear, before the undo keeps the parent again, so an untracked delete of the parent leaves its content",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m",
+          "origins": [
+            "a"
+          ]
+        },
+        {
+          "doc": 0,
+          "scope": "map:m",
+          "origins": [
+            "b"
+          ]
+        }
+      ],
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "map"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            }
+          ],
+          "stacks": [
+            null,
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "set",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "x",
+              "value": 1
+            },
+            {
+              "op": "set",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "y",
+              "value": 2
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "x": 1,
+                  "y": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "x": 1,
+                  "y": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "manage": 1,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "x": 1,
+                  "y": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "a",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "x"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "y": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "b",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "y"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 1
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "y": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "redo": {
+            "doc": 0,
+            "um": 1
+          },
+          "result": false,
+          "state": [
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d01700100",
+          "v2": "0000058d9987b4170000012705026d704100010101010001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0102cdcc83da0b012800cdcc83da0b000178017d012800cdcc83da0b000179017d0200",
+          "v2": "000006cd9987b417010201000001280502787941000100000241000102017d017d0200"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "a",
+          "v1": "0001cdcc83da0b010101",
+          "v2": "00000000000001000000000001cdcc83da0b010100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "b",
+          "v1": "0001cdcc83da0b010201",
+          "v2": "00000000000001000000000001cdcc83da0b010200"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "<um:1>",
+          "v1": "0101cdcc83da0b03a8cdcc83da0b02017d0200",
+          "v2": "000006cd9987b4170001040001a80100000001010101037d0200"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0001cdcc83da0b0200010301",
+          "v2": "00000000000001000000000001cdcc83da0b0200000200"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0104cdcc83da0b002701016d0170012800cdcc83da0b000178017d012800cdcc83da0b000179017d02a8cdcc83da0b02017d0201cdcc83da0b010004",
+          "v2": "000006cd9987b4170203010004000527002801a807046d70787941020301000001010241010104007d017d027d0201cdcc83da0b010003"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0103cdcc83da0b012800cdcc83da0b000178017d012800cdcc83da0b000179017d02a8cdcc83da0b02017d0201cdcc83da0b010004",
+          "v2": "000006cd9987b417020301000400032801a80502787941000100000241010103017d017d027d0201cdcc83da0b010003"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0102cdcc83da0b022800cdcc83da0b000179017d02a8cdcc83da0b02017d0201cdcc83da0b010004",
+          "v2": "000006cd9987b4170102000400032800a8030179010100000241000102027d027d0201cdcc83da0b010003"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0101cdcc83da0b03a8cdcc83da0b02017d0201cdcc83da0b010004",
+          "v2": "000006cd9987b4170001040001a80100000001010101037d0201cdcc83da0b010003"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0001cdcc83da0b010004",
+          "v2": "00000000000001000000000001cdcc83da0b010003"
+        }
+      ]
+    },
+    {
       "name": "undo-tracked-remote-delete-order",
       "description": "a tracked remote update deletes keys of two clients: yjs applies its delete set in the order written, highest client first, so undo walks the clients in that order and leaves a concurrent write in place",
       "gc": true,

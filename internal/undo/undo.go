@@ -344,9 +344,11 @@ func (um *UndoManager) StopCapturing() {
 // return false. The items the dropped steps kept from garbage
 // collection are released, as yjs clear does. The release changes items
 // and needs the doc lock, which Clear may be called with already held
-// (from a commit handler), so it runs inside the next commit, before
-// anything in that commit can keep or collect an item: before its next
-// after-transaction handler, or right before its GC (doc.QueueInCommit).
+// (from a commit handler), so it runs at the next point where anything
+// could keep or collect an item: when the next write transaction opens
+// (an Undo of another manager included), before the next after-transaction
+// handler of a commit in progress, or right before its GC
+// (doc.QueueUnderLock).
 // The release cannot take away a keep a step captured after Clear needs,
 // such as on a shared parent: it keeps the steps on the stacks again
 // after releasing, and every step there then was captured after Clear,
@@ -360,7 +362,7 @@ func (um *UndoManager) Clear() {
 	um.lastChange = time.Time{}
 	um.mu.Unlock()
 	if len(dropped) > 0 {
-		doc.QueueInCommit(um.doc, func(t *doc.TransactionMut) {
+		doc.QueueUnderLock(um.doc, func(t *doc.TransactionMut) {
 			for _, si := range dropped {
 				um.releaseKeep(t, si)
 			}

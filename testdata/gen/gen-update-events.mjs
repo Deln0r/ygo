@@ -680,6 +680,28 @@ const scenarios = [
     diffs: true,
   },
   {
+    name: "undo-clear-then-other-manager-undo",
+    description: "one manager's clear, then another manager's undo restoring into the parent both kept: yjs releases at clear, before the undo keeps the parent again, so an untracked delete of the parent leaves its content",
+    managers: [
+      { doc: 0, scope: M, origins: ["a"] },
+      { doc: 0, scope: M, origins: ["b"] },
+    ],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      txn(0, "setup", set([M, "p"], "x", 1), set([M, "p"], "y", 2)),
+      manage(0),
+      manage(1),
+      txn(0, "a", mdel([M, "p"], "x")),
+      txn(0, "b", mdel([M, "p"], "y")),
+      clear(0, 0),
+      undo(0, 1),
+      txn(0, "other", mdel(M, "p")),
+      redo(0, 1),
+    ],
+    diffs: true,
+  },
+  {
     name: "undo-tracked-remote-delete-order",
     description: "a tracked remote update deletes keys of two clients: yjs applies its delete set in the order written, highest client first, so undo walks the clients in that order and leaves a concurrent write in place",
     docs: 3,

@@ -134,10 +134,15 @@ type TransactionMut struct {
 // "this will hang forever" comment).
 func (d *Doc) WriteTxn() *TransactionMut {
 	d.mu.Lock()
-	return &TransactionMut{
+	t := &TransactionMut{
 		doc:         d,
 		beforeState: d.store.GetStateVector(),
 	}
+	// Work queued while no transaction ran (QueueUnderLock), such as an
+	// UndoManager releasing what a cleared step kept, runs before this
+	// transaction can keep or delete anything.
+	d.runQueued(t)
+	return t
 }
 
 // Commit runs the post-commit lifecycle and releases the write lock.
@@ -152,8 +157,8 @@ func (d *Doc) WriteTxn() *TransactionMut {
 //  4. Record subdocument changes.
 //  5. After-transaction handlers (the UndoManager, sync clients), which
 //     may mark deleted items kept. Functions queued with
-//     QueueInCommit run before each handler and once more after the
-//     last.
+//     QueueUnderLock run before each handler and once more after the
+//     last (and when a write transaction opens).
 //  6. GC: free deleted content (unless GC is off or the item is kept)
 //     and merge deleted runs.
 //  7. Update handlers (OnUpdate, OnUpdateV2), on the final layout.
@@ -198,7 +203,7 @@ func (t *TransactionMut) Commit() {
 	// keep, which the GC pass below must see, so observers run BEFORE
 	// gcDeleted.
 	t.doc.fireAfterTransactionHandlers(t)
-	// Work queued since the last handler (QueueInCommit), such as an
+	// Work queued since the last handler (QueueUnderLock), such as an
 	// UndoManager releasing what a step cleared from a handler kept, so
 	// this GC already sees it.
 	t.doc.runQueued(t)
