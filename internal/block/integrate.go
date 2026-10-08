@@ -349,5 +349,13 @@ func (i *Item) TrySquash(other *Item) bool {
 	if other.Right != nil {
 		other.Right.Left = i
 	}
+	// other was its key's winner: the merged item is now, as yjs
+	// tryToMergeWithLefts sets _map. Left on other, the map pointed at an
+	// item no longer in the store, and later writes on the key resolved
+	// against it.
+	if other.ParentSub != nil && other.Parent.Kind == ParentBranch && other.Parent.Branch != nil &&
+		other.Parent.Branch.Map[*other.ParentSub] == other {
+		other.Parent.Branch.Map[*other.ParentSub] = i
+	}
 	return true
 }

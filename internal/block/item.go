@@ -141,10 +141,9 @@ func setFlag(bits *uint16, mask uint16, on bool) {
 // Caller is responsible for storing the new right Item in the block
 // store. Use store.BlockStore.SplitBlock for integrated insertion.
 //
-// Known limitation: when self was the most recent writer on a map-like
-// parent (Right=nil, ParentSub != nil), yrs additionally rewrites
-// parent.Branch.Map[*ParentSub] = right. We do not, because Branch is
-// a stub until the types layer lands. See tech-debt.md.
+// When self was its key's winner (Right == nil, ParentSub != nil), the
+// right half becomes the winner, as yjs splitItem sets _map: a later
+// Set on the key takes it as its left neighbour.
 //
 // Mirrors yrs/src/block.rs:516-560 ItemPtr::splice.
 func (it *Item) Splice(offset uint64) *Item {
@@ -181,6 +180,9 @@ func (it *Item) Splice(offset uint64) *Item {
 	}
 	it.Right = right
 	it.Len = offset
+	if right.ParentSub != nil && right.Right == nil && right.Parent.Kind == ParentBranch && right.Parent.Branch != nil && right.Parent.Branch.Map != nil {
+		right.Parent.Branch.Map[*right.ParentSub] = right
+	}
 	return right
 }
 
