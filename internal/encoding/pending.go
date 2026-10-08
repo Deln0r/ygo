@@ -338,11 +338,13 @@ func (p *Pending) foldUpdate(u *Update, bs *store.BlockStore) {
 		}
 	}
 	if u.DeleteSet != nil {
-		u.DeleteSet.Iterate(func(client uint64, ranges []Range) {
-			for _, r := range ranges {
+		// In the order the update wrote its clients, which applyDeletes
+		// keeps for an update's own delete set.
+		for _, client := range u.DeleteSet.ClientsInOrder() {
+			for _, r := range u.DeleteSet.ClientRanges(client) {
 				p.DeleteSet.Insert(client, r.Start, r.Length)
 			}
-		})
+		}
 	}
 }
 
@@ -486,25 +488,35 @@ func (p *Pending) integrateBlocks(txn *doc.TransactionMut) int {
 	return progress
 }
 
-// applyDeletes applies the queued delete set, clients from the highest
-// ID down, and keeps the ranges that still point at unseen IDs. Each
-// range goes through applyDeleteRange, which splits items at the range
-// boundaries before tombstoning, so a wire delete-set that covers a
-// SUBSET of an existing item's clocks tombstones only the matching
-// middle slice instead of the whole item. Returns the number of items
-// deleted.
-func (p *Pending) applyDeletes(txn *doc.TransactionMut) int {
+// applyDeletes applies the delete set and keeps the ranges that still
+// point at unseen IDs. An update's own delete set (wireOrder) goes client
+// by client in the order the update wrote them, as yjs
+// readAndApplyDeleteSet reads it; the queued one from the highest client
+// ID down, the order yjs re-encodes its pending delete set in
+// (writeDeleteSet). The order of the deletions is the order an
+// UndoManager restores them in. Each range goes through applyDeleteRange,
+// which splits items at the range boundaries before tombstoning, so a
+// wire delete-set that covers a SUBSET of an existing item's clocks
+// tombstones only the matching middle slice instead of the whole item.
+// Returns the number of items deleted.
+func (p *Pending) applyDeletes(txn *doc.TransactionMut, wireOrder bool) int {
 	if p.DeleteSet == nil {
 		return 0
 	}
 	deleted := 0
 	remaining := NewIdSet()
-	clients := make([]uint64, 0, p.DeleteSet.ClientCount())
-	p.DeleteSet.Iterate(func(client uint64, _ []Range) {
-		clients = append(clients, client)
-	})
-	for i := len(clients) - 1; i >= 0; i-- {
-		client := clients[i]
+	var clients []uint64
+	if wireOrder {
+		clients = p.DeleteSet.ClientsInOrder()
+	} else {
+		p.DeleteSet.Iterate(func(client uint64, _ []Range) {
+			clients = append(clients, client)
+		})
+		for i, j := 0, len(clients)-1; i < j; i, j = i+1, j-1 {
+			clients[i], clients[j] = clients[j], clients[i]
+		}
+	}
+	for _, client := range clients {
 		for _, r := range p.DeleteSet.ClientRanges(client) {
 			n, leftover := applyDeleteRange(txn, client, r.Start, r.End())
 			deleted += n

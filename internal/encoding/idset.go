@@ -28,6 +28,10 @@ func (r Range) End() uint64 { return r.Start + r.Length }
 // case; we just store []Range directly.
 type IdSet struct {
 	clients map[uint64][]Range
+	// order lists the clients in the order they were first added: for a
+	// decoded set, the order they were written in, which is the order
+	// yjs readAndApplyDeleteSet applies an update's delete set in.
+	order []uint64
 }
 
 // NewIdSet returns an empty IdSet.
@@ -44,7 +48,10 @@ func (s *IdSet) Insert(client, start, length uint64) {
 		return
 	}
 	end := start + length
-	existing := s.clients[client]
+	existing, known := s.clients[client]
+	if !known {
+		s.order = append(s.order, client)
+	}
 
 	// Find the first existing range that ends at or after start
 	// (i.e. its End() >= start). That's the leftmost candidate for
@@ -113,6 +120,12 @@ func (s *IdSet) Iterate(fn func(client uint64, ranges []Range)) {
 	for _, c := range clients {
 		fn(c, s.clients[c])
 	}
+}
+
+// ClientsInOrder returns the clients in the order they were first added
+// (for a decoded set, the order they were written in). The slice is new.
+func (s *IdSet) ClientsInOrder() []uint64 {
+	return append([]uint64(nil), s.order...)
 }
 
 // ClientRanges returns client's ranges, sorted and merged. The slice
@@ -206,6 +219,9 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 				return nil, buf, err
 			}
 			ranges[j] = Range{Start: start, Length: length}
+		}
+		if _, known := s.clients[clientID]; !known {
+			s.order = append(s.order, clientID)
 		}
 		s.clients[clientID] = ranges
 	}

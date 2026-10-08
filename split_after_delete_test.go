@@ -119,3 +119,34 @@ func TestApply_SplitAfterPendingDelete(t *testing.T) {
 		t.Errorf("state\n got  %s\n want %s", got, state)
 	}
 }
+
+// An update's delete set applies in the order its clients are written, as
+// yjs readAndApplyDeleteSet reads it, not sorted: yjs and ygo write them
+// from the highest client down, but any order is valid on the wire. The
+// order of the deletions is the order an undo of the tracked update
+// restores them in. Bytes from yjs 13.6.33: client 271828182 sets m.a,
+// client 141421356 sets m.b, a delete-set-only update lists the lower
+// client first; the receiver (client 3141592653) applies it tracked and
+// undoes.
+func TestApply_DeleteSetInWireOrder(t *testing.T) {
+	const state = "0302cdcc83da0b00a8acd6b74300017d02a8d689cf810100017d0101d689cf8101002801016d0161017d0101acd6b743002801016d0162017d0202d689cf8101010001acd6b743010001"
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 3141592653})
+	m := ygo.NewMap(d, "m")
+	for _, u := range []string{"0101d689cf8101002801016d0161017d0100", "0101acd6b743002801016d0162017d0200"} {
+		b, _ := hex.DecodeString(u)
+		if err := ygo.ApplyUpdateWithOrigin(d, b, "setup"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	um := ygo.NewUndoManagerWithOptions(d, ygo.UndoManagerOptions{CaptureTimeout: -1, TrackedOrigins: map[any]struct{}{"tracked": {}}}, m)
+	b, _ := hex.DecodeString("0002acd6b743010001d689cf8101010001")
+	if err := ygo.ApplyUpdateWithOrigin(d, b, "tracked"); err != nil {
+		t.Fatal(err)
+	}
+	if !um.Undo() {
+		t.Fatal("Undo found nothing")
+	}
+	if got := hex.EncodeToString(ygo.EncodeStateAsUpdate(d)); got != state {
+		t.Errorf("state\n got  %s\n want %s", got, state)
+	}
+}

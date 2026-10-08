@@ -517,12 +517,12 @@ func (u *Update) Apply(txn *doc.TransactionMut) error {
 	fresh := NewPending()
 	fresh.foldUpdate(u, txn.Store())
 	fresh.integrateAll(txn)
-	fresh.applyDeletes(txn)
-	p.applyDeletes(txn)
+	fresh.applyDeletes(txn, true)
+	p.applyDeletes(txn, false)
 	queued := len(p.Blocks) > 0
 	p.absorb(fresh)
 	if queued && p.integrateAll(txn) > 0 {
-		p.applyDeletes(txn)
+		p.applyDeletes(txn, false)
 	}
 	if p.IsEmpty() {
 		txn.SetPendingState(nil)
