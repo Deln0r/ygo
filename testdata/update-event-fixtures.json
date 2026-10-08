@@ -16196,6 +16196,467 @@
       ]
     },
     {
+      "name": "undo-redone-copy-collected",
+      "description": "a deletion whose restored copy was later collected: yjs still counts undoing it as a change, so one undo does not go on to undo the step before",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m",
+          "origins": [
+            "a"
+          ]
+        },
+        {
+          "doc": 0,
+          "scope": "map:m",
+          "origins": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "map"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            }
+          ],
+          "stacks": [
+            null,
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "set",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "y",
+              "value": 1
+            },
+            {
+              "op": "set",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "z",
+              "value": 2
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "y": 1,
+                  "z": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            null,
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "y": 1,
+                  "z": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            null
+          ]
+        },
+        {
+          "manage": 1,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "y": 1,
+                  "z": 2
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "a",
+          "ops": [
+            {
+              "op": "set",
+              "path": "map:m",
+              "key": "w",
+              "value": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "y": 1,
+                  "z": 2
+                },
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "a",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "y"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "z": 2
+                },
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "b",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 1
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "z": 2
+                },
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 1
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "z": 2,
+                  "y": 1
+                },
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "b",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "y"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "z": 2
+                },
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 1
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "z": 2
+                },
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "w": 1
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ],
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d01700100",
+          "v2": "0000058d9987b4170000012705026d704100010101010001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0102cdcc83da0b012800cdcc83da0b000179017d012800cdcc83da0b00017a017d0200",
+          "v2": "000006cd9987b417010201000001280502797a41000100000241000102017d017d0200"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "a",
+          "v1": "0101cdcc83da0b032801016d0177017d0100",
+          "v2": "0000058d9987b4170000012805026d77410001010001010101037d0100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "a",
+          "v1": "0001cdcc83da0b010101",
+          "v2": "00000000000001000000000001cdcc83da0b010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "b",
+          "v1": "0001cdcc83da0b0200010201",
+          "v2": "00000000000001000000000001cdcc83da0b0200000100"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "<um:1>",
+          "v1": "0102cdcc83da0b04a7cdcc83da0b00012800cdcc83da0b04017a017d0200",
+          "v2": "000006cd9987b417010200080003a7002803017a010100010101010102047d0200"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "<um:1>",
+          "v1": "0101cdcc83da0b062800cdcc83da0b040179017d0100",
+          "v2": "000006cd9987b4170001080001280301790101000001010101067d0100"
+        },
+        {
+          "step": 9,
+          "doc": 0,
+          "origin": "b",
+          "v1": "0001cdcc83da0b010601",
+          "v2": "00000000000001000000000001cdcc83da0b010600"
+        },
+        {
+          "step": 11,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0001cdcc83da0b010402",
+          "v2": "00000000000001000000000001cdcc83da0b010401"
+        }
+      ]
+    },
+    {
       "name": "undo-fresh-update-before-pending",
       "description": "an update arrives while a block of one of its clients waits in the pending queue for it: yjs integrates the update's own blocks first and retries the queue after, so a key the update sets comes before the queued one in _map, and undo, walking keys in that order, leaves a concurrent write in place",
       "gc": true,

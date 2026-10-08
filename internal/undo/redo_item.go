@@ -47,7 +47,10 @@ func (um *UndoManager) deletedByAStack(id block.ID) bool {
 // item whose parent type was deleted is restored into the parent's live
 // copy. Returns the restored item, or nil when restoration is not
 // possible (a parent that cannot be restored, a conflicting later write
-// on the key, or Move and subdocument content).
+// on the key, or Move and subdocument content). For an item restored
+// before whose copy garbage collection has since removed, it returns the
+// item itself: yjs returns the collected struct, and the step counts.
+// Callers only test the result against nil.
 //
 // Caller holds the doc write lock via txn.
 func (um *UndoManager) redoItem(txn *doc.TransactionMut, item *block.Item, si *StackItem) *block.Item {
@@ -55,9 +58,16 @@ func (um *UndoManager) redoItem(txn *doc.TransactionMut, item *block.Item, si *S
 		return nil
 	}
 
-	// Already redone: follow the chain to the current live item.
+	// Already redone: the struct at the copy's ID, as yjs getItemCleanStart
+	// returns it, a collected run included.
 	if item.Redone != nil {
-		return txn.MaterializeCleanStart(*item.Redone)
+		if it := txn.MaterializeCleanStart(*item.Redone); it != nil {
+			return it
+		}
+		if _, ok := txn.Store().GetBlock(*item.Redone); ok {
+			return item
+		}
+		return nil
 	}
 
 	if item.Parent.Kind != block.ParentBranch || item.Parent.Branch == nil {
