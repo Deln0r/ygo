@@ -169,3 +169,17 @@ func TestApply_DeleteSetClientListedTwice(t *testing.T) {
 		t.Errorf("array %s, want [20]", got)
 	}
 }
+
+// A V1 delete set entry with no ranges leaves no client behind, as yjs
+// readDeleteSet skips it: the snapshot bytes 010500010103 (client 5 with
+// no ranges, state vector {1:3}) re-encode as yjs's 00010103.
+func TestDecodeSnapshot_EmptyRangeList(t *testing.T) {
+	b, _ := hex.DecodeString("010500010103")
+	snap, err := ygo.DecodeSnapshot(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(ygo.EncodeSnapshot(snap)); got != "00010103" {
+		t.Errorf("re-encoded %s, want yjs's 00010103", got)
+	}
+}

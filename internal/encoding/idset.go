@@ -220,6 +220,9 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 			}
 			ranges[j] = Range{Start: start, Length: length}
 		}
+		if len(ranges) == 0 {
+			continue // yjs readDeleteSet keeps no entry for a client with no ranges
+		}
 		if _, known := s.clients[clientID]; known {
 			// A client written twice keeps both entries' ranges, as yjs
 			// readDeleteSet and readAndApplyDeleteSet read every entry.
