@@ -14,6 +14,166 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact** - Deleting a nested shared type now deletes everything
+inside it in the same transaction, as yjs does: the transaction's update
+carries those deletions, an UndoManager can undo it, and the deleted types
+report no events of their own. `OnSubdocs` fires at the end of the commit,
+after garbage collection and the update handlers, where it used to fire among
+the after-transaction handlers. `Array.Push` appends after the last item of the
+array's list, a deleted one included, as yjs `push` does. `MergeUpdates` keeps
+the content of deleted items, so its output can be larger.
+
+### Fixed
+
+- **Deleting a nested shared type could not be undone.** Delete a nested map
+  that holds keys and undo: yjs brings the map back with its keys, ygo restored
+  nothing. Deleting a type now deletes the items inside it, as yjs
+  `ContentType.delete` does, and undo restores the type as a new copy with its
+  content restored into it, at any depth, also when the parent came from
+  another client. A subdocument reference inside it is still not restored, as
+  before on its own; yjs restores a new reference with the same GUID. The rest
+  of yjs's model for nested types came with it:
+  - A manager records a transaction only when a type in its scope that still
+    exists changed (yjs `changedParentTypes`). A manager scoped to a nested
+    type used to record that type's deletion through its parent and drop its
+    redo history; yjs records nothing.
+  - What a manager keeps from garbage collection keeps its ancestors too, so a
+    tracked delete inside a type followed by an untracked delete of the type no
+    longer collects the subtree; and steps dropped by `Clear` or by a fresh
+    edit release what they kept, which nothing did before, exactly their own
+    clocks, cutting a tombstone merged with another step's. A fresh edit
+    releases before it keeps its own deletions, as yjs does, so a parent both
+    steps keep stays kept. `Clear` releases before the next transaction body,
+    handler or GC can keep or collect an item, and keeps the remaining steps
+    again after releasing, so a step captured after `Clear`, or while it ran on
+    another goroutine, or another manager's undo after it, keeps what it needs,
+    a shared parent included.
+  - A restored item goes into its parent's live copy even when that copy was
+    deleted again, and the step then counts, as in yjs; the manager no longer
+    goes on to undo the step before it. Undoing a deletion counts too when the
+    restored copy has been garbage-collected since, as in yjs.
+  - Undo checks the scope on the restored copy it would delete, so a manager no
+    longer deletes content that another manager restored outside its scope.
+  - Within a step, restoring comes before deleting, children before parents,
+    and restoring walks the clients in the order they first deleted in the
+    captured transactions, deletions outside the manager's scope included, as
+    yjs walks the delete set it keeps. Walking clients by ID could restore an
+    older value over a concurrent write the undo had to leave alone. What a
+    step inserted is collected client by client in the order the clients joined
+    the document, per transaction, and across grouped transactions in the first
+    one's order followed by clients new in later ones, as yjs merges its
+    insertion sets.
+  - An applied update integrates its own blocks first, clients from the highest
+    ID down, then applies its delete set client by client in the order it
+    writes them, then what waits in the pending queue, the order of yjs
+    `readUpdateV2`, so a tracked remote update's deletions, and the order map
+    keys are first set, follow yjs too.
+  - Deleting a map deletes its keys in the order each was first set, as yjs
+    walks `_map`, and so does `Map.Clear`, which went by Go's random map order.
+    The order decides which key undo restores first, and the clocks the
+    restored items get.
+  - A collected type drops its references to its old items, as yjs
+    `ContentType.gc` does: a wrapper still held reads empty.
+
+- **An edit right after an undo joined the step before the undo**, so the next
+  undo reverted both. An undo now ends the capture group, as yjs
+  `stopCapturing` does.
+
+- **`Undo` and `Redo` took a step off the stack before they had the document
+  lock.** A commit on another goroutine meanwhile counted as the undo's own
+  step (a later `Redo` then deleted that edit) or joined the step below the one
+  undone. They now take their steps inside the transaction that replays them,
+  all in one as yjs `popStackItem` does, so such a commit lands wholly before
+  the undo or wholly after it.
+
+- **A map key's winner could be lost when its item was merged or split.** The
+  commit-time merge that folds a key's winner into the item to its left left
+  the map pointing at the absorbed item, so a later write on the key resolved
+  against an item no longer in the store and the replicas diverged for good; a
+  split of the winner left the map on the left piece, so the next local `Set`
+  lost to the key's history and was deleted at once. The map now follows the
+  merge and the split, as yjs `tryToMergeWithLefts` and `splitItem` do.
+
+- **The commit merged blocks in another order than yjs.** It merged this
+  transaction's new blocks before the after-transaction handlers and GC, and
+  never merged back the pieces of the items it split. It now collects first,
+  then merges the new blocks, then the split pieces (yjs `_mergeStructs`).
+  Before, a deleted item could merge into a kept neighbour and keep its content
+  for good, and the pieces of a split item stayed apart, so the state and
+  update bytes differed from yjs after a remote insert inside an item, and an
+  undo that cut a merged tombstone made a later undo restore it as two copies.
+
+- **A deleted item that a later integration in the same transaction split kept
+  its content and was missing from the observer delta.** A block waiting in the
+  pending queue split a tombstone the same update had just made, and the piece
+  it cut off did not count as deleted: GC kept its content, and a text delta
+  left its deletion out. A transaction's deletions now count by clock range, as
+  yjs tests its delete set.
+
+- **Undo restored a run of kept tombstones as several structs, and undoing an
+  insertion could delete less than yjs.** Items an UndoManager keeps did not
+  merge, so text typed right after a restored copy stayed apart from it, and
+  undoing the original insertion left that text. Kept items now merge as yjs
+  `mergeWith` merges them, and undo cuts the items it restores at the step's
+  range ends.
+
+- **After an undo or an applied update deleted array elements, the next insert
+  by index could land in the wrong place**: the search markers kept the old
+  indices. They are reset after every applied update and every undo or redo
+  step, as yjs resets them. An insert by index where a marker sits now goes
+  right after the previous live element, ahead of the tombstones before the
+  marker, as yjs puts it; it went after them.
+
+- **`Array.Push` put the new element before trailing tombstones.** yjs appends
+  after the last item of the list, deleted or not, so undoing the deletion of
+  the last element brings it back before the pushed one; ygo brought it back
+  after.
+
+- **A V1 delete set that listed a client twice lost the first entry's ranges**,
+  in `ApplyUpdate`, `MergeUpdates` and snapshots; both now apply, as in yjs. An
+  entry with no ranges no longer leaves an empty client behind (yjs skips it),
+  so such a snapshot re-encodes and compares as yjs's.
+
+- **`MergeUpdates` dropped the content of deleted items**: it merged through a
+  document with GC on. yjs `mergeUpdates` keeps it, and a receiver with GC off
+  (version history, snapshots) needs it. The same applies to `MergeUpdatesV2`
+  and the persistence compaction.
+
+- **`OnSubdocs` listed the subdocuments an update added in random order** (Go
+  map order). They come by client, highest first, the order an update
+  integrates them in when nothing waits in the queue, as in yjs.
+
+### Changed
+
+- **`OnSubdocs` fires at the end of the commit**, after garbage collection and
+  the `OnUpdate` / `OnUpdateV2` handlers, where yjs emits `subdocs`. It used to
+  fire among the after-transaction handlers, before GC and before the update
+  handlers.
+
+- **The commit lifecycle follows yjs `cleanupTransactions`**: observers,
+  after-transaction handlers, GC, then merging the new blocks and the split
+  pieces, then the update and subdocument handlers. An after-transaction
+  handler now sees the transaction's blocks before they merge.
+
+### Infrastructure
+
+- Update-event fixtures grew from 34 to 76 scenarios, 43 of them with an
+  UndoManager, nested types above all, recording each undo / redo result, each
+  manager's stack state and every document's content after every step, with
+  several managers and origins, a parent from one client holding keys from
+  another, an XML element, restore order around concurrent writes, tracked
+  remote updates, an update arriving while the pending queue waits for it,
+  `Clear` before a capture, and array inserts after an undo or a remote delete.
+  Their pinned divergences went from 5 to 2: four resolved (the three about
+  deleting nested types, and the kept-tombstone merge), and one new, the order
+  in which an update integrates a block that depends on another client's block
+  in the same update (yjs follows the dependency at once, ygo in the next
+  pass), which can change the clocks undo gives restored items. The observer
+  fixtures have no pinned divergence left, so they now count in the README
+  totals (199 to 218).
+
 ## [1.23.0] - 2026-10-08
 
 **Upgrade impact** - ygo now needs Go 1.26. modernc.org/sqlite 1.60, which

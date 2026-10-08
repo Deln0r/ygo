@@ -206,12 +206,12 @@ var UpdateEncoder func(t *TransactionMut, v2 bool) []byte
 // doc.on('update') event: structs created from the transaction's start
 // state on (the first of each client cut at that clock) and the delete
 // set of what the transaction deleted, byte for byte as yjs writes them
-// apart from three pinned cases (docs/tech-debt.md, "Remaining
+// apart from two pinned cases (docs/tech-debt.md, "Remaining
 // update-event divergences": yjs's extra cleanup update after
-// concurrent formatting is not emitted, undo restores kept tombstones
-// as separate structs, and an update whose block depends on another
-// client's block in it integrates in another order, which can change
-// the clocks an undo gives restored items) and the Any values ygo writes
+// concurrent formatting is not emitted, and an update whose block
+// depends on another client's block in it integrates in another order,
+// which can change the clocks an undo gives restored items) and the Any
+// values ygo writes
 // differently (objects with several keys, written with sorted keys,
 // and whole-number float64s).
 // Local edits, applied updates and UndoManager steps all emit one; a

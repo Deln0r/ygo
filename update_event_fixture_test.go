@@ -166,7 +166,7 @@ var knownUpdateEventDivergences = map[string]struct {
 		),
 	},
 	"undo-keys-from-dependent-blocks": {
-		reason: "yjs integrateStructs follows a block's missing dependency into the client of the same update that has it, integrating just that block first; Drain skips the block and takes it in the next pass, so a middle client's key is first set before the dependent one and undo restores m before z, where yjs restores z first. The map's content is the same (docs/tech-debt.md, \"An update's blocks integrate in passes\")",
+		reason: "yjs integrateStructs follows a block's missing dependency into the client of the same update that has it, integrating just that block first; Pending.integrateAll skips the block and takes it in the next pass, so a middle client's key is first set before the dependent one and undo restores m before z, where yjs restores z first. The map's content is the same (docs/tech-debt.md, \"An update's blocks integrate in passes\")",
 		events: pinnedEvents(
 			"0|0|setup|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
 			"1|1|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",

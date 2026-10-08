@@ -4,13 +4,9 @@
 
 ## Block layer
 
-### Item.Splice does not rewrite parent.Branch.Map for map-key tail items
+### Item.Splice does not rewrite parent.Branch.Map for map-key tail items (resolved)
 
-- **Where:** `internal/block/item.go` `Item.Splice`.
-- **What:** when the item being spliced is the most recent writer on a map-like parent (`Right == nil && ParentSub != nil`), yrs additionally rewrites `parent.Branch.Map[*ParentSub]` from the original item to the new right half (`block.rs:516-560`). We do not, because `Branch` is a stub until the types layer lands.
-- **Impact today:** none — no code path queries `Branch.Map` yet.
-- **Impact when types layer lands:** Map.Get on a map-key whose tail item was spliced would return the stale (left) half instead of the live (right) half. Map convergence relies on this map-slot pointer being current.
-- **When to address:** when the types layer ships `Branch.Map`. Add the rewrite to `Item.Splice` (or move the responsibility to `Store.SplitBlock` if cleaner) and add a regression test.
+- **Resolved by:** `Item.Splice` makes the right half its key's winner when the split item was (yjs `splitItem`), and `Item.TrySquash` points the map at the merged item when it absorbs the winner (yjs `tryToMergeWithLefts`). Both had been left from the time `Branch` was a stub, and both broke convergence: a merged winner left the map on an item no longer in the store, so replicas diverged for good; a split winner made the next local `Set` lose to the key's history (`TestMap_WinnerAfterMerge`, `TestMap_WinnerAfterSplit`, yjs bytes).
 
 ### Item.Repair pass not implemented (partially mitigated)
 
@@ -137,17 +133,70 @@
 - **Was:** `EncodeDiff` / `EncodeDiffV2` dropped cells the remote fully knew but wrote the boundary cell whole. Marked low priority in May; commit-time squash (June) then merged a writer's appends into one growing cell, so every "incremental" diff carried the writer's whole history: 27 bytes growing to 1720 over 200 appends, measured by a third-party evaluation that chose the other Go port for it.
 - **Resolved by:** `writeClientsStructs` (`internal/encoding/update.go`, V2 twin in `update_v2.go`), the yjs `writeStructs` algorithm: per client the header clock is `max(remoteClock, first cell start)`, found with `FindPivot`, and the first cell is written from that offset (`encodeCellFrom` / `itemFrom`: a copy whose origin is the clock before the cut and whose content drops the prefix; a GC run shortened by the offset). `Doc.OnUpdate` / `OnUpdateV2` reuse it from the transaction's start state. Byte-identical to `Y.encodeStateAsUpdate(doc, sv)` / V2 for every state vector on a grid over each scenario's clocks, including inside a surrogate pair and inside a collected run (`testdata/update-event-fixtures.json`).
 
-### Remaining update-event divergences (pinned, 2026-10-01)
+### Remaining update-event divergences (pinned)
 
 - **Where:** `knownUpdateEventDivergences` in `update_event_fixture_test.go`.
-- **What:** (1) `TransactionMut.Delete` does not delete the items inside a deleted nested type (yjs `ContentType.delete` does), so that transaction's delete set lists only the type's own item; the same gap means deleting a nested type cannot be undone (`redoItem` refuses a `KindType` item and a parent whose item is deleted) and, with GC off, the children stay live in the store. (2) No `cleanupYTextAfterTransaction`: after a remote update that duplicates a format, yjs emits a second transaction (origin nil) deleting the redundant marker; ygo does not. (3) `TrySquash` refuses kept items, so undo restores a run of kept tombstones as several structs where yjs (`Item.mergeWith`, which carries `keep`) restores one. Allowing the merge needs the restore pass to cut at the range ends first; without that it restores whole merged items and four undo fixtures fail (measured).
-- **When to address:** (1) is the next undo item: recursive delete, `keepItem` up the parent chain, `redoItem` for types and through a redone parent. (2) belongs with the rich-text insert work. (3) after (1).
+- **What:** (1) No `cleanupYTextAfterTransaction`: after a remote update that duplicates a format, yjs emits a second transaction (origin nil) deleting the redundant marker; ygo does not. (2) `undo-keys-from-dependent-blocks`: an update's blocks integrate in passes (entry "An update's blocks integrate in passes, not by following dependencies" below).
+- **Resolved since:** deleting a nested type now deletes the items inside it (`deleteTypeContent`, yjs `ContentType.delete`) and undo restores it (October 2026, three pins removed). With it came the rest of yjs's model for nested types: the UndoManager captures only when a type in scope that still exists changed (yjs `changedParentTypes`), keeps the ancestors of what it keeps and releases them when steps are dropped, before it keeps a new step's deletions and, for `Clear`, before the next transaction body, handler or GC can keep or collect an item (`keepItem`, `clearUndoManagerStackItem`, `doc.QueueUnderLock`), restores into a parent's live copy and rechecks scope there (`redoItem`, `popStackItem`), restores before it deletes and in the order clients first deleted, counting the whole transaction as yjs does, with remote updates applied blocks first and clients from the highest ID down as yjs reads them, deletes a map's keys in the order they were first set (`Branch.MapOrder`, yjs `_map`), ends the capture group on undo (`stopCapturing`), and a collected type drops its references to its old items (`ContentType.gc`). Later in October the kept-tombstone pin went too: kept items merge as yjs `Item.mergeWith` merges them (carrying `keep`), and undo cuts the items it restores at the step's range ends (yjs `iterateStructs`), so a merged tombstone is never restored beyond what a step deleted. The non-merge had not only cost structs: text typed right after a restored copy stayed apart from it, and undoing the original insertion left that text where yjs deletes it (scenarios `undo-insertion-merged-into-restored-copy`, `undo-array-restored-copy-merge`).
+- **When to address:** (1) belongs with the rich-text insert work. (2) see its entry.
 
-### Commit-time squash runs before after-transaction handlers
+### An update's blocks integrate in passes, not by following dependencies
 
-- **Where:** `TransactionMut.Commit` (`internal/doc/transaction.go`): observers, then `squashNewBlocks`, then after-transaction handlers, then GC. yjs merges after GC.
-- **What:** a handler that marks only some of a transaction's tombstones kept sees them already merged. Insert and delete "a", then insert and delete "b" in one transaction, and keep only the second: ygo keeps the merged "ab", yjs keeps "b" and collects "a", so the stores and their encodings differ. The bundled UndoManager keeps every in-scope deletion of a transaction and never hits this; it takes a handler that calls `Item.SetKeep` itself.
-- **When to address:** together with the kept-tombstone merge above; moving the squash changes what the UndoManager's capture sees, which the 1.22.0 undo fixes rely on.
+- **Where:** `Pending.integrateAll` (`internal/encoding/pending.go`).
+- **What:** yjs `integrateStructs` takes clients from the highest ID down and, when a block depends on a block of another client in the same update, follows into that client at once and integrates just enough of it. `integrateAll` takes clients in the same order, but skips such a block and picks it up in the next pass. The final document is the same; the order of the transaction's deletions and of the map keys it sets first can differ, and with it the order an UndoManager restores a tracked update's deletions in (and so the clocks the restored items get) or the order deleting such a map walks its keys in. It takes one update in which a block depends on a block of another client in that update; the pinned scenario `undo-keys-from-dependent-blocks` shows it with three writers, where undo restores a middle client's key before the dependent one.
+- **When to address:** if a scenario needs it; porting the dependency stack means porting yjs's pending handling with it.
+
+### Undo does not restore subdocument references
+
+- **Where:** `redoItem` (`internal/undo/redo_item.go`), `Content.CopyableForUndo`.
+- **What:** undo skips `ContentDoc` (and `ContentMove`) items. yjs `ContentDoc.copy` creates a new document with the same GUID and options, so undoing the deletion of a subdocument, or of a map holding one, brings the reference back; ygo restores the map without it.
+- **When to address:** with subdocument lifecycle work: a restored reference has to register as a new subdocument and report through `OnSubdocs`.
+
+### UndoManager ignores IgnoreRemoteMapChanges
+
+- **Where:** `undo.Options.IgnoreRemoteMapChanges` / `ygo.UndoManagerOptions`.
+- **What:** the option is accepted and stored but not used. yjs `ignoreRemoteMapChanges` lets undo restore a map key over a later write from another client (redoItem takes the key's current winner as left instead of giving up); ygo gives up as with the option off, so `Undo` returns false and the remote value stays.
+- **When to address:** with the next UndoManager options work; the restore path for map keys is `redoMapItem`.
+
+### GC of a deleted type merges its children's runs further than yjs
+
+- **Where:** `TransactionMut.gcDeleted` merge pass (`SquashFrom` from the smallest touched clock).
+- **What:** yjs merges only around the transaction's delete set and its `_mergeStructs`, so collecting a type whose children were deleted (and released) earlier can leave several adjacent GC runs; ygo collapses them into one. Peers converge on the same content; the V1/V2 state bytes differ (one GC struct of length 4 where yjs writes 2, 1, 1).
+- **When to address:** if byte-exact state encoding after such histories is needed.
+
+### Pending queue corner cases
+
+- **Where:** `Update.Apply`, `Pending` (`internal/encoding/pending.go`).
+- **What:** (1) yjs retries its pending structs only when an update reaches a clock its `missing` vector names; ygo retries whenever something is queued, so a queued block whose dependency arrived, but below the recorded missing clock, integrates one update earlier than in yjs. (2) When the queue holds two encodings of the same clocks (a live item, then the same clocks as ContentDeleted / GC from a later diff), yjs's merged pending update keeps the later encoding and ygo the first; the delete set then leaves the same document, but with GC off ygo keeps a deleted type and its child where yjs has ContentDeleted and GC, and the update event's delete set covers one more clock.
+- **When to address:** if a sync scenario needs byte-exact pending behaviour.
+
+### Subdocument lifecycle events differ from yjs
+
+- **Where:** `Doc.Load`, `TransactionMut.trackSubdocs`, `Doc.OnSubdocs`.
+- **What:** (1) `Load` on a subdocument only sets the flag; yjs `load()` opens a transaction on the parent that reports the subdocument as loaded, so ygo never reports it in `Loaded`. (2) A locally added subdocument is not reported as loaded (a new yjs `Y.Doc` has `shouldLoad` true), and an autoLoad subdocument added and deleted in one transaction reports nothing where yjs reports it loaded. (3) A subdocument deleted and re-added with the same GUID in one update drops out of `Subdocs()` (the added pass registers it, the removed pass for the old reference unregisters the same GUID); `GetDoc` still works.
+- **When to address:** with subdocument provider work; (1) needs a parent transaction from `Load`, which must not be called with the parent's lock held.
+
+### Commit-time squash runs before after-transaction handlers (resolved)
+
+- **Resolved by:** `TransactionMut.Commit` now runs in yjs `cleanupTransactions` order: observers, after-transaction handlers, GC (`gcDeleted`), then the merge of the transaction's new blocks (`squashNewBlocks`) and of the pieces of items it split (`mergeSplits`, yjs `_mergeStructs`, from `BlockStore.TakeSplits`). The old order let a handler see merged tombstones and, once kept items could merge, let a deleted item merge into a kept neighbour before GC and keep its content (`TestCommit_CollectsBeforeMergingIntoKept`); the missing re-merge left split pieces apart, so state bytes differed from yjs after a remote insert inside an item (`TestCommit_RemergesSplitPieces`).
+
+### Undo cuts structs only at the ranges in its scope
+
+- **Where:** `applyStackItem`, `setKeep` (`internal/undo/undo.go`).
+- **What:** yjs walks the whole delete set and insertion set it captured, ranges outside the manager's scope included, and so cuts merged structs at those ranges too (the restored pieces carry `redone` and stay apart). ygo records and cuts only the ranges in scope, so a tombstone merged across such a range stays one struct: the content is the same, the struct layout and its encoding differ.
+- **When to address:** if byte-exact layouts after multi-scope undo are needed; it needs the out-of-scope ranges kept on the step.
+
+### Rich-text local inserts at a format boundary
+
+- **Where:** `Text.Insert` / `InsertWithAttributes` (`internal/types/text.go`, `text_format.go`).
+- **What:** plain text typed right before a formatted run goes after the run's format marker and takes its format, where yjs puts it before the marker; an insert with explicit attributes inside formatted text keeps the surrounding attributes, where yjs closes them around it (bold=null before, bold=true after).
+- **When to address:** with the rich-text insert semantics work (yjs `insertText`, `findNextPosition`, `insertNegatedAttributes`).
+
+### Delete-set order inside a client, and subdocument order after a queue retry
+
+- **Where:** `Pending.applyDeletes`, `IdSet`, `trackSubdocs`.
+- **What:** (1) an update's delete set applies client by client in the order written, but each client's ranges in clock order and a client written twice merged into its first position; yjs applies ranges exactly as written, which can change the order observers fire in. (2) `OnSubdocs` lists added subdocuments by client, highest first; when blocks waiting in the queue integrate in the same transaction after the update's own, yjs lists them in that integration order.
+- **When to address:** if a consumer depends on those orders.
 
 ### State encodings ignore the pending buffer
 
@@ -360,7 +409,7 @@
 ### TransactionMut.Commit lifecycle (resolved)
 
 - **Was:** Commit only released the write lock; squash, GC, observers, subdocument events and update emission were all missing.
-- **Resolved by:** each step as its layer landed: commit-time squash with apply-side partial-overlap slicing (June 2026), GC of deleted content and nested subtrees, observers ordered as yjs fires them (1.21.0), subdocument lifecycle events, and per-transaction update events (`Doc.OnUpdate` / `OnUpdateV2`, 1.22.0). The order is documented on `TransactionMut.Commit`; the one difference from yjs's order is the entry "Commit-time squash runs before after-transaction handlers" above.
+- **Resolved by:** each step as its layer landed: commit-time squash with apply-side partial-overlap slicing (June 2026), GC of deleted content and nested subtrees, observers ordered as yjs fires them (1.21.0), subdocument lifecycle events, and per-transaction update events (`Doc.OnUpdate` / `OnUpdateV2`, 1.22.0). The order is documented on `TransactionMut.Commit` and follows yjs `cleanupTransactions` since October 2026 (entry "Commit-time squash runs before after-transaction handlers").
 
 ### GC of deleted nested-type subtrees (resolved)
 

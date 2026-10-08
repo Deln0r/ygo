@@ -30,10 +30,12 @@ type StackItem struct {
 	delOrder []uint64
 
 	// insOrder lists the clients that created anything in the captured
-	// transactions, in or out of scope, in the order they first joined the
-	// document's store (yjs builds insertions from afterState, which
-	// iterates store.clients), across grouped transactions. Undo collects
-	// inserted items in this order and deletes them in reverse.
+	// transactions, in or out of scope: per transaction in the order they
+	// first joined the document's store (yjs builds insertions from
+	// afterState, which iterates store.clients), and across grouped
+	// transactions the first one's clients followed by clients new in
+	// later ones (yjs mergeDeleteSets). Undo collects inserted items in
+	// this order and deletes them in reverse.
 	insOrder []uint64
 }
 
