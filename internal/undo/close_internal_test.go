@@ -162,3 +162,32 @@ func TestClear_DuringCaptureRekeepsAncestors(t *testing.T) {
 		t.Errorf("state\n got  %s\n want %s", got, want)
 	}
 }
+
+// TestUndo_ConcurrentCommitIsAnOrdinaryEdit: Undo sets its flag and then
+// waits for the doc lock; a commit on another goroutine that holds the
+// lock runs the handler meanwhile. That commit is an ordinary tracked edit
+// (it goes on the undo stack and drops the redo history), not the undo's
+// own step, as in either serial order of yjs.
+func TestUndo_ConcurrentCommitIsAnOrdinaryEdit(t *testing.T) {
+	d := doc.NewDoc()
+	m := types.NewMap(d.Branch("m"))
+	um := NewUndoManager(d, []*block.Branch{m.Branch()}, Options{CaptureTimeout: -1})
+	txn := d.WriteTxn()
+	m.Set(txn, "a", int64(1))
+	txn.Commit()
+
+	// The state Undo is in while it waits: step popped, flag set.
+	um.mu.Lock()
+	um.undoing = true
+	um.mu.Unlock()
+	txn = d.WriteTxn()
+	m.Set(txn, "b", int64(2))
+	txn.Commit()
+	um.mu.Lock()
+	um.undoing = false
+	undo, redo := len(um.undoStack), len(um.redoStack)
+	um.mu.Unlock()
+	if undo != 2 || redo != 0 {
+		t.Fatalf("stacks after a concurrent edit: undo %d redo %d, want 2 and 0", undo, redo)
+	}
+}
