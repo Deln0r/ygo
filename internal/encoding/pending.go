@@ -55,10 +55,11 @@ func sliceWireItemRight(it *block.Item, offset uint64) error {
 // (`Option<DeleteSet>`). We collapse both into a single Pending
 // struct attached to the Doc via the opaque `pendingState any` slot.
 //
-// Lifecycle: ApplyUpdate folds the incoming update's blocks/DS into
-// Pending, then runs Pending.Drain in a loop until no further
-// progress is made. Items that successfully integrate are removed
-// from Pending; the leftover stays for the next ApplyUpdate call.
+// Lifecycle: Update.Apply integrates the incoming update's blocks and
+// delete set, then the queued delete set, then, when something was
+// queued, the queued blocks with the update's leftovers (the order of
+// yjs readUpdateV2). Items that integrate leave the queue; the leftover
+// stays for the next ApplyUpdate call.
 //
 // Concurrency: Pending is mutated only under the doc's write lock
 // (acquired by the surrounding TransactionMut). No internal mutex.
@@ -70,9 +71,9 @@ type Pending struct {
 	Blocks map[uint64][]Block
 
 	// DeleteSet stores ranges whose target IDs are not yet present
-	// in the local store. yrs calls this `pending_ds`. Each Drain
-	// pass re-scans these ranges; those whose target now exists
-	// get applied.
+	// in the local store. yrs calls this `pending_ds`. Each Apply
+	// re-scans these ranges; those whose target now exists get
+	// applied.
 	DeleteSet *IdSet
 }
 
@@ -250,8 +251,8 @@ func blockStartClock(b Block) uint64 {
 
 // itemMissingDep reports whether any of an Item's wire-level
 // dependency references point to a clock the local store has not
-// seen yet. Used both during the first Apply pass and during
-// Drain to decide if an item is still stuck.
+// seen yet. Used by every integration pass to decide if an item is
+// still stuck.
 func itemMissingDep(bs *store.BlockStore, it *block.Item) bool {
 	if it == nil {
 		return false
@@ -321,14 +322,14 @@ func (p *Pending) foldUpdate(u *Update, bs *store.BlockStore) {
 				// Keep unless the item is fully known. A partially
 				// known item (squashed peer block overlapping the
 				// state-vector boundary) is queued and sliced at
-				// Drain time, not dropped on a first-clock check.
+				// integration time, not dropped on a first-clock check.
 				if b.Item != nil && itemFullyKnown(bs, b.Item) {
 					continue
 				}
 				p.addBlock(client, b)
 			case WireBlockGC, WireBlockSkip:
 				// Keep unless fully known; a run whose start the store
-				// has is trimmed at Drain time, like an item.
+				// has is trimmed at integration time, like an item.
 				if b.ID.Clock+b.Len <= bs.GetClock(client) {
 					continue
 				}
@@ -345,28 +346,53 @@ func (p *Pending) foldUpdate(u *Update, bs *store.BlockStore) {
 	}
 }
 
-// Drain attempts to integrate every queued block whose dependencies
-// are now satisfied. Returns the number of blocks that successfully
-// integrated this pass. Apply callers loop on Drain until it
-// returns 0, which means the queue has reached its fixed point for
-// this transaction.
-//
-// The order of work within a pass: iterate clients in ascending
-// clientID, items within a client in clock-ascending order. A block
-// with a still-missing dep is skipped (left in the queue) — the
-// causal-prefix property of yrs updates means a later clock for
-// the same client may yet integrate (depends on a different chain),
-// so we do not short-circuit on first failure within a client.
-func (p *Pending) Drain(txn *doc.TransactionMut) int {
+// integrateAll runs block passes until one integrates nothing and returns
+// the number of blocks integrated. Passes take clients from the highest ID
+// down and a client's blocks in clock order, as yjs integrateStructs does,
+// because the order of a transaction's deletions decides the order an
+// UndoManager restores them in, and the order map keys are first set is
+// the order deleting their map walks them (Branch.MapOrder). yjs follows a
+// block's missing dependency into the client of the same update that has
+// it at once; a pass here skips the block and the next pass takes it, so
+// the order differs when an update holds a block that depends on another
+// of its clients' blocks (docs/tech-debt.md). A block with a still-missing
+// dep does not stop its client: a later clock may depend on another chain.
+func (p *Pending) integrateAll(txn *doc.TransactionMut) int {
+	total := 0
+	for {
+		n := p.integrateBlocks(txn)
+		total += n
+		if n == 0 {
+			return total
+		}
+	}
+}
+
+// absorb moves q's blocks and delete-set ranges into p.
+func (p *Pending) absorb(q *Pending) {
+	for client, list := range q.Blocks {
+		for _, b := range list {
+			p.addBlock(client, b)
+		}
+	}
+	q.DeleteSet.Iterate(func(client uint64, ranges []Range) {
+		for _, r := range ranges {
+			p.DeleteSet.Insert(client, r.Start, r.Length)
+		}
+	})
+}
+
+// integrateBlocks is one pass over the queued blocks, clients from the
+// highest ID down. Returns the number of blocks integrated.
+func (p *Pending) integrateBlocks(txn *doc.TransactionMut) int {
 	bs := txn.Store()
 	progress := 0
 
-	// Block integration pass.
 	clients := make([]uint64, 0, len(p.Blocks))
 	for c := range p.Blocks {
 		clients = append(clients, c)
 	}
-	sort.Slice(clients, func(i, j int) bool { return clients[i] < clients[j] })
+	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
 
 	for _, c := range clients {
 		list := p.Blocks[c]
@@ -457,27 +483,38 @@ func (p *Pending) Drain(txn *doc.TransactionMut) int {
 			p.Blocks[c] = remaining
 		}
 	}
-
-	// Delete-set pass: rebuild a per-client remaining list whose
-	// ranges still point at unseen IDs. Each accepted range goes
-	// through applyDeleteRange which splits items at the range
-	// boundaries before tombstoning, so a wire delete-set that
-	// covers a SUBSET of an existing item's clocks tombstones only
-	// the matching middle slice instead of the whole item.
-	if p.DeleteSet != nil {
-		remaining := NewIdSet()
-		p.DeleteSet.Iterate(func(client uint64, ranges []Range) {
-			for _, r := range ranges {
-				deleted, leftover := applyDeleteRange(txn, client, r.Start, r.End())
-				progress += deleted
-				if leftover.Length > 0 {
-					remaining.Insert(client, leftover.Start, leftover.Length)
-				}
-			}
-		})
-		p.DeleteSet = remaining
-	}
 	return progress
+}
+
+// applyDeletes applies the queued delete set, clients from the highest
+// ID down, and keeps the ranges that still point at unseen IDs. Each
+// range goes through applyDeleteRange, which splits items at the range
+// boundaries before tombstoning, so a wire delete-set that covers a
+// SUBSET of an existing item's clocks tombstones only the matching
+// middle slice instead of the whole item. Returns the number of items
+// deleted.
+func (p *Pending) applyDeletes(txn *doc.TransactionMut) int {
+	if p.DeleteSet == nil {
+		return 0
+	}
+	deleted := 0
+	remaining := NewIdSet()
+	clients := make([]uint64, 0, p.DeleteSet.ClientCount())
+	p.DeleteSet.Iterate(func(client uint64, _ []Range) {
+		clients = append(clients, client)
+	})
+	for i := len(clients) - 1; i >= 0; i-- {
+		client := clients[i]
+		for _, r := range p.DeleteSet.ClientRanges(client) {
+			n, leftover := applyDeleteRange(txn, client, r.Start, r.End())
+			deleted += n
+			if leftover.Length > 0 {
+				remaining.Insert(client, leftover.Start, leftover.Length)
+			}
+		}
+	}
+	p.DeleteSet = remaining
+	return deleted
 }
 
 // applyDeleteRange tombstones every live Item covering any clock

@@ -115,6 +115,10 @@ func (s *IdSet) Iterate(fn func(client uint64, ranges []Range)) {
 	}
 }
 
+// ClientRanges returns client's ranges, sorted and merged. The slice
+// aliases internal state and must not be retained or mutated.
+func (s *IdSet) ClientRanges(client uint64) []Range { return s.clients[client] }
+
 // ClientCount returns the number of distinct clients with at least
 // one range in the set.
 func (s *IdSet) ClientCount() int { return len(s.clients) }

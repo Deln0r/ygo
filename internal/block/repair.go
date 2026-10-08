@@ -63,8 +63,8 @@ func Repair(it *Item, ctx IntegrateContext) error {
 		// Nested-type parent: look up the parent Item and pull its
 		// embedded Branch out of the KindType Content. The parent
 		// Item must already be in the store; missing parents land
-		// in encoding.Pending which retries Repair on every Drain
-		// pass (per docs/yrs-port-notes/nested-types.md §4 and
+		// in encoding.Pending which retries Repair on every
+		// integration pass (per docs/yrs-port-notes/nested-types.md §4 and
 		// gotcha 8). itemMissingDep over in encoding/pending.go
 		// already covers ParentID misses.
 		//

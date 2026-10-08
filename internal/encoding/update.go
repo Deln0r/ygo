@@ -508,11 +508,21 @@ func decodeID(buf []byte) (block.ID, []byte, error) {
 // pending-buffer retry loop yrs runs in `Store::try_integrate_pending`.
 func (u *Update) Apply(txn *doc.TransactionMut) error {
 	p := getOrCreatePending(txn)
-	p.foldUpdate(u, txn.Store())
-	for p.Drain(txn) > 0 {
-		// Loop until fixed point. Drain returns 0 when no further
-		// queued block could integrate this pass — the queue either
-		// drained empty or is genuinely stuck on missing deps.
+	// The order of yjs readUpdateV2: the update's own blocks first, then
+	// its delete set, then the delete set queued earlier, then, when
+	// something was queued, the queued blocks together with what the
+	// update left over, and the queued delete set once more. Integrating
+	// the queued blocks first (they may integrate now) changed which map
+	// keys are set first, and so what an undo restores.
+	fresh := NewPending()
+	fresh.foldUpdate(u, txn.Store())
+	fresh.integrateAll(txn)
+	fresh.applyDeletes(txn)
+	p.applyDeletes(txn)
+	queued := len(p.Blocks) > 0
+	p.absorb(fresh)
+	if queued && p.integrateAll(txn) > 0 {
+		p.applyDeletes(txn)
 	}
 	if p.IsEmpty() {
 		txn.SetPendingState(nil)
