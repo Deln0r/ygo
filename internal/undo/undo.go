@@ -478,38 +478,47 @@ func (um *UndoManager) Redo() bool {
 }
 
 // popUntilChange pops stack entries and replays them until one changes
-// the document or the stack runs out.
+// the document or the stack runs out, all in one transaction, as yjs
+// popStackItem runs its loop. The steps leave the stack after the
+// transaction has the doc lock: a commit on another goroutine then lands
+// wholly before the undo (as the step undone, or grouped into it) or
+// wholly after it (a new step that drops the redo history), never in
+// between.
 func (um *UndoManager) popUntilChange(stack *[]*StackItem, active *bool) bool {
-	for {
+	um.mu.Lock()
+	empty := um.closed || len(*stack) == 0
+	um.mu.Unlock()
+	if empty {
+		return false
+	}
+	txn := um.doc.WriteTxn()
+	txn.Origin = um
+	um.mu.Lock()
+	*active = true
+	um.mu.Unlock()
+	changed := false
+	for !changed {
 		um.mu.Lock()
 		if um.closed || len(*stack) == 0 {
 			um.mu.Unlock()
-			return false
+			break
 		}
 		si := (*stack)[len(*stack)-1]
 		*stack = (*stack)[:len(*stack)-1]
-		*active = true
 		um.mu.Unlock()
-
-		changed := um.applyStackItem(si)
-
-		um.mu.Lock()
-		*active = false
-		um.mu.Unlock()
-		if changed {
-			return true
-		}
+		changed = um.applyStackItem(txn, si)
 	}
+	txn.Commit()
+	um.mu.Lock()
+	*active = false
+	um.mu.Unlock()
+	return changed
 }
 
 // applyStackItem runs the deletion-of-insertions and resurrection-of-
-// deletions for one StackItem inside a fresh WriteTxn. The umorigin
-// marker on the transaction makes the resulting AfterTransaction route
-// to the opposite stack.
-func (um *UndoManager) applyStackItem(si *StackItem) bool {
-	txn := um.doc.WriteTxn()
-	txn.Origin = um
-	defer txn.Commit()
+// deletions for one StackItem inside txn, whose Origin is the manager:
+// the commit's AfterTransaction routes it to the opposite stack.
+func (um *UndoManager) applyStackItem(txn *doc.TransactionMut, si *StackItem) bool {
 	changed := false
 
 	// Delete everything that was inserted during the captured window, the

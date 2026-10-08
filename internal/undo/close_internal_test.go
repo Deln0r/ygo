@@ -191,3 +191,50 @@ func TestUndo_ConcurrentCommitIsAnOrdinaryEdit(t *testing.T) {
 		t.Fatalf("stacks after a concurrent edit: undo %d redo %d, want 2 and 0", undo, redo)
 	}
 }
+
+// TestUndo_LinearizableWithConcurrentCommit: a commit holding the doc lock
+// when Undo starts lands wholly before the undo: it joins the top step
+// (within the capture timeout), and that step is the one undone, as in
+// yjs when the edit comes first. It must not join the step below.
+func TestUndo_LinearizableWithConcurrentCommit(t *testing.T) {
+	d := doc.NewDoc()
+	m := types.NewMap(d.Branch("m"))
+	um := NewUndoManager(d, []*block.Branch{m.Branch()}, Options{CaptureTimeout: time.Hour})
+	txn := d.WriteTxn()
+	m.Set(txn, "a", int64(1))
+	txn.Commit()
+	um.StopCapturing()
+	txn = d.WriteTxn()
+	m.Set(txn, "b", int64(2))
+	txn.Commit()
+
+	txn = d.WriteTxn() // another goroutine's edit, holding the lock
+	m.Set(txn, "c", int64(3))
+	done := make(chan bool)
+	go func() { done <- um.Undo() }()
+	time.Sleep(20 * time.Millisecond) // Undo is (most likely) waiting for the lock
+	txn.Commit()
+	if !<-done {
+		t.Fatal("first Undo found nothing")
+	}
+	keys := func() string {
+		r := d.ReadTxn()
+		defer r.Close()
+		out := ""
+		for _, k := range []string{"a", "b", "c"} {
+			if m.Has(k) {
+				out += k
+			}
+		}
+		return out
+	}
+	if got := keys(); got != "a" {
+		t.Fatalf("after the first Undo: %q, want a (b and c undone together)", got)
+	}
+	if !um.Undo() || keys() != "" {
+		t.Fatalf("after the second Undo: %q, want nothing", keys())
+	}
+	if um.Undo() {
+		t.Fatal("a third Undo found something")
+	}
+}
