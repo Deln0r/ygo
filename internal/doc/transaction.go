@@ -227,14 +227,19 @@ func (t *TransactionMut) Commit() {
 // the in-memory handle is reachable via Subdoc(guid).
 func (t *TransactionMut) trackSubdocs() {
 	bs := t.doc.store
-	// Clients from the highest ID down, the order an update integrates
-	// them in, so Added lists subdocuments in yjs's order rather than Go's
-	// random map order.
-	clients := make([]uint64, 0, len(t.afterState))
-	for c := range t.afterState {
-		clients = append(clients, c)
+	// Clients with new clocks, from the highest ID down, the order an
+	// update integrates them in, so Added lists subdocuments in yjs's order
+	// rather than Go's random map order. Usually there is one.
+	var one [1]uint64
+	clients := one[:0]
+	for c, after := range t.afterState {
+		if after > t.beforeState[c] {
+			clients = append(clients, c)
+		}
 	}
-	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
+	if len(clients) > 1 {
+		sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
+	}
 	for _, client := range clients {
 		after := t.afterState[client]
 		clock := t.beforeState[client]
@@ -340,33 +345,29 @@ func (t *TransactionMut) SubdocsLoaded() []string { return t.subdocsLoaded }
 // marked keep (the UndoManager preserves them to support redo); the
 // merge runs either way.
 func (t *TransactionMut) gcDeleted() {
+	if len(t.deletedRanges) == 0 {
+		return
+	}
 	bs := t.doc.store
 	touched := map[uint64]uint64{} // client -> smallest deleted clock
 	// Every cell inside the deleted ranges, as yjs tryGcDeleteSet walks
 	// the structs of transaction.deleteSet: a deleted item that a later
-	// integration split has pieces whose heads no Delete call saw.
-	t.deletedRangesOf(0)
-	clients := make([]uint64, 0, len(t.deletedByClient))
-	for c := range t.deletedByClient {
-		clients = append(clients, c)
-	}
-	sort.Slice(clients, func(i, j int) bool { return clients[i] < clients[j] })
-	for _, c := range clients {
-		for _, r := range t.deletedByClient[c] {
-			// Each cell is looked up afresh: collecting a type replaces
-			// its children's cells with GC runs, possibly further along
-			// this walk.
-			for clock := r.start; clock < r.end; {
-				cell, ok := bs.GetBlock(block.ID{Client: c, Clock: clock})
-				if !ok {
-					break
-				}
-				if it := cell.AsItem(); it != nil && it.IsDeleted() {
-					t.gcDeletedItem(it, touched)
-				}
-				if !advanceClock(&clock, cell.ClockEnd()) {
-					break
-				}
+	// integration split has pieces whose heads no Delete call saw. Each
+	// range is one Delete's, so they do not overlap and their order does
+	// not matter. Each cell is looked up afresh: collecting a type replaces
+	// its children's cells with GC runs, possibly further along this walk.
+	for _, r := range t.deletedRanges {
+		c := r.ID.Client
+		for clock := r.ID.Clock; clock < r.ID.Clock+r.Len; {
+			cell, ok := bs.GetBlock(block.ID{Client: c, Clock: clock})
+			if !ok {
+				break
+			}
+			if it := cell.AsItem(); it != nil && it.IsDeleted() {
+				t.gcDeletedItem(it, touched)
+			}
+			if !advanceClock(&clock, cell.ClockEnd()) {
+				break
 			}
 		}
 	}
@@ -771,6 +772,16 @@ func (t *TransactionMut) PositionalChanged(b *block.Branch) bool {
 // a later integration in the same transaction counts as deleted in every
 // piece.
 func (t *TransactionMut) DeletedThisTxn(id block.ID) bool {
+	// A handful of deletions, the common case, is a linear scan with no
+	// index to build.
+	if len(t.deletedRanges) <= 8 {
+		for _, r := range t.deletedRanges {
+			if r.ID.Client == id.Client && r.ID.Clock <= id.Clock && id.Clock < r.ID.Clock+r.Len {
+				return true
+			}
+		}
+		return false
+	}
 	ranges := t.deletedRangesOf(id.Client)
 	i := sort.Search(len(ranges), func(i int) bool { return ranges[i].end > id.Clock })
 	return i < len(ranges) && ranges[i].start <= id.Clock
