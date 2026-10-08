@@ -1,11 +1,13 @@
 package undo
 
 import (
+	"encoding/hex"
 	"testing"
 	"time"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/encoding"
 	"github.com/Deln0r/ygo/internal/types"
 )
 
@@ -67,5 +69,96 @@ func TestClose_CommitInFlight(t *testing.T) {
 	}
 	if um.CanUndo() {
 		t.Error("a manager closed during the commit captured it")
+	}
+}
+
+// TestClear_DuringCapture drives a Clear into the window between a
+// capture keeping its deletions and publishing its step, as a Clear on
+// another goroutine can land while a commit runs. The release of the
+// cleared step must not take away the keep the new step needs on the
+// parent both share: undo restores the parent with its remaining key, as
+// yjs does when the clear comes before the capture.
+func TestClear_DuringCapture(t *testing.T) {
+	d := doc.NewDoc()
+	m := types.NewMap(d.Branch("m"))
+	txn := d.WriteTxn()
+	txn.Origin = "setup"
+	p := m.SetMap(txn, "p")
+	p.Set(txn, "x", int64(1))
+	p.Set(txn, "y", int64(2))
+	txn.Commit()
+	um := NewUndoManager(d, []*block.Branch{m.Branch()})
+	txn = d.WriteTxn()
+	p.Delete(txn, "x")
+	txn.Commit()
+
+	cleared := false
+	um.afterKeep = func() {
+		if !cleared {
+			cleared = true
+			um.Clear()
+		}
+	}
+	txn = d.WriteTxn()
+	m.Delete(txn, "p")
+	txn.Commit()
+	if !cleared {
+		t.Fatal("the hook never ran")
+	}
+	if !um.Undo() {
+		t.Fatal("Undo found nothing to restore")
+	}
+	restored, ok := m.Get("p").(*types.Map)
+	if !ok {
+		t.Fatalf("p after undo = %v, want a map", m.Get("p"))
+	}
+	if got := restored.Get("y"); got != int64(2) {
+		t.Fatalf("p.y after undo = %v, want 2", got)
+	}
+}
+
+// TestClear_DuringCaptureRekeepsAncestors: the step captured while Clear
+// ran deletes a child whose parent the cleared step had also kept. The
+// release un-keeps the parent; re-keeping the surviving step must keep it
+// again although the child itself is still kept, so a later untracked
+// deletion of the parent does not collect what the step needs. The state
+// is yjs 13.6.33's for the clear made before the capture.
+func TestClear_DuringCaptureRekeepsAncestors(t *testing.T) {
+	const want = "010301002701016d017001280001000178017d01280001000179017d020101010003"
+	d := doc.NewDocWithOptions(doc.Options{ClientID: 1})
+	m := types.NewMap(d.Branch("m"))
+	txn := d.WriteTxn()
+	txn.Origin = "setup"
+	p := m.SetMap(txn, "p")
+	txn.Commit()
+	txn = d.WriteTxn()
+	txn.Origin = "setup"
+	p.Set(txn, "x", int64(1))
+	p.Set(txn, "y", int64(2))
+	txn.Commit()
+	um := NewUndoManager(d, []*block.Branch{m.Branch()})
+	txn = d.WriteTxn()
+	p.Delete(txn, "x")
+	txn.Commit()
+
+	cleared := false
+	um.afterKeep = func() {
+		if !cleared {
+			cleared = true
+			um.Clear()
+		}
+	}
+	txn = d.WriteTxn()
+	p.Delete(txn, "y")
+	txn.Commit()
+	txn = d.WriteTxn()
+	txn.Origin = "remote"
+	m.Delete(txn, "p")
+	txn.Commit()
+	if !cleared {
+		t.Fatal("the hook never ran")
+	}
+	if got := hex.EncodeToString(encoding.EncodeStateAsUpdate(d)); got != want {
+		t.Errorf("state\n got  %s\n want %s", got, want)
 	}
 }

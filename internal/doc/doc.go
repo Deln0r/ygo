@@ -110,6 +110,15 @@ type Doc struct {
 	// transaction's update (OnUpdate / OnUpdateV2).
 	updateHandlers   []*registeredUpdate
 	updateV2Handlers []*registeredUpdate
+
+	// subdocsHandlers fire last in Commit, after the update handlers, as
+	// yjs emits 'subdocs' after GC and 'update' (OnSubdocs).
+	subdocsHandlers []*registeredSubdocs
+
+	// queued holds one-shot functions the next Commit runs before its
+	// next after-transaction handler or its garbage collection
+	// (QueueInCommit).
+	queued []func(*TransactionMut)
 }
 
 // registeredAfterTxn wraps a handler so each registration has a
@@ -165,6 +174,10 @@ func (d *Doc) fireAfterTransactionHandlers(mut *TransactionMut) {
 	copy(handlers, d.afterTxnHandlers)
 	d.handlersMu.Unlock()
 	for _, h := range handlers {
+		// Work queued before this handler (QueueInCommit), from outside
+		// the commit or from an earlier handler, runs first, as if it had
+		// run when it was queued.
+		d.runQueued(mut)
 		h.fn(mut)
 	}
 }
@@ -194,11 +207,13 @@ var UpdateEncoder func(t *TransactionMut, v2 bool) []byte
 // state on (the first of each client cut at that clock) and the delete
 // set of what the transaction deleted, byte for byte as yjs writes them
 // apart from three pinned cases (docs/tech-debt.md, "Remaining
-// update-event divergences": deleting a nested type lists only the
-// type's own item, yjs's extra cleanup update after concurrent
-// formatting is not emitted, undo restores kept tombstones as separate
-// structs) and the Any values ygo writes differently (objects with
-// several keys, written with sorted keys, and whole-number float64s).
+// update-event divergences": yjs's extra cleanup update after
+// concurrent formatting is not emitted, undo restores kept tombstones
+// as separate structs, and an update whose block depends on another
+// client's block in it integrates in another order, which can change
+// the clocks an undo gives restored items) and the Any values ygo writes
+// differently (objects with several keys, written with sorted keys,
+// and whole-number float64s).
 // Local edits, applied updates and UndoManager steps all emit one; a
 // transaction that changed nothing emits none.
 //
@@ -260,6 +275,34 @@ func (d *Doc) fireUpdateHandlers(t *TransactionMut) {
 		for _, h := range handlers {
 			h.fn(update, t.Origin)
 		}
+	}
+}
+
+// QueueInCommit queues fn to run once inside the next Commit of d (the
+// one in progress when called from one of its handlers), with the write
+// lock held: before the next after-transaction handler runs, or, when
+// none is left, before that commit collects deleted content. A plain
+// function rather than a method, so it stays off the public ygo.Doc.
+//
+// The UndoManager releases what a cleared step kept this way. yjs clear
+// releases at once, so nothing that runs after it can be undone by it:
+// here no handler keeps an item, and no GC collects one, between the
+// Clear and its release. Called from a handler, the release reaches the
+// GC of that very commit, as in yjs.
+func QueueInCommit(d *Doc, fn func(*TransactionMut)) {
+	d.handlersMu.Lock()
+	d.queued = append(d.queued, fn)
+	d.handlersMu.Unlock()
+}
+
+// runQueued runs and forgets the functions queued with QueueInCommit.
+func (d *Doc) runQueued(t *TransactionMut) {
+	d.handlersMu.Lock()
+	fns := d.queued
+	d.queued = nil
+	d.handlersMu.Unlock()
+	for _, fn := range fns {
+		fn(t)
 	}
 }
 
@@ -361,21 +404,48 @@ type SubdocsEvent struct {
 	Loaded  []string
 }
 
+// registeredSubdocs gives each OnSubdocs registration a stable identity
+// for unsubscribe.
+type registeredSubdocs struct {
+	fn func(SubdocsEvent)
+}
+
 // OnSubdocs registers fn to fire after any transaction that changed the
 // document's subdocuments. Returns an unsubscribe function. A sync
 // provider uses this to learn which nested documents to start or stop
-// syncing. Convenience layer over OnAfterTransaction.
+// syncing. It fires at the end of the commit, after garbage collection
+// and the update handlers, where yjs emits 'subdocs'; the write lock is
+// still held.
 func (d *Doc) OnSubdocs(fn func(SubdocsEvent)) func() {
-	return d.OnAfterTransaction(func(t *TransactionMut) {
-		if len(t.subdocsAdded) == 0 && len(t.subdocsRemoved) == 0 && len(t.subdocsLoaded) == 0 {
-			return
+	h := &registeredSubdocs{fn: fn}
+	d.handlersMu.Lock()
+	d.subdocsHandlers = append(d.subdocsHandlers, h)
+	d.handlersMu.Unlock()
+	return func() {
+		d.handlersMu.Lock()
+		defer d.handlersMu.Unlock()
+		for i, r := range d.subdocsHandlers {
+			if r == h {
+				d.subdocsHandlers = append(d.subdocsHandlers[:i], d.subdocsHandlers[i+1:]...)
+				return
+			}
 		}
-		fn(SubdocsEvent{
-			Added:   t.subdocsAdded,
-			Removed: t.subdocsRemoved,
-			Loaded:  t.subdocsLoaded,
-		})
-	})
+	}
+}
+
+// fireSubdocsHandlers runs the OnSubdocs handlers, from a snapshot, when
+// the transaction changed the document's subdocuments.
+func (d *Doc) fireSubdocsHandlers(t *TransactionMut) {
+	if len(t.subdocsAdded) == 0 && len(t.subdocsRemoved) == 0 && len(t.subdocsLoaded) == 0 {
+		return
+	}
+	d.handlersMu.Lock()
+	handlers := append([]*registeredSubdocs(nil), d.subdocsHandlers...)
+	d.handlersMu.Unlock()
+	ev := SubdocsEvent{Added: t.subdocsAdded, Removed: t.subdocsRemoved, Loaded: t.subdocsLoaded}
+	for _, h := range handlers {
+		h.fn(ev)
+	}
 }
 
 // Load marks this subdocument to be loaded. A provider watching the

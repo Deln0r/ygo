@@ -20,6 +20,68 @@ type StackItem struct {
 	Insertions *encoding.IdSet
 	Deletions  *encoding.IdSet
 	Meta       map[string]any
+
+	// delOrder lists the clients of every deletion in the captured
+	// transactions, in or out of scope, in the order they first deleted
+	// something, across grouped transactions. Restoration walks clients
+	// in this order, as yjs walks the delete set it keeps (the whole
+	// transaction's, a Map in insertion order): which item is restored
+	// first decides whether a later one conflicts with it.
+	delOrder []uint64
+
+	// insOrder lists the clients that created anything in the captured
+	// transactions, in or out of scope, in the order they first joined the
+	// document's store (yjs builds insertions from afterState, which
+	// iterates store.clients), across grouped transactions. Undo collects
+	// inserted items in this order and deletes them in reverse.
+	insOrder []uint64
+}
+
+// noteDeletion records client in the deletion order if it is new.
+func (si *StackItem) noteDeletion(client uint64) {
+	for _, c := range si.delOrder {
+		if c == client {
+			return
+		}
+	}
+	si.delOrder = append(si.delOrder, client)
+}
+
+// noteInsertion records client in the insertion order if it is new.
+func (si *StackItem) noteInsertion(client uint64) {
+	for _, c := range si.insOrder {
+		if c == client {
+			return
+		}
+	}
+	si.insOrder = append(si.insOrder, client)
+}
+
+// deletionClients returns the clients of Deletions in deletion order,
+// then any not recorded there in ascending order.
+func (si *StackItem) deletionClients() []uint64 {
+	return orderedClients(si.delOrder, si.Deletions)
+}
+
+// insertionClients returns the clients of Insertions in insertion order,
+// then any not recorded there in ascending order.
+func (si *StackItem) insertionClients() []uint64 {
+	return orderedClients(si.insOrder, si.Insertions)
+}
+
+// orderedClients returns order, then the clients of set missing from it
+// in ascending order.
+func orderedClients(order []uint64, set *encoding.IdSet) []uint64 {
+	out := append([]uint64(nil), order...)
+	set.Iterate(func(client uint64, _ []encoding.Range) {
+		for _, c := range out {
+			if c == client {
+				return
+			}
+		}
+		out = append(out, client)
+	})
+	return out
 }
 
 // newStackItem returns a StackItem with empty IdSets ready to accept
@@ -40,6 +102,12 @@ func newStackItem() *StackItem {
 func (si *StackItem) merge(other *StackItem) {
 	mergeIdSets(si.Insertions, other.Insertions)
 	mergeIdSets(si.Deletions, other.Deletions)
+	for _, c := range other.delOrder {
+		si.noteDeletion(c)
+	}
+	for _, c := range other.insOrder {
+		si.noteInsertion(c)
+	}
 	if other.Meta != nil {
 		si.Meta = other.Meta
 	}

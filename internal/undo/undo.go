@@ -82,6 +82,11 @@ type UndoManager struct {
 
 	unsubscribe func()
 	closed      bool
+
+	// afterKeep, when set (tests only), runs after a capture has kept its
+	// deletions and before it publishes its step: the window a Clear on
+	// another goroutine can fall into.
+	afterKeep func()
 }
 
 // NewUndoManager registers an UndoManager on doc, watching the given
@@ -149,10 +154,44 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 		return
 	}
 
-	// Build the StackItem for this transaction, filtering every
-	// touched item by scope. We resolve items through the store
-	// rather than trusting changedTypes, which the types layer does
-	// not yet populate (see internal/doc AddChangedType note).
+	// Scope gate: the transaction must have changed a shared type in
+	// scope that still exists, as yjs requires the scope to be in
+	// transaction.changedParentTypes (every ancestor of each changed type
+	// that was not deleted). Deleting a scoped type through its parent
+	// deletes the items inside it, which are in scope, but the type
+	// reports no change, so yjs records nothing, keeps nothing and leaves
+	// the redo history alone.
+	if !um.scopeChanged(mut) {
+		return
+	}
+
+	// A fresh edit drops the redo history, releasing what it kept, before
+	// this step keeps its own deletions, as yjs clear(false, true) runs
+	// before it keeps them: released the other way round, a shared
+	// ancestor this step just kept would lose its keep. An undo ends the
+	// capture group (yjs stopCapturing), so the next edit opens a new
+	// step instead of joining the one before the undo.
+	um.mu.Lock()
+	if um.closed {
+		um.mu.Unlock()
+		return
+	}
+	undoing, redoing := um.undoing, um.redoing
+	var dropped []*StackItem
+	if !undoing && !redoing {
+		dropped = um.redoStack
+		um.redoStack = nil
+	}
+	if undoing {
+		um.lastChange = time.Time{}
+	}
+	um.mu.Unlock()
+	for _, old := range dropped {
+		um.releaseKeep(mut, old)
+	}
+
+	// Build the StackItem for this transaction, keeping only what lies
+	// in scope.
 	store := mut.Store()
 	si := newStackItem()
 
@@ -201,12 +240,25 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 		}
 	}
 
+	// Insertion clients in the order they joined the store, as yjs builds
+	// its insertions from afterState: every client with new clocks in the
+	// transaction, in scope or not, since yjs keeps the whole set.
+	for _, client := range store.ClientOrder() {
+		if after[client] > before[client] {
+			si.noteInsertion(client)
+		}
+	}
+
 	// Deletions: the exact range of every Delete this transaction whose
 	// item is in scope. The range is taken when the item is tombstoned:
 	// commit-time squash runs before this hook and can merge the
 	// tombstone with an older one, and recording the merged item's extent
 	// would make undo resurrect content this transaction never deleted.
+	// The order of clients is noted for every deletion, in scope or not:
+	// yjs keeps the transaction's whole delete set, whose clients run in
+	// the order they first deleted, and restores in that order.
 	for _, dr := range mut.DeletedRanges() {
+		si.noteDeletion(dr.ID.Client)
 		it := store.GetItem(dr.ID)
 		if it == nil || !um.itemInScope(it) {
 			continue
@@ -221,11 +273,15 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 			if cov == nil {
 				break
 			}
-			cov.SetKeep(true)
+			keepItem(cov, true)
 			if !advanceClock(&clock, cov.ID.Clock+cov.Len-1) {
 				break
 			}
 		}
+	}
+
+	if um.afterKeep != nil {
+		um.afterKeep()
 	}
 
 	// Nothing in scope changed: this transaction is invisible to us.
@@ -240,16 +296,9 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 	}
 
 	now := um.nowFn()
-	undoing := um.undoing
-	redoing := um.redoing
 	target := &um.undoStack
 	if undoing {
 		target = &um.redoStack
-	}
-
-	if !undoing && !redoing {
-		// Fresh local edit: throw away any pending redo history.
-		um.redoStack = um.redoStack[:0]
 	}
 
 	if !undoing && !redoing &&
@@ -292,15 +341,37 @@ func (um *UndoManager) StopCapturing() {
 }
 
 // Clear empties both stacks. After Clear, CanUndo and CanRedo both
-// return false. Existing keep flags on items previously held against
-// GC are released by the GC pass when the items become reachable
-// again (not yet wired in this skeleton; tracked in tech-debt).
+// return false. The items the dropped steps kept from garbage
+// collection are released, as yjs clear does. The release changes items
+// and needs the doc lock, which Clear may be called with already held
+// (from a commit handler), so it runs inside the next commit, before
+// anything in that commit can keep or collect an item: before its next
+// after-transaction handler, or right before its GC (doc.QueueInCommit).
+// The release cannot take away a keep a step captured after Clear needs,
+// such as on a shared parent: it keeps the steps on the stacks again
+// after releasing, and every step there then was captured after Clear,
+// which emptied them. That also covers a commit on another goroutine
+// whose capture had already kept its items when Clear ran.
 func (um *UndoManager) Clear() {
 	um.mu.Lock()
-	defer um.mu.Unlock()
-	um.undoStack = um.undoStack[:0]
-	um.redoStack = um.redoStack[:0]
+	dropped := append(append([]*StackItem(nil), um.undoStack...), um.redoStack...)
+	um.undoStack = nil
+	um.redoStack = nil
 	um.lastChange = time.Time{}
+	um.mu.Unlock()
+	if len(dropped) > 0 {
+		doc.QueueInCommit(um.doc, func(t *doc.TransactionMut) {
+			for _, si := range dropped {
+				um.releaseKeep(t, si)
+			}
+			um.mu.Lock()
+			live := append(append([]*StackItem(nil), um.undoStack...), um.redoStack...)
+			um.mu.Unlock()
+			for _, si := range live {
+				um.setKeep(t, si, true)
+			}
+		})
+	}
 }
 
 // Close unregisters this UndoManager from the doc and releases its
@@ -445,8 +516,9 @@ func (um *UndoManager) applyStackItem(si *StackItem) bool {
 	// the manager that had merged with it, and its start is where this
 	// range's content begins.
 	bs := txn.Store()
-	si.Insertions.Iterate(func(client uint64, ranges []encoding.Range) {
-		for _, r := range ranges {
+	var toDelete []*block.Item
+	for _, client := range si.insertionClients() {
+		for _, r := range si.Insertions.ClientRanges(client) {
 			clock := r.Start
 			end := r.End()
 			for clock < end {
@@ -481,23 +553,26 @@ func (um *UndoManager) applyStackItem(si *StackItem) bool {
 					}
 					target = live
 				}
-				if target != nil && !target.IsDeleted() {
-					txn.Delete(target)
-					changed = true
+				// The live copy may sit in a new copy of a parent another
+				// manager restored, outside this manager's scope; yjs
+				// checks the scope on the resolved item.
+				if target != nil && !target.IsDeleted() && um.itemInScope(target) {
+					toDelete = append(toDelete, target)
 				}
 				if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
 					break
 				}
 			}
 		}
-	})
+	}
 
 	// Resurrect everything that was deleted during the captured window,
 	// except what the same window inserted. Typing "abc" and deleting the
 	// "b" is one step; undoing it must leave nothing behind, not the "b".
 	// yjs popStackItem skips those items for the same reason.
-	si.Deletions.Iterate(func(client uint64, ranges []encoding.Range) {
-		for _, r := range ranges {
+	// Clients in the order they deleted, as yjs walks its delete set.
+	for _, client := range si.deletionClients() {
+		for _, r := range si.Deletions.ClientRanges(client) {
 			clock := r.Start
 			for clock < r.End() {
 				cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
@@ -519,8 +594,95 @@ func (um *UndoManager) applyStackItem(si *StackItem) bool {
 				}
 			}
 		}
-	})
+	}
+
+	// Delete what the step inserted last, children before parents (in
+	// reverse of the order collected), as yjs popStackItem does: restoring
+	// first lets a restored item land in a parent this step is about to
+	// delete, as in yjs.
+	for i := len(toDelete) - 1; i >= 0; i-- {
+		if it := toDelete[i]; !it.IsDeleted() {
+			txn.Delete(it)
+			changed = true
+		}
+	}
 	return changed
+}
+
+// keepItem marks it, and every ancestor item up to one already in that
+// state, kept (or not): yjs keepItem. A kept item survives garbage
+// collection, and keeping the ancestors stops a later deletion of a
+// parent from collecting the subtree the kept item is in.
+func keepItem(it *block.Item, keep bool) {
+	for it != nil && it.IsKeep() != keep {
+		it.SetKeep(keep)
+		if it.Parent.Kind != block.ParentBranch || it.Parent.Branch == nil {
+			return
+		}
+		it = it.Parent.Branch.Item
+	}
+}
+
+// keepWithAncestors marks it and every ancestor item kept, whatever their
+// state.
+func keepWithAncestors(it *block.Item) {
+	for it != nil {
+		it.SetKeep(true)
+		if it.Parent.Kind != block.ParentBranch || it.Parent.Branch == nil {
+			return
+		}
+		it = it.Parent.Branch.Item
+	}
+}
+
+// releaseKeep un-keeps the items a dropped step deleted in scope, and
+// their ancestors (yjs clearUndoManagerStackItem). Called under the doc
+// lock, from inside a commit.
+func (um *UndoManager) releaseKeep(mut *doc.TransactionMut, si *StackItem) {
+	um.setKeep(mut, si, false)
+}
+
+// setKeep marks the items a step deleted in scope, and their ancestors,
+// kept or not. Releasing goes through keepItem, as yjs does. Keeping walks
+// every ancestor, kept or not: it re-keeps the steps left after Clear's
+// release, and that release may have un-kept an ancestor of an item that
+// is itself still kept, where keepItem would stop.
+func (um *UndoManager) setKeep(mut *doc.TransactionMut, si *StackItem, keep bool) {
+	bs := mut.Store()
+	si.Deletions.Iterate(func(client uint64, ranges []encoding.Range) {
+		for _, r := range ranges {
+			for clock := r.Start; clock < r.End(); {
+				cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
+				if !ok {
+					break
+				}
+				if it := cell.AsItem(); it != nil && um.itemInScope(it) {
+					if keep {
+						keepWithAncestors(it)
+					} else {
+						keepItem(it, false)
+					}
+				}
+				if !advanceClock(&clock, cell.ClockEnd()) {
+					break
+				}
+			}
+		}
+	})
+}
+
+// scopeChanged reports whether the transaction changed a shared type at
+// or under a scope branch that is not itself deleted.
+func (um *UndoManager) scopeChanged(mut *doc.TransactionMut) bool {
+	for _, b := range mut.ChangedTypes() {
+		if b.Item != nil && b.Item.IsDeleted() {
+			continue
+		}
+		if um.isInScope(b) {
+			return true
+		}
+	}
+	return false
 }
 
 // advanceClock moves *clock past lastInclusive (the inclusive upper

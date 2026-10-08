@@ -30,9 +30,10 @@ import * as Y from "yjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const outPath = resolve(here, "..", "update-event-fixtures.json");
 
-// Client IDs. Large enough that their varints take several bytes, and doc 0
-// sorts above doc 1, so the descending client order in an update is visible.
-const CLIENTS = [3141592653, 271828182];
+// Client IDs. Large enough that their varints take several bytes, and each
+// doc sorts above the next, so the descending client order in an update is
+// visible.
+const CLIENTS = [3141592653, 271828182, 141421356, 57721566];
 
 // Ops. `path` locates a shared type: "<kind>:<name>" for a root (text, array,
 // map), then map keys (strings) and array indices (numbers) for nested types.
@@ -46,6 +47,7 @@ const set = (path, key, value) => ({ op: "set", path, key, value });
 const setType = (path, key, kind) => ({ op: "setType", path, key, kind });
 const insType = (path, index, kind) => ({ op: "insertType", path, index, kind });
 const mdel = (path, key) => ({ op: "mapDelete", path, key });
+const mclear = (path) => ({ op: "mapClear", path });
 
 // Steps.
 const txn = (doc, origin, ...ops) => ({ doc, origin, ops });
@@ -55,12 +57,23 @@ const txn = (doc, origin, ...ops) => ({ doc, origin, ops });
 const apply = (from, to, origin, what, sv) => ({ apply: { from, to, origin, what, ...(sv ? { sv } : {}) } });
 // replay applies again the exact bytes an earlier apply step sent.
 const replay = (step, to, origin) => ({ apply: { replay: step, to, origin } });
-const undo = (doc) => ({ undo: { doc } });
-const redo = (doc) => ({ redo: { doc } });
+const undo = (doc, um) => ({ undo: { doc, ...(um !== undefined ? { um } : {}) } });
+const redo = (doc, um) => ({ redo: { doc, ...(um !== undefined ? { um } : {}) } });
+// manage creates manager k of sc.managers ({doc, scope, origins, group}) at
+// that point, so a nested scope exists by then; clear empties its stacks.
+const manage = (k) => ({ manage: k });
+const clear = (doc, um) => ({ clear: { doc, um } });
+const stop = (doc, um) => ({ stop: { doc, um } });
+// XML ops.
+const xmlElement = (path, index, name) => ({ op: "xmlElement", path, index, name });
+const xmlText = (path, index) => ({ op: "xmlText", path, index });
+const setAttr = (path, key, value) => ({ op: "setAttr", path, key, value });
 
 const T = "text:t";
 const A = "array:a";
 const M = "map:m";
+const X = "xml:x";
+const O = "map:o";
 
 const appends = [];
 for (let i = 0; i < 200; i++) appends.push(txn(0, null, ins(T, i, "x")));
@@ -354,6 +367,527 @@ const scenarios = [
     undoGroup: true,
   },
   {
+    name: "undo-nested-map-delete",
+    description: "a nested map with keys deleted, undone (it comes back with its keys), redone, undone again",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      txn(0, "setup", set([M, "child"], "a", 1), set([M, "child"], "b", "x")),
+      manage(0),
+      txn(0, null, mdel(M, "child")),
+      undo(0, 0),
+      redo(0, 0),
+      undo(0, 0),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-nested-array-delete",
+    description: "a nested array of two blocks deleted and undone",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "arr", "array")),
+      txn(0, "setup", push([M, "arr"], [1, 2])),
+      txn(0, "setup", push([M, "arr"], ["three"])),
+      manage(0),
+      txn(0, null, mdel(M, "arr")),
+      undo(0, 0),
+      redo(0, 0),
+    ],
+  },
+  {
+    name: "undo-nested-formatted-text-delete",
+    description: "a nested text with a bold run deleted and undone: the format markers come back too",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "t", "text")),
+      txn(0, "setup", ins([M, "t"], 0, "hello")),
+      txn(0, "setup", fmt([M, "t"], 0, 2, { bold: true })),
+      manage(0),
+      txn(0, null, mdel(M, "t")),
+      undo(0, 0),
+      redo(0, 0),
+    ],
+  },
+  {
+    name: "undo-three-levels-delete",
+    description: "a map in a map in a map, holding a text, deleted from the top and undone",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "a", "map")),
+      txn(0, "setup", setType([M, "a"], "b", "map")),
+      txn(0, "setup", set([M, "a", "b"], "c", 1), setType([M, "a", "b"], "d", "text")),
+      txn(0, "setup", ins([M, "a", "b", "d"], 0, "deep")),
+      manage(0),
+      txn(0, null, mdel(M, "a")),
+      undo(0, 0),
+      redo(0, 0),
+      undo(0, 0),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-types-in-array-delete",
+    description: "a map and a text inside an array deleted together and undone",
+    managers: [{ doc: 0, scope: A }],
+    states: true,
+    steps: [
+      txn(0, "setup", insType(A, 0, "map")),
+      txn(0, "setup", set([A, 0], "k", "v"), insType(A, 1, "text")),
+      txn(0, "setup", ins([A, 1], 0, "tx")),
+      manage(0),
+      txn(0, null, del(A, 0, 2)),
+      undo(0, 0),
+      redo(0, 0),
+    ],
+  },
+  {
+    name: "undo-keeps-ancestors",
+    description: "a tracked delete inside a map keeps the map: an untracked delete of the map then leaves its content uncollected",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      txn(0, "setup", set([M, "child"], "a", 1)),
+      manage(0),
+      txn(0, null, mdel([M, "child"], "a")),
+      txn(0, "other", mdel(M, "child")),
+      undo(0, 0),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-child-scope-parent-deleted",
+    description: "a manager scoped to a nested map ignores the map's deletion, even though deleting it deletes a live key inside: its redo history survives",
+    managers: [{ doc: 0, scope: [M, "child"] }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      txn(0, "setup", set([M, "child"], "s", 0)),
+      manage(0),
+      txn(0, null, set([M, "child"], "a", 1)),
+      undo(0, 0),
+      txn(0, null, mdel(M, "child")),
+      redo(0, 0),
+    ],
+  },
+  {
+    name: "undo-scope-recheck-two-managers",
+    description: "a child-scoped manager does not delete what another manager restored into a new copy of the child",
+    managers: [
+      { doc: 0, scope: [M, "child"], origins: ["a"] },
+      { doc: 0, scope: M, origins: ["b"] },
+    ],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      manage(0),
+      manage(1),
+      txn(0, "a", set([M, "child"], "x", 1)),
+      txn(0, "b", mdel(M, "child")),
+      undo(0, 1),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-into-deleted-restored-parent",
+    description: "undo restores a key into a parent whose restored copy was deleted again: the step counts, the earlier one stays",
+    managers: [
+      { doc: 0, scope: M, origins: ["a"] },
+      { doc: 0, scope: M, origins: ["b"] },
+    ],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      txn(0, "setup", set([M, "child"], "x", 1)),
+      manage(0),
+      manage(1),
+      txn(0, "a", set(M, "z", 1)),
+      txn(0, "a", mdel([M, "child"], "x")),
+      txn(0, "b", mdel(M, "child")),
+      undo(0, 1),
+      txn(0, "other", mdel(M, "child")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-group-restore-before-delete",
+    description: "one undo step inserted a map and deleted a key an untracked edit put in it: yjs restores the key, then deletes the map",
+    managers: [{ doc: 0, scope: M, group: true }],
+    states: true,
+    steps: [
+      manage(0),
+      txn(0, null, setType(M, "p", "map")),
+      txn(0, "other", set([M, "p"], "c", 1)),
+      txn(0, null, mdel([M, "p"], "c")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-clear-releases-keep",
+    description: "after clear, a map the manager kept is released: an untracked delete of it is collected",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      txn(0, "setup", set([M, "child"], "a", 1)),
+      manage(0),
+      txn(0, null, mdel([M, "child"], "a")),
+      clear(0, 0),
+      txn(0, "other", mdel(M, "child")),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-fresh-edit-releases-keep",
+    description: "undoing an insertion keeps what it deleted for redo; a fresh edit drops the redo step and releases the keep, so an untracked delete of the parent is collected",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "child", "map")),
+      manage(0),
+      txn(0, null, set([M, "child"], "b", 2)),
+      undo(0, 0),
+      txn(0, null, set(M, "z", 1)),
+      txn(0, "other", mdel(M, "child")),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-restore-order-concurrent-write",
+    description: "one step deletes a key written by a middle client and the map holding it, with a lower client's write of the same key in between: yjs restores the lower client's value, because it walks deleting clients in deletion order",
+    docs: 3,
+    managers: [{ doc: 0, scope: M, group: true }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 2, "remote", "state"),
+      txn(1, null, set([M, "p"], "x", "A")),
+      apply(1, 0, "remote", "diff"),
+      apply(1, 2, "remote", "diff"),
+      manage(0),
+      txn(2, null, set([M, "p"], "x", "B")),
+      txn(0, null, mdel([M, "p"], "x")),
+      apply(2, 0, "remote", "diff"),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-release-before-keep",
+    description: "a fresh edit drops a redo step that kept the map it then deletes: the release comes first, so the map stays kept and undo restores it with its key",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      txn(0, "setup", set([M, "p"], "x", 1)),
+      manage(0),
+      txn(0, null, set([M, "p"], "y", 2)),
+      undo(0, 0),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-ends-capture-group",
+    description: "an edit right after an undo opens a new step: the next undo removes only it",
+    managers: [{ doc: 0, scope: T, group: true }],
+    states: true,
+    steps: [
+      manage(0),
+      txn(0, null, ins(T, 0, "a")),
+      stop(0, 0),
+      txn(0, null, ins(T, 1, "b")),
+      undo(0, 0),
+      txn(0, null, ins(T, 1, "c")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-nested-multi-client",
+    description: "a map created by a higher client ID holding keys from a lower one, deleted and undone by the lower: the parent is restored first",
+    docs: 2,
+    managers: [{ doc: 1, scope: M }],
+    states: true,
+    steps: [
+      txn(0, null, setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      manage(0),
+      txn(1, "setup", set([M, "p"], "a", 1), set([M, "p"], "b", 2)),
+      txn(1, null, mdel(M, "p")),
+      undo(1, 0),
+      redo(1, 0),
+      undo(1, 0),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "undo-xml-element-delete",
+    description: "an XML element with an attribute and a text child deleted and undone",
+    managers: [{ doc: 0, scope: X }],
+    states: true,
+    steps: [
+      txn(0, "setup", xmlElement(X, 0, "p")),
+      txn(0, "setup", setAttr([X, 0], "class", "c"), xmlText([X, 0], 0)),
+      txn(0, "setup", ins([X, 0, 0], 0, "hi")),
+      manage(0),
+      txn(0, null, del(X, 0, 1)),
+      undo(0, 0),
+      redo(0, 0),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-clear-then-tracked-delete",
+    description: "clear releases what a dropped step kept, including the parent, before the next step keeps it again: the parent's deletion after clear is undone with its remaining key",
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      txn(0, "setup", set([M, "p"], "x", 1), set([M, "p"], "y", 2)),
+      manage(0),
+      txn(0, null, mdel([M, "p"], "x")),
+      clear(0, 0),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-clear-other-manager-keeps",
+    description: "one manager's clear does not take away a keep another manager adds after it: the second manager still restores the shared parent",
+    managers: [
+      { doc: 0, scope: M, origins: ["a"] },
+      { doc: 0, scope: M, origins: ["b"] },
+    ],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      txn(0, "setup", set([M, "p"], "x", 1), set([M, "p"], "y", 2)),
+      manage(0),
+      manage(1),
+      txn(0, "a", mdel([M, "p"], "x")),
+      clear(0, 0),
+      txn(0, "b", mdel(M, "p")),
+      undo(0, 1),
+    ],
+    diffs: true,
+  },
+  {
+    name: "undo-tracked-remote-delete-order",
+    description: "a tracked remote update deletes keys of two clients: yjs applies its delete set in the order written, highest client first, so undo walks the clients in that order and leaves a concurrent write in place",
+    docs: 3,
+    managers: [{ doc: 0, scope: M, group: true, origins: [null, "tracked"] }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      txn(2, "setup", set(M, "q", 1)),
+      apply(0, 1, "remote", "state"),
+      apply(2, 1, "remote", "state"),
+      txn(1, "setup", set([M, "p"], "x", "A")),
+      apply(1, 0, "remote", "state"),
+      apply(1, 2, "remote", "state"),
+      manage(0),
+      txn(2, null, set([M, "p"], "x", "B")),
+      txn(1, null, mdel([M, "p"], "x"), mdel(M, "q")),
+      apply(1, 0, "tracked", "diff"),
+      apply(2, 0, "remote", "diff"),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-out-of-scope-deletion-first",
+    description: "one tracked transaction deletes a key outside the manager's scope, then one inside: yjs keeps the whole transaction's client order, so undo walks the outside key's client first and restores the inside key over a concurrent write",
+    docs: 3,
+    managers: [{ doc: 0, scope: M, group: true }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      txn(2, "setup", set(O, "q", 1)),
+      apply(0, 1, "remote", "state"),
+      apply(2, 1, "remote", "state"),
+      txn(1, "setup", set([M, "p"], "x", "A")),
+      apply(1, 0, "remote", "state"),
+      apply(1, 2, "remote", "state"),
+      manage(0),
+      txn(2, null, set([M, "p"], "x", "B")),
+      txn(0, null, mdel(O, "q"), mdel([M, "p"], "x")),
+      apply(2, 0, "remote", "diff"),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-tracked-remote-blocks-before-deletes",
+    description: "a tracked remote update whose higher client's write depends on a lower client's write in the same update: yjs integrates every block, both overwrites included, before the delete set, so the lower client's first deletion is an overwrite and undo walks that client before the delete set's others (GC off, so the overwritten write arrives with its content, not as a deleted struct)",
+    docs: 3,
+    gc: false,
+    managers: [{ doc: 0, scope: M, origins: ["tracked"] }],
+    states: true,
+    steps: [
+      txn(0, "setup", set(M, "k", "V0")),
+      txn(2, "setup", set(M, "s", "old")),
+      txn(1, "setup", set(M, "r", "w")),
+      apply(0, 1, "remote", "state"),
+      apply(2, 1, "remote", "state"),
+      apply(1, 0, "remote", "state"),
+      apply(1, 2, "remote", "state"),
+      manage(0),
+      txn(2, null, set(M, "k", "V1"), mdel(M, "s")),
+      apply(2, 1, "remote", "diff"),
+      txn(1, null, set(M, "k", "V2"), mdel(M, "r")),
+      apply(1, 0, "tracked", "diff"),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-tracked-remote-insertions-order",
+    description: "a tracked remote update inserts keys of two clients into an empty document: yjs records insertion clients in the order they joined the store and deletes in reverse on undo, which decides the order redo restores them in",
+    docs: 4,
+    managers: [{ doc: 0, scope: M, origins: ["tracked"] }],
+    states: true,
+    steps: [
+      txn(1, null, set(M, "a", "A")),
+      txn(2, null, set(M, "b", "B")),
+      apply(1, 3, "remote", "state"),
+      apply(2, 3, "remote", "state"),
+      manage(0),
+      apply(3, 0, "tracked", "state"),
+      undo(0, 0),
+      redo(0, 0),
+    ],
+  },
+  {
+    name: "undo-insertions-order-across-scope",
+    description: "a tracked remote update inserts outside the manager's scope for a higher client and inside it for a lower one, then a grouped update inserts inside it for the higher: yjs keeps the insertion clients of the whole transaction in store order, so undo deletes the lower client's key last and redo restores it first",
+    docs: 4,
+    managers: [{ doc: 0, scope: M, group: true, origins: ["tracked"] }],
+    states: true,
+    steps: [
+      manage(0),
+      txn(1, null, set(O, "x", 0)),
+      txn(2, null, set(M, "b", "B")),
+      apply(1, 3, "remote", "state"),
+      apply(2, 3, "remote", "state"),
+      apply(3, 0, "tracked", "state"),
+      txn(1, null, set(M, "a", "A")),
+      apply(1, 0, "tracked", "diff"),
+      undo(0, 0),
+      redo(0, 0),
+    ],
+  },
+  {
+    name: "undo-fresh-update-before-pending",
+    description: "an update arrives while a block of one of its clients waits in the pending queue for it: yjs integrates the update's own blocks first and retries the queue after, so a key the update sets comes before the queued one in _map, and undo, walking keys in that order, leaves a concurrent write in place",
+    docs: 4,
+    managers: [{ doc: 0, scope: M, group: true }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 2, "remote", "state"),
+      apply(0, 3, "remote", "state"),
+      txn(1, null, set(O, "dummy", 0)),
+      apply(1, 3, "remote", "state"),
+      txn(1, null, set([M, "p"], "x", "A")),
+      txn(2, null, set([M, "p"], "q", "Q")),
+      apply(2, 3, "remote", "state"),
+      apply(1, 0, "remote", "since", { [CLIENTS[0]]: 1, [CLIENTS[1]]: 1 }),
+      apply(3, 0, "remote", "diff"),
+      apply(1, 2, "remote", "state"),
+      txn(2, null, set([M, "p"], "x", "B")),
+      manage(0),
+      txn(0, null, mclear([M, "p"])),
+      apply(2, 0, "remote", "diff"),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-nested-keys-in-arrival-order",
+    description: "a map holding keys from two other clients, z arriving before a: deleting the map deletes them in the order they were first set, as yjs walks _map, so undo restores z first",
+    docs: 3,
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 2, "remote", "state"),
+      txn(1, "setup", set([M, "p"], "z", 1)),
+      txn(2, "setup", set([M, "p"], "a", 2)),
+      apply(1, 0, "remote", "diff"),
+      apply(2, 0, "remote", "diff"),
+      manage(0),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-nested-keys-from-one-update",
+    description: "a map whose keys from two clients arrive in one update: yjs integrates the higher client first, so its key comes first in _map and is restored first",
+    docs: 3,
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 2, "remote", "state"),
+      txn(1, "setup", set([M, "p"], "z", 1)),
+      txn(2, "setup", set([M, "p"], "a", 2)),
+      apply(2, 1, "remote", "diff"),
+      apply(1, 0, "remote", "diff"),
+      manage(0),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-keys-from-dependent-blocks",
+    description: "one update holds keys of three clients in a map: the highest client's key overwrites the lowest's, and a middle client's key is independent. yjs integrates the highest client's key first, following its dependency into just the lowest client's first key, then the middle client's, then the rest, so the keys first set come in that order and undo of the map's deletion restores in it",
+    docs: 4,
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 2, "remote", "state"),
+      apply(0, 3, "remote", "state"),
+      txn(3, null, set([M, "p"], "z", "L1")),
+      apply(3, 1, "remote", "diff"),
+      txn(1, null, set([M, "p"], "z", "H1")),
+      txn(3, null, set([M, "p"], "a", "L2")),
+      txn(2, null, set([M, "p"], "m", "M1")),
+      apply(3, 1, "remote", "diff"),
+      apply(2, 1, "remote", "diff"),
+      manage(0),
+      apply(1, 0, "remote", "diff"),
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "undo-map-clear-order",
+    description: "a map with keys from two clients, z set before a, cleared in a tracked transaction: yjs clears in _map order, and undo restores in that order",
+    docs: 2,
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(1, "setup", set(M, "z", 1)),
+      apply(1, 0, "remote", "state"),
+      txn(0, "setup", set(M, "a", 2)),
+      manage(0),
+      txn(0, null, mclear(M)),
+      undo(0, 0),
+    ],
+  },
+  {
     name: "undo-redo",
     description: "UndoManager transactions emit updates with the manager as origin",
     steps: [txn(0, null, ins(T, 0, "abc")), txn(0, null, ins(T, 3, "def")), undo(0), undo(0), redo(0)],
@@ -369,6 +903,7 @@ const resolveType = (doc, path) => {
     case "text": cur = doc.getText(name); break;
     case "array": cur = doc.getArray(name); break;
     case "map": cur = doc.getMap(name); break;
+    case "xml": cur = doc.getXmlFragment(name); break;
     default: throw new Error(`unknown root kind ${kind}`);
   }
   for (const seg of segs.slice(1)) {
@@ -404,6 +939,10 @@ const applyOp = (doc, op) => {
     case "setType": return t.set(op.key, newType(op.kind));
     case "insertType": return t.insert(op.index, [newType(op.kind)]);
     case "mapDelete": return t.delete(op.key);
+    case "mapClear": return t.clear();
+    case "xmlElement": return t.insert(op.index, [new Y.XmlElement(op.name)]);
+    case "xmlText": return t.insert(op.index, [new Y.XmlText()]);
+    case "setAttr": return t.setAttribute(op.key, op.value);
     default: throw new Error(`unknown op ${op.op}`);
   }
 };
@@ -424,14 +963,23 @@ const out = scenarios.map((sc) => {
   // reaches); otherwise every transaction is its own step. The manager
   // tracks the null origin only, so a "setup" transaction is not undoable.
   const ums = docs.map((d) => (sc.undoScope ? new Y.UndoManager(resolveType(d, sc.undoScope), { captureTimeout: sc.undoGroup ? 1e9 : 0 }) : null));
+  const managers = (sc.managers || []).map(() => null);
   const events = [];
   let step = -1;
   const originName = (o, i) => {
     if (o === null || o === undefined) return null;
     if (typeof o === "string") return o;
     if (o === ums[i]) return "<undo-manager>";
+    const k = managers.indexOf(o);
+    if (k >= 0) return `<um:${k}>`;
     throw new Error(`unexpected origin ${o}`);
   };
+  const managerAt = (u) => (u.um === undefined ? ums[u.doc] : managers[u.um]);
+  const rootKeys = [...new Set(sc.steps.flatMap((s) => (s.ops || []).map((op) => (Array.isArray(op.path) ? op.path[0] : op.path))).concat(sc.undoScope ? [sc.undoScope] : []).concat((sc.managers || []).map((m) => (Array.isArray(m.scope) ? m.scope[0] : m.scope))))].sort();
+  const snapshot = () => ({
+    state: docs.map((d) => Object.fromEntries(rootKeys.map((r) => [r, resolveType(d, r).toJSON()]))),
+    stacks: managers.map((m) => (m ? [m.canUndo(), m.canRedo()] : null)),
+  });
   docs.forEach((d, i) => {
     d.on("update", (u, origin) => events.push({ step, doc: i, origin: originName(origin, i), v1: hex(u) }));
     d.on("updateV2", (u, origin) => {
@@ -455,14 +1003,27 @@ const out = scenarios.map((sc) => {
       Y.applyUpdate(docs[to], u, origin);
       steps.push({ apply: { ...s.apply, update: hex(u) } });
     } else if (s.undo || s.redo) {
-      const i = (s.undo || s.redo).doc;
-      if (s.undo) ums[i].undo();
-      else ums[i].redo();
+      const um = managerAt(s.undo || s.redo);
+      const result = (s.undo ? um.undo() : um.redo()) !== null;
+      steps.push(sc.managers ? { ...s, result } : s);
+    } else if (s.manage !== undefined) {
+      const m = sc.managers[s.manage];
+      managers[s.manage] = new Y.UndoManager(resolveType(docs[m.doc], m.scope), {
+        captureTimeout: m.group ? 1e9 : 0,
+        trackedOrigins: new Set(m.origins === undefined ? [null] : m.origins),
+      });
+      steps.push(s);
+    } else if (s.clear) {
+      managers[s.clear.um].clear();
+      steps.push(s);
+    } else if (s.stop) {
+      managers[s.stop.um].stopCapturing();
       steps.push(s);
     } else {
       docs[s.doc].transact(() => s.ops.forEach((op) => applyOp(docs[s.doc], op)), s.origin);
       steps.push(s);
     }
+    if (sc.states) Object.assign(steps[steps.length - 1], snapshot());
   });
   for (const e of events) {
     if (e.v2 === undefined) throw new Error(`${sc.name}: update without updateV2`);
@@ -492,6 +1053,8 @@ const out = scenarios.map((sc) => {
     gc,
     clients: CLIENTS.slice(0, n),
     ...(sc.undoScope ? { undo_scope: sc.undoScope, undo_group: !!sc.undoGroup } : {}),
+    ...(sc.managers ? { managers: sc.managers } : {}),
+    ...(sc.states ? { root_keys: [...new Set(sc.steps.flatMap((s) => (s.ops || []).map((op) => (Array.isArray(op.path) ? op.path[0] : op.path))).concat((sc.managers || []).map((m) => (Array.isArray(m.scope) ? m.scope[0] : m.scope))))].sort() } : {}),
     steps,
     events,
     ...(diffs ? { diffs_doc: sc.diffsDoc || 0, diffs } : {}),

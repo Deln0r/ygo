@@ -162,16 +162,21 @@ func (c Content) Copy() Content {
 		}
 		out.DocOpts = m
 	}
+	if c.Kind == KindType && c.Branch != nil {
+		// A new, empty shared type of the same kind (and tag, for an XML
+		// element), as yjs ContentType.copy does with type._copy(). Its
+		// content comes back item by item, restored into it.
+		out.Branch = &Branch{TypeRef: c.Branch.TypeRef, Name: c.Branch.Name, Map: map[string]*Item{}}
+	}
 	return out
 }
 
 // CopyableForUndo reports whether Copy produces a faithful, fully
-// independent restoration for this content kind. False for the
-// pointer-payload kinds (Type, Move, Doc) the first UndoManager cut
-// does not handle.
+// independent restoration for this content kind. False for Move and
+// Doc, which the UndoManager does not restore.
 func (c Content) CopyableForUndo() bool {
 	switch c.Kind {
-	case KindType, KindMove, KindDoc:
+	case KindMove, KindDoc:
 		return false
 	default:
 		return true

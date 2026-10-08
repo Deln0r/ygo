@@ -41,13 +41,13 @@ func (um *UndoManager) deletedByAStack(id block.ID) bool {
 
 // redoItem resurrects a previously deleted item by inserting a fresh
 // item with a copy of its content, linked back to the original via
-// Item.Redone. Returns the new live item, or nil if restoration is
-// not possible (an unresolved parent, or a content kind the first cut
-// does not handle).
-//
-// This is the map-key path of yjs's redoItem (ParentSub != nil). The
-// sequence path (ParentSub == nil, Array / Text) lands in a follow-up;
-// see docs/undo-manager-design.md.
+// Item.Redone: yjs redoItem, for map entries (redoMapItem) and
+// positional items (redoSequenceItem). A shared type comes back as a
+// new empty copy, its content restored into it item by item, and an
+// item whose parent type was deleted is restored into the parent's live
+// copy. Returns the restored item, or nil when restoration is not
+// possible (a parent that cannot be restored, a conflicting later write
+// on the key, or Move and subdocument content).
 //
 // Caller holds the doc write lock via txn.
 func (um *UndoManager) redoItem(txn *doc.TransactionMut, item *block.Item, si *StackItem) *block.Item {
@@ -60,20 +60,36 @@ func (um *UndoManager) redoItem(txn *doc.TransactionMut, item *block.Item, si *S
 		return txn.MaterializeCleanStart(*item.Redone)
 	}
 
-	// Parent must be a resolved branch. Nested-type parents whose
-	// own item is deleted need recursive parent-redo; deferred.
 	if item.Parent.Kind != block.ParentBranch || item.Parent.Branch == nil {
 		return nil
 	}
 	parent := item.Parent.Branch
-	if parent.Item != nil && parent.Item.IsDeleted() {
-		// Parent type itself was deleted; recursive parent resurrection
-		// is a follow-up. Refuse rather than produce a dangling item.
-		return nil
+	if pi := parent.Item; pi != nil && pi.IsDeleted() {
+		// The parent type was deleted too. As yjs redoItem: restore it
+		// first when this step deleted it as well, otherwise give up
+		// unless it was restored already; then restore into its live
+		// copy, the end of its Redone chain, even if that copy has been
+		// deleted again (the item is then restored deleted, and the step
+		// still counts).
+		if pi.Redone == nil {
+			if !um.inStepToRedo(pi, si) || um.redoItem(txn, pi, si) == nil {
+				return nil
+			}
+		}
+		for pi.Redone != nil {
+			next := txn.MaterializeCleanStart(*pi.Redone)
+			if next == nil {
+				return nil
+			}
+			pi = next
+		}
+		if pi.Content.Kind != block.KindType || pi.Content.Branch == nil {
+			return nil
+		}
+		parent = pi.Content.Branch
 	}
 
-	// Content kinds with pointer payloads (nested type, move, doc) are
-	// not faithfully restorable in the first cut.
+	// Move and subdocument content are not restored.
 	if !item.Content.CopyableForUndo() {
 		return nil
 	}
@@ -130,16 +146,30 @@ func (um *UndoManager) redoMapItem(txn *doc.TransactionMut, item *block.Item, pa
 		ParentSub: &keyCopy,
 		Flags:     block.FlagCountable,
 	}
-	redone.SetKeep(true)
+	return integrateRedone(txn, item, redone)
+}
 
+// integrateRedone links item to its restored copy and integrates the
+// copy, as the end of yjs redoItem does: item.redone is set first, the
+// copy is kept, and the copy is returned even when integration deletes
+// it at once (its parent is deleted), so the step counts as a change.
+func integrateRedone(txn *doc.TransactionMut, item, redone *block.Item) *block.Item {
+	id := redone.ID
+	item.Redone = &id
+	keepItem(redone, true)
 	txn.Store().PushBlock(redone)
 	if dropped := redone.Integrate(txn, 0); dropped {
 		txn.Delete(redone)
-		return nil
 	}
-
-	item.Redone = &nextID
 	return redone
+}
+
+// inStepToRedo reports whether this step restores it: deleted by the
+// step (si.Deletions), not inserted by it, and in scope. yjs's redoitems.
+func (um *UndoManager) inStepToRedo(it *block.Item, si *StackItem) bool {
+	return si.Deletions.Contains(it.ID.Client, it.ID.Clock) &&
+		!si.Insertions.Contains(it.ID.Client, it.ID.Clock) &&
+		um.itemInScope(it)
 }
 
 // redoSequenceItem resurrects a positional (Array / Text) item at its
@@ -219,16 +249,7 @@ func redoSequenceItem(txn *doc.TransactionMut, item *block.Item, parent *block.B
 		Parent:      block.Parent{Kind: block.ParentBranch, Branch: parent},
 		Flags:       flags,
 	}
-	redone.SetKeep(true)
-
-	txn.Store().PushBlock(redone)
-	if dropped := redone.Integrate(txn, 0); dropped {
-		txn.Delete(redone)
-		return nil
-	}
-
-	item.Redone = &nextID
-	return redone
+	return integrateRedone(txn, item, redone)
 }
 
 // sameParentBranch reports whether it sits directly under parent.

@@ -28,16 +28,18 @@ type updateEventFile struct {
 }
 
 type updateEventScenario struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	GC          bool              `json:"gc"`
-	Clients     []uint64          `json:"clients"`
-	UndoScope   string            `json:"undo_scope"`
-	UndoGroup   bool              `json:"undo_group"`
-	Steps       []updateEventStep `json:"steps"`
-	Events      []updateEvent     `json:"events"`
-	DiffsDoc    int               `json:"diffs_doc"`
-	Diffs       []updateDiff      `json:"diffs"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	GC          bool                 `json:"gc"`
+	Clients     []uint64             `json:"clients"`
+	UndoScope   string               `json:"undo_scope"`
+	UndoGroup   bool                 `json:"undo_group"`
+	Managers    []updateEventManager `json:"managers"`
+	RootKeys    []string             `json:"root_keys"`
+	Steps       []updateEventStep    `json:"steps"`
+	Events      []updateEvent        `json:"events"`
+	DiffsDoc    int                  `json:"diffs_doc"`
+	Diffs       []updateDiff         `json:"diffs"`
 }
 
 type updateEventStep struct {
@@ -53,12 +55,35 @@ type updateEventStep struct {
 		Replay *int    `json:"replay"`
 		Update string  `json:"update"`
 	} `json:"apply"`
-	Undo *struct {
-		Doc int `json:"doc"`
-	} `json:"undo"`
-	Redo *struct {
-		Doc int `json:"doc"`
-	} `json:"redo"`
+	Undo   *updateEventUndoRef `json:"undo"`
+	Redo   *updateEventUndoRef `json:"redo"`
+	Manage *int                `json:"manage"`
+	Clear  *updateEventUndoRef `json:"clear"`
+	Stop   *updateEventUndoRef `json:"stop"`
+	// Result is what yjs's undo / redo returned (a stack item or null),
+	// State the toJSON of each document's roots after the step, Stacks
+	// each manager's [canUndo, canRedo] after it (null before it exists).
+	Result *bool           `json:"result"`
+	State  json.RawMessage `json:"state"`
+	Stacks json.RawMessage `json:"stacks"`
+}
+
+// updateEventUndoRef names the manager an undo / redo / clear step acts on:
+// Um indexes the scenario's managers; without it, the document's legacy
+// undo_scope manager.
+type updateEventUndoRef struct {
+	Doc int  `json:"doc"`
+	Um  *int `json:"um"`
+}
+
+// updateEventManager is an UndoManager a scenario creates at its manage step,
+// on Scope (a path), tracking Origins (null for the nil origin; absent means
+// [null]), one step per transaction unless Group.
+type updateEventManager struct {
+	Doc     int             `json:"doc"`
+	Scope   json.RawMessage `json:"scope"`
+	Origins []*string       `json:"origins"`
+	Group   bool            `json:"group"`
 }
 
 type updateEventOp struct {
@@ -72,6 +97,7 @@ type updateEventOp struct {
 	Values json.RawMessage `json:"values"`
 	Key    string          `json:"key"`
 	Kind   string          `json:"kind"`
+	Name   string          `json:"name"`
 }
 
 type updateEvent struct {
@@ -128,34 +154,6 @@ var knownUpdateEventDivergences = map[string]struct {
 	reason string
 	events []updateEvent
 }{
-	"nested-type-deleted": {
-		reason: "deleting a nested type does not delete the items inside it (txn.Delete has no recursive delete), so the transaction's delete set holds the type's own item, [0,1), where yjs's holds [0,3)",
-		events: pinnedEvents(
-			"0|0|nil|0101cdcc83da0b002701016d056368696c640100|0000058d9987b4170000012709066d6368696c640105010101010001010000",
-			"1|0|nil|0102cdcc83da0b012800cdcc83da0b000161017d012800cdcc83da0b000162017d0200|000006cd9987b417010201000001280502616241000100000241000102017d017d0200",
-			"2|0|nil|0001cdcc83da0b010001|00000000000001000000000001cdcc83da0b010000",
-		),
-	},
-	"nested-array-collected": {
-		reason: "the same missing recursive delete: the delete set is [0,1), yjs's [0,6); the collected run itself, and every diff inside it, matches",
-		events: pinnedEvents(
-			"0|0|nil|0101cdcc83da0b002701016d036172720000|0000058d9987b4170000012707046d6172720103010101000001010000",
-			"1|0|nil|0101cdcc83da0b010800cdcc83da0b00057d017d027d037d047d0500|000006cd9987b417000100000108010001000001050101017d017d027d037d047d0500",
-			"2|0|nil|0001cdcc83da0b010001|00000000000001000000000001cdcc83da0b010000",
-			"3|0|nil|0101cdcc83da0b062801016d056166746572017d0100|0000058d9987b4170000012809066d6166746572010501010001010101067d0100",
-		),
-	},
-	"remote-collected-run-partly-known": {
-		reason: "the same missing recursive delete in step 4 ([0,1) where yjs has [0,4)); the receiver's step 5, which integrates the unknown tail of the collected run, matches",
-		events: pinnedEvents(
-			"0|0|nil|0101cdcc83da0b002701016d01700200|0000058d9987b4170000012705026d704100010101020001010000",
-			"1|0|nil|0101cdcc83da0b010400cdcc83da0b00016100|000006cd9987b417000100000104030161010100000001010100",
-			"2|1|remote|0102cdcc83da0b002701016d0170020400cdcc83da0b00016100|000006cd9987b417000100000327000406036d706141010301000001020001020000",
-			"3|0|nil|0101cdcc83da0b0284cdcc83da0b0102626300|000006cd9987b417000102000184040262630200000001010200",
-			"4|0|nil|0001cdcc83da0b010001|00000000000001000000000001cdcc83da0b010000",
-			"5|1|remote|0101cdcc83da0b02000201cdcc83da0b010002|0000058d9987b4170000010001000000010201010201cdcc83da0b010001",
-		),
-	},
 	"concurrent-formatting": {
 		reason: "after a remote update that duplicates a format, yjs runs cleanupYTextAfterTransaction and emits a second update of its own (origin nil) deleting the redundant marker; ygo has no such cleanup, so that event is missing and the later diff lacks the deletion",
 		events: pinnedEvents(
@@ -165,6 +163,25 @@ var knownUpdateEventDivergences = map[string]struct {
 			"3|1|nil|0102d689cf81010046cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00|000200020b96939e8302cd9987b4170001020100034600860b08626f6c64626f6c644400000000010200787e00",
 			"4|0|remote|0102d689cf81010046cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00|000200020b96939e8302cd9987b4170001020100034600860b08626f6c64626f6c644400000000010200787e00",
 			"5|1|remote|0102cdcc83da0b0246cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c01d689cf8101010001|0002000206cd9987b4170101020100034600860b08626f6c64626f6c644400000000010202787e01d689cf8101010000",
+		),
+	},
+	"undo-keys-from-dependent-blocks": {
+		reason: "yjs integrateStructs follows a block's missing dependency into the client of the same update that has it, integrating just that block first; Drain skips the block and takes it in the next pass, so a middle client's key is first set before the dependent one and undo restores m before z, where yjs restores z first. The map's content is the same (docs/tech-debt.md, \"An update's blocks integrate in passes\")",
+		events: pinnedEvents(
+			"0|0|setup|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
+			"1|1|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
+			"2|2|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
+			"3|3|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
+			"4|3|nil|0101de85c31b002800cdcc83da0b00017a0177024c3100|0000099e8b86378d9987b417010000012803017a01010000010101010077024c3100",
+			"5|1|remote|0101de85c31b002800cdcc83da0b00017a0177024c3100|0000099e8b86378d9987b417010000012803017a01010000010101010077024c3100",
+			"6|1|nil|0101d689cf810100a8de85c31b00017702483101de85c31b010001|00000996939e83029e8b863701000001a80100000001010101007702483101de85c31b010000",
+			"7|3|nil|0101de85c31b012800cdcc83da0b0001610177024c3200|0000099e8b86378d9987b417010000012803016101010000010101010177024c3200",
+			"8|2|nil|0101acd6b743002800cdcc83da0b00016d0177024d3100|00000aacacef86018d9987b417010000012803016d01010000010101010077024d3100",
+			"9|1|remote|0101de85c31b012800cdcc83da0b0001610177024c3200|0000099e8b86378d9987b417010000012803016101010000010101010177024c3200",
+			"10|1|remote|0101acd6b743002800cdcc83da0b00016d0177024d3100|00000aacacef86018d9987b417010000012803016d01010000010101010077024d3100",
+			"12|0|remote|0301d689cf810100a8de85c31b00017702483101acd6b743002800cdcc83da0b00016d0177024d3102de85c31b002100cdcc83da0b00017a012800cdcc83da0b0001610177024c3201de85c31b010001|00001d96939e83029e8b8637acacef86018d9987b4179e8b8637cd9987b417000201020007a800280021002806036d7a61410101000002410203010077024831010077024d31020077024c3201de85c31b010000",
+			"13|0|nil|0004cdcc83da0b010001d689cf8101010001acd6b743010001de85c31b010101|00000000000001000000000004cdcc83da0b010000d689cf8101010000acd6b743010000de85c31b010100",
+			"14|0|<um:0>|0104cdcc83da0b01a7cdcc83da0b00012800cdcc83da0b01016d0177024d312800cdcc83da0b01017a01770248312800cdcc83da0b0101610177024c3200|000006cd9987b4170304000201000003a7002806036d7a6141010100010102410101040177024d317702483177024c3200",
 		),
 	},
 	"undo-grouped-deletes": {
@@ -329,6 +346,13 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			rootNames[segs[0].(string)] = true
 		}
 	}
+	for _, m := range sc.Managers {
+		rootNames[decodeUpdateEventPath(t, m.Scope)[0].(string)] = true
+	}
+	for _, r := range sc.RootKeys {
+		rootNames[r] = true
+	}
+	managers := make([]*ygo.UndoManager, len(sc.Managers))
 	var events []updateEvent
 	step := -1
 	docs := make([]*updateEventDoc, len(sc.Clients))
@@ -345,6 +369,8 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 				ed.roots[name] = ygo.NewArray(d, n)
 			case "map":
 				ed.roots[name] = ygo.NewMap(d, n)
+			case "xml":
+				ed.roots[name] = ygo.NewXmlFragment(d, n)
 			default:
 				t.Fatalf("unknown root kind %q", kind)
 			}
@@ -369,6 +395,12 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			if ed.um != nil && o == any(ed.um) {
 				s := "<undo-manager>"
 				return &s
+			}
+			for k, m := range managers {
+				if m != nil && o == any(m) {
+					s := fmt.Sprintf("<um:%d>", k)
+					return &s
+				}
 			}
 			t.Fatalf("unexpected origin %T", o)
 			return nil
@@ -428,10 +460,49 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			if err := ygo.ApplyUpdateWithOrigin(plain[a.To], raw, origin); err != nil {
 				t.Fatalf("step %d: apply: %v", k, err)
 			}
-		case st.Undo != nil:
-			docs[st.Undo.Doc].um.Undo()
-		case st.Redo != nil:
-			docs[st.Redo.Doc].um.Redo()
+		case st.Undo != nil || st.Redo != nil:
+			ref, op := st.Undo, "undo"
+			if ref == nil {
+				ref, op = st.Redo, "redo"
+			}
+			um := docs[ref.Doc].um
+			if ref.Um != nil {
+				um = managers[*ref.Um]
+			}
+			var got bool
+			if op == "undo" {
+				got = um.Undo()
+			} else {
+				got = um.Redo()
+			}
+			if st.Result != nil && got != *st.Result {
+				t.Errorf("step %d: %s returned %v, yjs %v", k, op, got, *st.Result)
+			}
+		case st.Manage != nil:
+			m := sc.Managers[*st.Manage]
+			scope, err := resolveUpdateEventPath(docs[m.Doc], decodeUpdateEventPath(t, m.Scope))
+			if err != nil {
+				t.Fatalf("step %d: manager scope: %v", k, err)
+			}
+			opts := ygo.UndoManagerOptions{CaptureTimeout: -1}
+			if m.Group {
+				opts.CaptureTimeout = time.Hour
+			}
+			if m.Origins != nil {
+				opts.TrackedOrigins = map[any]struct{}{}
+				for _, o := range m.Origins {
+					if o == nil {
+						opts.TrackedOrigins[nil] = struct{}{}
+					} else {
+						opts.TrackedOrigins[*o] = struct{}{}
+					}
+				}
+			}
+			managers[*st.Manage] = ygo.NewUndoManagerWithOptions(docs[m.Doc].d, opts, scope.(ygo.UndoScope))
+		case st.Clear != nil:
+			managers[*st.Clear.Um].Clear()
+		case st.Stop != nil:
+			managers[*st.Stop.Um].StopCapturing()
 		default:
 			ed := docs[st.Doc]
 			txn := ed.d.WriteTxn()
@@ -446,8 +517,101 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			}
 			txn.Commit()
 		}
+		if len(st.State) > 0 {
+			got := make([]any, len(docs))
+			for i, ed := range docs {
+				state := map[string]any{}
+				for _, r := range sc.RootKeys {
+					state[r] = renderUpdateEventState(ed.roots[r])
+				}
+				got[i] = state
+			}
+			if g, w, ok := sameUpdateEventJSON(got, st.State); !ok {
+				t.Errorf("step %d: state\n ygo %s\n yjs %s", k, g, w)
+			}
+		}
+		if len(st.Stacks) > 0 {
+			got := make([]any, len(managers))
+			for i, m := range managers {
+				if m != nil {
+					got[i] = []bool{m.CanUndo(), m.CanRedo()}
+				}
+			}
+			if g, w, ok := sameUpdateEventJSON(got, st.Stacks); !ok {
+				t.Errorf("step %d: [canUndo canRedo] per manager\n ygo %s\n yjs %s", k, g, w)
+			}
+		}
 	}
 	return plain, events
+}
+
+// renderUpdateEventState is the toJSON yjs gives a shared type: a map as an
+// object, an array as a list, a text as its plain string, XML as its markup.
+func renderUpdateEventState(v any) any {
+	switch x := v.(type) {
+	case *ygo.Map:
+		out := map[string]any{}
+		x.Range(func(k string, val any) bool {
+			out[k] = renderUpdateEventState(val)
+			return true
+		})
+		return out
+	case *ygo.Array:
+		out := []any{}
+		x.Range(func(_ uint64, val any) bool {
+			out = append(out, renderUpdateEventState(val))
+			return true
+		})
+		return out
+	case *ygo.Text:
+		return x.String()
+	case *ygo.XmlFragment:
+		return x.ToString()
+	case *ygo.XmlElement:
+		return x.ToString()
+	case *ygo.XmlText:
+		return x.String()
+	default:
+		return v
+	}
+}
+
+// sameUpdateEventJSON compares got with the fixture's JSON after one
+// round through encoding/json each, so key order and number spelling agree.
+func sameUpdateEventJSON(got any, want json.RawMessage) (string, string, bool) {
+	g, err := json.Marshal(got)
+	if err != nil {
+		return err.Error(), string(want), false
+	}
+	dec := json.NewDecoder(bytes.NewReader(want))
+	dec.UseNumber()
+	var w any
+	if err := dec.Decode(&w); err != nil {
+		return string(g), err.Error(), false
+	}
+	wb, _ := json.Marshal(w)
+	return string(g), string(wb), bytes.Equal(g, wb)
+}
+
+// resolveUpdateEventPath walks a fixture path ("kind:name", then map keys
+// and child indices) to a shared type.
+func resolveUpdateEventPath(ed *updateEventDoc, segs []any) (any, error) {
+	target := ed.roots[segs[0].(string)]
+	for _, seg := range segs[1:] {
+		switch v := target.(type) {
+		case *ygo.Map:
+			target = v.Get(seg.(string))
+		case *ygo.Array:
+			target = v.Get(uint64(seg.(float64)))
+		case *ygo.XmlFragment:
+			target = v.Get(uint64(seg.(float64)))
+		case *ygo.XmlElement:
+			target = v.Get(uint64(seg.(float64)))
+		default:
+			return nil, fmt.Errorf("cannot descend into %T", target)
+		}
+	}
+	return target, nil
 }
 
 func decodeUpdateEventPath(t *testing.T, raw json.RawMessage) []any {
@@ -468,19 +632,42 @@ func decodeUpdateEventPath(t *testing.T, raw json.RawMessage) []any {
 
 func applyUpdateEventOp(t *testing.T, txn *ygo.TransactionMut, ed *updateEventDoc, op updateEventOp) error {
 	t.Helper()
-	segs := decodeUpdateEventPath(t, op.Path)
-	target := ed.roots[segs[0].(string)]
-	for _, seg := range segs[1:] {
-		switch v := target.(type) {
-		case *ygo.Map:
-			target = v.Get(seg.(string))
-		case *ygo.Array:
-			target = v.Get(uint64(seg.(float64)))
-		default:
-			return fmt.Errorf("cannot descend into %T", target)
-		}
+	target, err := resolveUpdateEventPath(ed, decodeUpdateEventPath(t, op.Path))
+	if err != nil {
+		return err
 	}
 	switch v := target.(type) {
+	case *ygo.XmlText:
+		if op.Op == "insert" {
+			return v.Insert(txn, op.Index, op.Text)
+		}
+	case *ygo.XmlFragment:
+		switch op.Op {
+		case "xmlElement":
+			v.InsertXmlElement(txn, op.Index, op.Name)
+			return nil
+		case "xmlText":
+			v.InsertXmlText(txn, op.Index)
+			return nil
+		case "delete":
+			v.Delete(txn, op.Index, op.Len)
+			return nil
+		}
+	case *ygo.XmlElement:
+		switch op.Op {
+		case "xmlElement":
+			v.InsertXmlElement(txn, op.Index, op.Name)
+			return nil
+		case "xmlText":
+			v.InsertXmlText(txn, op.Index)
+			return nil
+		case "setAttr":
+			v.SetAttribute(txn, op.Key, jsonValue(t, op.Value).(string))
+			return nil
+		case "delete":
+			v.Delete(txn, op.Index, op.Len)
+			return nil
+		}
 	case *ygo.Text:
 		switch op.Op {
 		case "insert":
@@ -526,6 +713,9 @@ func applyUpdateEventOp(t *testing.T, txn *ygo.TransactionMut, ed *updateEventDo
 			return nil
 		case "mapDelete":
 			v.Delete(txn, op.Key)
+			return nil
+		case "mapClear":
+			v.Clear(txn)
 			return nil
 		case "setType":
 			switch op.Kind {

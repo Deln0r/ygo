@@ -52,12 +52,7 @@ type observerSpec struct {
 var knownObserverDivergences = map[string]struct {
 	reason string
 	calls  []string
-}{
-	"grandchild-written-then-child-deleted": {
-		reason: "deleting a nested type does not delete the types inside it (txn.Delete has no recursive delete), so the grandchild still reports its change",
-		calls:  []string{"observe grand", "deep root [map[] map[child grand]]"},
-	},
-}
+}{}
 
 func TestObservers_Fixtures(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "observer-fixtures.json"))

@@ -14,6 +14,9 @@ type StateVector map[uint64]uint64
 // not safe for concurrent access; the Doc layer holds the RWMutex.
 type BlockStore struct {
 	clients map[uint64]*ClientBlockList
+	// order lists the clients in the order their first block arrived,
+	// the order in which yjs iterates store.clients (a Map).
+	order []uint64
 }
 
 // NewBlockStore returns an empty store.
@@ -38,8 +41,16 @@ func (s *BlockStore) GetClientMut(c uint64) *ClientBlockList {
 	if !ok {
 		l = NewClientBlockList()
 		s.clients[c] = l
+		s.order = append(s.order, c)
 	}
 	return l
+}
+
+// ClientOrder returns the clients in the order their first block arrived,
+// as yjs iterates store.clients: the order of a yjs state vector, and so of
+// the insertions an UndoManager records. The slice is new.
+func (s *BlockStore) ClientOrder() []uint64 {
+	return append([]uint64(nil), s.order...)
 }
 
 // Contains reports whether the store has ever seen the given ID. Returns

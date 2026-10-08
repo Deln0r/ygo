@@ -147,11 +147,14 @@ func (d *Doc) WriteTxn() *TransactionMut {
 //  3. Squash: merge this transaction's new blocks into their left
 //     neighbours.
 //  4. Record subdocument changes.
-//  5. After-transaction handlers (the UndoManager, OnSubdocs, sync
-//     clients), which may mark deleted items kept.
+//  5. After-transaction handlers (the UndoManager, sync clients), which
+//     may mark deleted items kept. Functions queued with
+//     QueueInCommit run before each handler and once more after the
+//     last.
 //  6. GC: free deleted content (unless GC is off or the item is kept)
 //     and merge deleted runs.
 //  7. Update handlers (OnUpdate, OnUpdateV2), on the final layout.
+//  8. Subdocument handlers (OnSubdocs), as yjs emits 'subdocs' last.
 //
 // yjs runs its merge after GC rather than before the after-transaction
 // handlers; docs/tech-debt.md ("Commit-time squash runs before
@@ -192,12 +195,17 @@ func (t *TransactionMut) Commit() {
 	// keep, which the GC pass below must see, so observers run BEFORE
 	// gcDeleted.
 	t.doc.fireAfterTransactionHandlers(t)
+	// Work queued since the last handler (QueueInCommit), such as an
+	// UndoManager releasing what a step cleared from a handler kept, so
+	// this GC already sees it.
+	t.doc.runQueued(t)
 	// Garbage-collect deleted content (free payloads, merge deleted
 	// runs), skipping items marked keep by an observer.
 	t.gcDeleted()
 	// Update events last, as yjs emits 'update' / 'updateV2' after GC
 	// and the struct merge: the bytes describe the final layout.
 	t.doc.fireUpdateHandlers(t)
+	t.doc.fireSubdocsHandlers(t)
 	t.doc.mu.Unlock()
 }
 
@@ -404,6 +412,15 @@ func (t *TransactionMut) gcNestedChildren(br *block.Branch, touched map[uint64]u
 			gcItem(it)
 		}
 	}
+	// The collected type keeps no reference to its old items, as yjs
+	// ContentType.gc empties _start and _map: a wrapper someone still
+	// holds reads an empty type, and the items can be freed.
+	br.Start = nil
+	br.Map = map[string]*block.Item{}
+	br.MapOrder = nil
+	br.BlockLen = 0
+	br.ContentLen = 0
+	br.Markers.Invalidate()
 }
 
 // squashNewBlocks collapses runs of same-client adjacent-clock items
@@ -555,11 +572,8 @@ func (t *TransactionMut) MaterializeCleanEnd(id block.ID) *block.Item {
 // transaction's eventual delete-set emission. The Item must already
 // be in the store.
 //
-// Note: deleting a nested type does not delete the items inside it,
-// as yjs ContentType.delete does (docs/tech-debt.md, "Remaining
-// update-event divergences"). GC collects them together with the
-// type; with GC off, or when an UndoManager keeps the type's item,
-// they stay live.
+// Deleting a shared type's item deletes the items inside it too
+// (deleteTypeContent), as yjs ContentType.delete does.
 func (t *TransactionMut) Delete(item *block.Item) {
 	if item == nil || item.IsDeleted() {
 		return
@@ -581,6 +595,38 @@ func (t *TransactionMut) Delete(item *block.Item) {
 			}
 			if item.Len <= parent.ContentLen {
 				parent.ContentLen -= item.Len
+			}
+		}
+	}
+	if item.Content.Kind == block.KindType && item.Content.Branch != nil {
+		t.deleteTypeContent(item.Content.Branch)
+	}
+}
+
+// deleteTypeContent deletes every live item of a shared type whose own
+// item was just deleted, and forgets the changes recorded on the type in
+// this transaction, as yjs ContentType.delete does: the items inside go
+// into the transaction's delete set (and so into its update and an
+// UndoManager's step), and a deleted type reports no event. Positional
+// items go in document order, map entries in the order their keys were
+// first set (yjs _map.forEach).
+func (t *TransactionMut) deleteTypeContent(br *block.Branch) {
+	for it := br.Start; it != nil; it = it.Right {
+		if !it.IsDeleted() {
+			t.Delete(it)
+		}
+	}
+	for _, k := range br.MapKeys() {
+		if it := br.Map[k]; it != nil && !it.IsDeleted() {
+			t.Delete(it)
+		}
+	}
+	if _, ok := t.changedTypes[br]; ok {
+		delete(t.changedTypes, br)
+		for i, b := range t.changedOrder {
+			if b == br {
+				t.changedOrder = append(t.changedOrder[:i:i], t.changedOrder[i+1:]...)
+				break
 			}
 		}
 	}
