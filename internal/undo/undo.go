@@ -608,6 +608,9 @@ func (um *UndoManager) applyStackItem(si *StackItem) bool {
 			changed = true
 		}
 	}
+	// The step's deletions moved indices the types' search markers knew,
+	// as yjs popStackItem resets them.
+	txn.InvalidatePositionalMarkers()
 	return changed
 }
 

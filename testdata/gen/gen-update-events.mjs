@@ -931,6 +931,33 @@ const scenarios = [
     ],
   },
   {
+    name: "array-insert-after-undo",
+    description: "an undo deletes an array element before the one a search marker sits on; the next insert by index lands where yjs puts it (yjs popStackItem resets the markers)",
+    managers: [{ doc: 0, scope: A }],
+    states: true,
+    steps: [
+      manage(0),
+      txn(0, null, insType(A, 0, "array")),
+      txn(0, "y", insv(A, 1, [2])),
+      undo(0, 0),
+      txn(0, "other", insType(A, 1, "array")),
+    ],
+  },
+  {
+    name: "array-insert-after-remote-delete",
+    description: "a remote delete removes an array element before the one a search marker sits on; the next local insert by index lands where yjs puts it (yjs resets the markers of a remote transaction)",
+    docs: 2,
+    states: true,
+    steps: [
+      txn(0, null, insType(A, 0, "array")),
+      txn(0, null, insv(A, 1, [2])),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, del(A, 0, 1)),
+      apply(1, 0, "remote", "diff"),
+      txn(0, null, insType(A, 1, "array")),
+    ],
+  },
+  {
     name: "undo-redo",
     description: "UndoManager transactions emit updates with the manager as origin",
     steps: [txn(0, null, ins(T, 0, "abc")), txn(0, null, ins(T, 3, "def")), undo(0), undo(0), redo(0)],

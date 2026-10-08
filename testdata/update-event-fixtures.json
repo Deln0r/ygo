@@ -19847,6 +19847,373 @@
       ]
     },
     {
+      "name": "array-insert-after-undo",
+      "description": "an undo deletes an array element before the one a search marker sits on; the next insert by index lands where yjs puts it (yjs popStackItem resets the markers)",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "array:a"
+        }
+      ],
+      "root_keys": [
+        "array:a"
+      ],
+      "steps": [
+        {
+          "manage": 0,
+          "state": [
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insertType",
+              "path": "array:a",
+              "index": 0,
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                []
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "y",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 1,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                [],
+                2
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "array:a": [
+                2
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "insertType",
+              "path": "array:a",
+              "index": 1,
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                2,
+                []
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b00070101610000",
+          "v2": "0000058d9987b4170000010703016101010101000001010000"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": "y",
+          "v1": "0101cdcc83da0b0188cdcc83da0b00017d0200",
+          "v2": "000006cd9987b4170001000001880100000001010101017d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0001cdcc83da0b010001",
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0101cdcc83da0b0287cdcc83da0b010000",
+          "v2": "000006cd9987b41700010200018701000001000001010200"
+        }
+      ]
+    },
+    {
+      "name": "array-insert-after-remote-delete",
+      "description": "a remote delete removes an array element before the one a search marker sits on; the next local insert by index lands where yjs puts it (yjs resets the markers of a remote transaction)",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "root_keys": [
+        "array:a"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insertType",
+              "path": "array:a",
+              "index": 0,
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                []
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 1,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                [],
+                2
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0102cdcc83da0b00070101610088cdcc83da0b00017d0200"
+          },
+          "state": [
+            {
+              "array:a": [
+                [],
+                2
+              ]
+            },
+            {
+              "array:a": [
+                [],
+                2
+              ]
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "array:a",
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                [],
+                2
+              ]
+            },
+            {
+              "array:a": [
+                2
+              ]
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010001"
+          },
+          "state": [
+            {
+              "array:a": [
+                2
+              ]
+            },
+            {
+              "array:a": [
+                2
+              ]
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insertType",
+              "path": "array:a",
+              "index": 1,
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                2,
+                []
+              ]
+            },
+            {
+              "array:a": [
+                2
+              ]
+            }
+          ],
+          "stacks": []
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b00070101610000",
+          "v2": "0000058d9987b4170000010703016101010101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0188cdcc83da0b00017d0200",
+          "v2": "000006cd9987b4170001000001880100000001010101017d0200"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0102cdcc83da0b00070101610088cdcc83da0b00017d0200",
+          "v2": "000006cd9987b4170001000003070088030161010101010001010102007d0200"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010001",
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0287cdcc83da0b010000",
+          "v2": "000006cd9987b41700010200018701000001000001010200"
+        }
+      ]
+    },
+    {
       "name": "undo-redo",
       "description": "UndoManager transactions emit updates with the manager as origin",
       "gc": true,

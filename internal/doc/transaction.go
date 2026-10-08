@@ -653,6 +653,7 @@ func (t *TransactionMut) deleteTypeContent(br *block.Branch) {
 			t.Delete(it)
 		}
 	}
+	br.Markers.Invalidate()
 	if _, ok := t.changedTypes[br]; ok {
 		delete(t.changedTypes, br)
 		for i, b := range t.changedOrder {
@@ -706,6 +707,20 @@ func (t *TransactionMut) ChangedKeys(b *block.Branch) map[string]struct{} {
 
 // PositionalChanged reports whether branch saw positional (Array /
 // Text) content changes this transaction.
+// InvalidatePositionalMarkers drops the search markers of every type whose
+// positional content this transaction changed. The type API keeps its
+// markers in step with its own edits; deletions that do not go through
+// it (an update's delete set, an UndoManager step) leave them pointing at
+// old indices, and yjs resets them there too (_callObserver for a remote
+// transaction, popStackItem for undo).
+func (t *TransactionMut) InvalidatePositionalMarkers() {
+	for _, b := range t.changedOrder {
+		if cs := t.changedTypes[b]; cs != nil && cs.positional {
+			b.Markers.Invalidate()
+		}
+	}
+}
+
 func (t *TransactionMut) PositionalChanged(b *block.Branch) bool {
 	if cs := t.changedTypes[b]; cs != nil {
 		return cs.positional

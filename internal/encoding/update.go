@@ -524,6 +524,8 @@ func (u *Update) Apply(txn *doc.TransactionMut) error {
 	if queued && p.integrateAll(txn) > 0 {
 		p.applyDeletes(txn, false)
 	}
+	// Remote deletions moved indices the types' search markers knew.
+	txn.InvalidatePositionalMarkers()
 	if p.IsEmpty() {
 		txn.SetPendingState(nil)
 	} else {
