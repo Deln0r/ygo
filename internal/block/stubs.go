@@ -1,5 +1,7 @@
 package block
 
+import "sort"
+
 // Forward-dependency stubs. These types are owned by layers we have not
 // yet ported; the block layer references them only through pointers and
 // never inspects their internals. Real definitions land with the types,
@@ -55,6 +57,12 @@ type Branch struct {
 	// branches; populated lazily.
 	Map map[string]*Item
 
+	// MapOrder lists the keys of Map in the order each was first set,
+	// the order in which a JS Map iterates yjs's _map. Map never loses
+	// a key, so MapOrder only grows, until garbage collection of the
+	// type resets both. Read it through MapKeys.
+	MapOrder []string
+
 	// Item is the back-reference to the Item whose Content owns this
 	// branch (for nested shared types). nil for root branches.
 	// Integrate consults Item.IsDeleted to decide whether to
@@ -103,6 +111,31 @@ type Branch struct {
 	// receive the bubbled event path as a []any of nested events.
 	Observers     []func(any)
 	DeepObservers []func([]any)
+}
+
+// MapKeys returns the keys of Map in yjs's _map order: the order each
+// was first set. Deleting a type and Map.Clear walk keys in this order,
+// as yjs does, which decides the order of their deletions and so the
+// order in which an undo restores them. Keys of Map missing from
+// MapOrder, which only a Map written around Integrate can have, come
+// last, sorted. The slice is new; the caller may keep it.
+func (b *Branch) MapKeys() []string {
+	keys := append([]string(nil), b.MapOrder...)
+	if len(keys) == len(b.Map) {
+		return keys
+	}
+	listed := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		listed[k] = true
+	}
+	var rest []string
+	for k := range b.Map {
+		if !listed[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(keys, rest...)
 }
 
 // Move records a move operation for movable list items. Defined when

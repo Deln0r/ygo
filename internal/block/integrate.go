@@ -214,6 +214,9 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 		if parent.Map == nil {
 			parent.Map = map[string]*Item{}
 		}
+		if _, ok := parent.Map[*i.ParentSub]; !ok {
+			parent.MapOrder = append(parent.MapOrder, *i.ParentSub)
+		}
 		parent.Map[*i.ParentSub] = i
 		if i.Left != nil {
 			// The previous map-key winner becomes a tombstone.

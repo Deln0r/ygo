@@ -135,15 +135,12 @@ func (m *Map) Range(fn func(key string, value any) bool) {
 	}
 }
 
-// Clear deletes every entry in the map.
-//
-// Per types-map.md finding 4: yrs's Map::clear calls txn.delete on
-// every entry, including already-tombstoned ones. Our txn.Delete is
-// idempotent (early-returns on IsDeleted), so we filter here purely
-// to avoid the no-op — semantics match yrs either way.
+// Clear deletes every entry in the map, in the order the keys were
+// first set, as yjs YMap.clear walks _map. The order is that of the
+// transaction's deletions, which an UndoManager restores in.
 func (m *Map) Clear(txn *doc.TransactionMut) {
-	for _, item := range m.branch.Map {
-		if !item.IsDeleted() {
+	for _, key := range m.branch.MapKeys() {
+		if item := m.branch.Map[key]; item != nil && !item.IsDeleted() {
 			txn.Delete(item)
 		}
 	}
