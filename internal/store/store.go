@@ -17,6 +17,10 @@ type BlockStore struct {
 	// order lists the clients in the order their first block arrived,
 	// the order in which yjs iterates store.clients (a Map).
 	order []uint64
+	// splits records the right half of every SplitBlock since the last
+	// TakeSplits: the commit tries to merge each one back with its
+	// neighbours, as yjs does with transaction._mergeStructs.
+	splits []block.ID
 }
 
 // NewBlockStore returns an empty store.
@@ -206,7 +210,16 @@ func (s *BlockStore) SplitBlock(it *block.Item, offset uint64) *block.Item {
 		return nil
 	}
 	l.Insert(idx+1, CellOfItem(right))
+	s.splits = append(s.splits, right.ID)
 	return right
+}
+
+// TakeSplits returns the IDs of the right halves split since the last
+// call, in split order, and forgets them.
+func (s *BlockStore) TakeSplits() []block.ID {
+	out := s.splits
+	s.splits = nil
+	return out
 }
 
 // Materialize splits the underlying block on both sides (as needed) so

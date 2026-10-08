@@ -141,6 +141,30 @@ func (l *ClientBlockList) SquashFrom(startIdx int) int {
 	return removed
 }
 
+// MergeWithLefts merges the cell at pos into its left neighbour, and the
+// result into its own left neighbour, while that succeeds (yjs
+// tryToMergeWithLefts). Returns the number of merges.
+func (l *ClientBlockList) MergeWithLefts(pos int) int {
+	merged := 0
+	for i := pos; i >= 1 && i < len(l.list); i-- {
+		prev, cur := l.list[i-1], l.list[i]
+		switch {
+		case prev.Kind == CellKindItem && cur.Kind == CellKindItem &&
+			prev.Item != nil && cur.Item != nil && prev.Item.TrySquash(cur.Item):
+			if br := prev.Item.Parent.Branch; br != nil && br.Markers != nil {
+				br.Markers.Invalidate()
+			}
+		case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
+			l.list[i-1] = CellOfGC(prev.GC.Start, cur.GC.End)
+		default:
+			return merged
+		}
+		l.list = append(l.list[:i], l.list[i+1:]...)
+		merged++
+	}
+	return merged
+}
+
 // ReplaceWithGC converts the cell at index i into a GC cell covering the
 // same clock range, discarding the live Item. No-op if i is out of range
 // or the cell is already a GC cell.

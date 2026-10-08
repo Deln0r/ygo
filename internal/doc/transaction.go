@@ -148,25 +148,24 @@ func (d *Doc) WriteTxn() *TransactionMut {
 // Commit runs the post-commit lifecycle and releases the write lock.
 // Safe to call more than once; subsequent calls are no-ops.
 //
-// Lifecycle, in order, all with the write lock held:
+// Lifecycle, in order, all with the write lock held, as yjs
+// cleanupTransactions runs it:
 //  1. Snapshot the after-state.
 //  2. Shared-type observers (Observe / ObserveDeep), on the layout as
 //     the transaction left it.
-//  3. Squash: merge this transaction's new blocks into their left
-//     neighbours.
-//  4. Record subdocument changes.
-//  5. After-transaction handlers (the UndoManager, sync clients), which
+//  3. Record subdocument changes.
+//  4. After-transaction handlers (the UndoManager, sync clients), which
 //     may mark deleted items kept. Functions queued with
 //     QueueUnderLock run before each handler and once more after the
 //     last (and when a write transaction opens).
-//  6. GC: free deleted content (unless GC is off or the item is kept)
+//  5. GC: free deleted content (unless GC is off or the item is kept)
 //     and merge deleted runs.
+//  6. Merge this transaction's new blocks into their left neighbours,
+//     then the pieces of the items it split (yjs _mergeStructs). Merging
+//     after GC means a deleted item this commit collects can no longer
+//     merge into a kept neighbour and keep its content.
 //  7. Update handlers (OnUpdate, OnUpdateV2), on the final layout.
 //  8. Subdocument handlers (OnSubdocs), as yjs emits 'subdocs' last.
-//
-// yjs runs its merge after GC rather than before the after-transaction
-// handlers; docs/tech-debt.md ("Commit-time squash runs before
-// after-transaction handlers") has the one case where that shows.
 func (t *TransactionMut) Commit() {
 	if t.closed {
 		return
@@ -189,10 +188,6 @@ func (t *TransactionMut) Commit() {
 	if TypeEventHook != nil {
 		TypeEventHook(t)
 	}
-	// Commit-time block squash: merge same-client adjacent-clock items
-	// created this transaction into their predecessors. Clocks are
-	// preserved, so afterState (captured above) stays valid.
-	t.squashNewBlocks()
 	// Collect subdocument lifecycle changes (added / removed / loaded)
 	// so observers see them, before handlers fire.
 	t.trackSubdocs()
@@ -210,6 +205,12 @@ func (t *TransactionMut) Commit() {
 	// Garbage-collect deleted content (free payloads, merge deleted
 	// runs), skipping items marked keep by an observer.
 	t.gcDeleted()
+	// Commit-time block squash: merge same-client adjacent-clock items
+	// created this transaction into their predecessors, then the pieces
+	// of items split during it. Clocks are preserved, so afterState
+	// (captured above) stays valid.
+	t.squashNewBlocks()
+	t.mergeSplits()
 	// Update events last, as yjs emits 'update' / 'updateV2' after GC
 	// and the struct merge: the bytes describe the final layout.
 	t.doc.fireUpdateHandlers(t)
@@ -470,6 +471,32 @@ func (t *TransactionMut) gcNestedChildren(br *block.Branch, touched map[uint64]u
 // otherwise inflates document size by roughly 12x on fine-grained text
 // workloads. Squash starts at the first new cell so it can also merge
 // into the prior tail.
+// mergeSplits tries to merge each piece this transaction split off back
+// into its neighbours, from the last split to the first, as yjs merges
+// transaction._mergeStructs: first the cell after the piece with its
+// lefts, and, unless that already took the piece in, the piece with its
+// left.
+func (t *TransactionMut) mergeSplits() {
+	splits := t.doc.store.TakeSplits()
+	for i := len(splits) - 1; i >= 0; i-- {
+		id := splits[i]
+		list := t.doc.store.GetClient(id.Client)
+		if list == nil {
+			continue
+		}
+		idx, ok := list.FindPivot(id.Clock)
+		if !ok {
+			continue
+		}
+		if idx+1 < list.Len() && list.MergeWithLefts(idx+1) > 1 {
+			continue
+		}
+		if idx > 0 {
+			list.MergeWithLefts(idx)
+		}
+	}
+}
+
 func (t *TransactionMut) squashNewBlocks() {
 	for c, after := range t.afterState {
 		before := t.beforeState[c]

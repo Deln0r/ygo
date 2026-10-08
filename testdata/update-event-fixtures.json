@@ -20608,6 +20608,440 @@
       ]
     },
     {
+      "name": "undo-copy-then-collected-overwrite",
+      "description": "an untracked overwrite of a key whose value undo restored: yjs collects the overwritten value before merging, so it does not merge into the kept restored copy and goes out without content",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "set",
+              "path": "map:m",
+              "key": "k",
+              "value": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "k": 1
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "k": 1
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "set",
+              "path": "map:m",
+              "key": "k",
+              "value": 5
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "k": 5
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "map:m": {
+                "k": 1
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "u",
+          "ops": [
+            {
+              "op": "set",
+              "path": "map:m",
+              "key": "k",
+              "value": 2
+            },
+            {
+              "op": "set",
+              "path": "map:m",
+              "key": "k",
+              "value": 3
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "k": 3
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "mirror",
+            "what": "state",
+            "update": "0104cdcc83da0b002801016d016b017d01a8cdcc83da0b00027d057d01a1cdcc83da0b0201a8cdcc83da0b03017d0301cdcc83da0b010004"
+          },
+          "state": [
+            {
+              "map:m": {
+                "k": 3
+              }
+            },
+            {
+              "map:m": {
+                "k": 3
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002801016d016b017d0100",
+          "v2": "0000058d9987b4170000012805026d6b410001010001010101007d0100"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b01a8cdcc83da0b00017d0501cdcc83da0b010001",
+          "v2": "000006cd9987b4170001000001a80100000001010101017d0501cdcc83da0b010000"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0101cdcc83da0b02a8cdcc83da0b01017d0101cdcc83da0b010101",
+          "v2": "000006cd9987b4170001020001a80100000001010101027d0101cdcc83da0b010100"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "u",
+          "v1": "0102cdcc83da0b03a1cdcc83da0b0201a8cdcc83da0b03017d0301cdcc83da0b010202",
+          "v2": "000006cd9987b417010204020003a100a8010000000241000102037d0301cdcc83da0b010201"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": "mirror",
+          "v1": "0102cdcc83da0b002101016d016b04a8cdcc83da0b03017d0301cdcc83da0b010004",
+          "v2": "000006cd9987b41700010600032100a805026d6b41000101000204010102007d0301cdcc83da0b010003"
+        }
+      ]
+    },
+    {
+      "name": "undo-copy-then-collected-array-neighbour",
+      "description": "an array element restored by undo, then one untracked transaction inserts after it and deletes both: yjs collects the new element before merging, so it does not merge into the kept restored copy",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "array:a"
+        }
+      ],
+      "root_keys": [
+        "array:a"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 0,
+              "values": [
+                1,
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                2
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "array:a": [
+                1,
+                2
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "array:a",
+              "index": 1,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "array:a": [
+                1,
+                2
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "u",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 2,
+              "values": [
+                3
+              ]
+            },
+            {
+              "op": "delete",
+              "path": "array:a",
+              "index": 1,
+              "len": 2
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1
+              ]
+            },
+            {
+              "array:a": []
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "mirror",
+            "what": "state",
+            "update": "0104cdcc83da0b0008010161017d0188cdcc83da0b00017d02c8cdcc83da0b00cdcc83da0b01017d02c1cdcc83da0b02cdcc83da0b010101cdcc83da0b010103"
+          },
+          "state": [
+            {
+              "array:a": [
+                1
+              ]
+            },
+            {
+              "array:a": [
+                1
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0008010161027d017d0200",
+          "v2": "0000058d9987b417000001080301610101010001020101007d017d0200"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010101",
+          "v2": "00000000000001000000000001cdcc83da0b010100"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0101cdcc83da0b02c8cdcc83da0b00cdcc83da0b01017d0200",
+          "v2": "000006cd9987b417010100010201c80100000001010101027d0200"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "u",
+          "v1": "0101cdcc83da0b03c1cdcc83da0b02cdcc83da0b010101cdcc83da0b010202",
+          "v2": "000006cd9987b417010104010201c101000000010101010301cdcc83da0b010201"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": "mirror",
+          "v1": "0103cdcc83da0b0008010161017d0181cdcc83da0b0001c1cdcc83da0b00cdcc83da0b010201cdcc83da0b010103",
+          "v2": "000006cd9987b4170202010001020508008100c103016101010100034100020103007d0101cdcc83da0b010102"
+        }
+      ]
+    },
+    {
       "name": "array-insert-after-undo",
       "description": "an undo deletes an array element before the one a search marker sits on; the next insert by index lands where yjs puts it (yjs popStackItem resets the markers)",
       "gc": true,
