@@ -226,7 +226,16 @@ func (t *TransactionMut) Commit() {
 // the in-memory handle is reachable via Subdoc(guid).
 func (t *TransactionMut) trackSubdocs() {
 	bs := t.doc.store
-	for client, after := range t.afterState {
+	// Clients from the highest ID down, the order an update integrates
+	// them in, so Added lists subdocuments in yjs's order rather than Go's
+	// random map order.
+	clients := make([]uint64, 0, len(t.afterState))
+	for c := range t.afterState {
+		clients = append(clients, c)
+	}
+	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
+	for _, client := range clients {
+		after := t.afterState[client]
 		clock := t.beforeState[client]
 		for clock < after {
 			// Walk cell by cell, not clock by clock: a Skip block can

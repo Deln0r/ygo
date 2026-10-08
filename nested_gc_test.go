@@ -335,3 +335,22 @@ func TestUndoClear_FromOnSubdocsAfterGC(t *testing.T) {
 		t.Errorf("state\n got  %s\n want %s", got, want)
 	}
 }
+
+// OnSubdocs lists the subdocuments an update adds in yjs's order, the
+// order the update integrates its clients in (highest first), not in Go's
+// map order: 50 applications of one merged update from clients 1 to 4 all
+// report G4,G3,G2,G1, as yjs 13.6.33 does.
+func TestOnSubdocs_AddedInIntegrationOrder(t *testing.T) {
+	u, _ := hex.DecodeString("040104002901016d02733402473476000103002901016d02733302473376000102002901016d02733202473276000101002901016d027331024731760000")
+	for i := 0; i < 50; i++ {
+		d := ygo.NewDocWithOptions(ygo.Options{ClientID: 9})
+		var got string
+		d.OnSubdocs(func(ev ygo.SubdocsEvent) { got = strings.Join(ev.Added, ",") })
+		if err := ygo.ApplyUpdate(d, u); err != nil {
+			t.Fatal(err)
+		}
+		if got != "G4,G3,G2,G1" {
+			t.Fatalf("run %d: Added %s, want G4,G3,G2,G1", i, got)
+		}
+	}
+}
