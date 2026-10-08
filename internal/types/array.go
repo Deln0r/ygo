@@ -48,10 +48,24 @@ func (a *Array) Insert(txn *doc.TransactionMut, idx uint64, value any) {
 	a.InsertRange(txn, idx, []any{value})
 }
 
-// Push appends one or more values to the end of the array.
-// Equivalent to InsertRange(txn, Len(), values).
+// Push appends one or more values to the end of the array: after the
+// last item of the list, deleted or not, as yjs typeListPushGenerics
+// does. InsertRange at Len() puts them right after the last live
+// element instead, before any trailing tombstones, as yjs insert(length)
+// does; the difference shows when a tombstone at the end comes back
+// through undo or meets a concurrent insert.
 func (a *Array) Push(txn *doc.TransactionMut, values ...any) {
-	a.InsertRange(txn, a.Len(), values)
+	if len(values) == 0 {
+		return
+	}
+	last, _ := startFromMarker(a.branch, a.Len())
+	if last == nil {
+		last = a.branch.Start
+	}
+	for last != nil && last.Right != nil {
+		last = last.Right
+	}
+	a.insertBetween(txn, a.Len(), last, nil, values)
 }
 
 // InsertRange inserts every value at idx in order, packed into a
@@ -66,7 +80,12 @@ func (a *Array) InsertRange(txn *doc.TransactionMut, idx uint64, values []any) {
 	}
 
 	left, right := findInsertPosition(a.branch, txn, idx)
+	a.insertBetween(txn, idx, left, right, values)
+}
 
+// insertBetween integrates values as one item between left and right,
+// at user index idx (for the search markers).
+func (a *Array) insertBetween(txn *doc.TransactionMut, idx uint64, left, right *block.Item, values []any) {
 	var origin, rightOrigin *block.ID
 	if left != nil {
 		lid := left.LastID()
@@ -272,12 +291,21 @@ func findInsertPosition(branch *block.Branch, txn *doc.TransactionMut, idx uint6
 		cur = branch.Start
 	}
 	// Marker boundary case: marker said "cur starts at counted" and
-	// caller wants idx == counted, so insert immediately before cur.
-	// Without this guard the walk falls into the
-	// `counted+cur.Len > idx` branch and tries to split cur at
-	// offset 0 — corrupts the linked list.
+	// caller wants idx == counted. Without this guard the walk falls into
+	// the `counted+cur.Len > idx` branch and tries to split cur at offset
+	// 0, which corrupts the linked list. The new item goes right after the
+	// last live element before cur, ahead of any tombstones, where a walk
+	// from the start puts it and where yjs typeListInsertGenerics puts it
+	// (n = n.prev, the previous undeleted item).
 	if cur != nil && counted == idx {
-		return cur.Left, cur
+		p := cur.Left
+		for p != nil && p.IsDeleted() {
+			p = p.Left
+		}
+		if p == nil {
+			return nil, branch.Start
+		}
+		return p, p.Right
 	}
 	for ; cur != nil; cur = cur.Right {
 		lastSeen = cur

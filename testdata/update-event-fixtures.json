@@ -21967,6 +21967,419 @@
       ]
     },
     {
+      "name": "array-push-after-trailing-tombstone",
+      "description": "push goes after the last struct, a trailing tombstone included (yjs typeListPushGenerics), so undoing the deletion of the last element brings it back before the pushed one",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "array:a"
+        }
+      ],
+      "root_keys": [
+        "array:a"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 0,
+              "values": [
+                1,
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                2
+              ]
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "array:a": [
+                1,
+                2
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "array:a",
+              "index": 1,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "push",
+              "path": "array:a",
+              "values": [
+                3
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                3
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "array:a": [
+                1,
+                2,
+                3
+              ]
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0008010161027d017d0200",
+          "v2": "0000058d9987b417000001080301610101010001020101007d017d0200"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010101",
+          "v2": "00000000000001000000000001cdcc83da0b010100"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0101cdcc83da0b0288cdcc83da0b01017d0300",
+          "v2": "000006cd9987b4170001020001880100000001010101027d0300"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0101cdcc83da0b03c8cdcc83da0b00cdcc83da0b01017d0200",
+          "v2": "000006cd9987b417010100010201c80100000001010101037d0200"
+        }
+      ]
+    },
+    {
+      "name": "array-insert-at-marker-boundary",
+      "description": "an insert by index where a search marker sits goes right after the previous live element, ahead of the tombstones before the marker, as yjs steps to n.prev",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "array:a"
+        }
+      ],
+      "root_keys": [
+        "array:a",
+        "text:t"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 0,
+              "values": [
+                1,
+                2,
+                3
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                2,
+                3
+              ],
+              "text:t": ""
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "x"
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                2,
+                3
+              ],
+              "text:t": "x"
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "push",
+              "path": "array:a",
+              "values": [
+                4
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                2,
+                3,
+                4
+              ],
+              "text:t": "x"
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "array:a": [
+                1,
+                2,
+                3,
+                4
+              ],
+              "text:t": "x"
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "array:a",
+              "index": 1,
+              "len": 2
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                4
+              ],
+              "text:t": "x"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": "array:a",
+              "index": 1,
+              "values": [
+                9
+              ]
+            }
+          ],
+          "state": [
+            {
+              "array:a": [
+                1,
+                9,
+                4
+              ],
+              "text:t": "x"
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "undo": {
+            "doc": 0,
+            "um": 0
+          },
+          "result": true,
+          "state": [
+            {
+              "array:a": [
+                1,
+                9,
+                2,
+                3,
+                4
+              ],
+              "text:t": "x"
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              true
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0008010161037d017d027d0300",
+          "v2": "0000058d9987b417000001080301610101010001030101007d017d027d0300"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0304010174017800",
+          "v2": "0000058d9987b417000001040502747841000101000001010300"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0488cdcc83da0b02017d0400",
+          "v2": "000006cd9987b4170001040001880100000001010101047d0400"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010102",
+          "v2": "00000000000001000000000001cdcc83da0b010101"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0101cdcc83da0b05c8cdcc83da0b00cdcc83da0b01017d0900",
+          "v2": "000006cd9987b417010100010201c80100000001010101057d0900"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "<um:0>",
+          "v1": "0101cdcc83da0b06c8cdcc83da0b05cdcc83da0b01027d027d0300",
+          "v2": "000006cd9987b41701010a010201c80100000001020101067d027d0300"
+        }
+      ]
+    },
+    {
       "name": "array-insert-after-undo",
       "description": "an undo deletes an array element before the one a search marker sits on; the next insert by index lands where yjs puts it (yjs popStackItem resets the markers)",
       "gc": true,
