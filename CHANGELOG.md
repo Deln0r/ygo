@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.24.0] - 2026-10-12
 
 **Upgrade impact** - Deleting a nested shared type now deletes everything
 inside it in the same transaction, as yjs does: the transaction's update
@@ -1580,6 +1580,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.24.0]: https://github.com/Deln0r/ygo/releases/tag/v1.24.0
 [1.23.0]: https://github.com/Deln0r/ygo/releases/tag/v1.23.0
 [1.22.0]: https://github.com/Deln0r/ygo/releases/tag/v1.22.0
 [1.21.0]: https://github.com/Deln0r/ygo/releases/tag/v1.21.0
