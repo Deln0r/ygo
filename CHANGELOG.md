@@ -14,6 +14,81 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact** - Text inserts now place and format text as yjs
+`insertText` does. `Insert` takes the formatting in effect at the index:
+text typed at the end of a bold run is bold, text typed at its start is not,
+the reverse of before. `InsertWithAttributes` inserts exactly the attributes
+given: formatting in effect that the call does not name is closed around the
+text, and a non-nil empty `Attrs` inserts with no attributes, where it used to
+act like `Insert`. `InsertEmbed` inserts the embed without attributes and a
+string value as text. A delta insert without `Attributes` carries no
+formatting, and a retain past the end of the text appends newlines. `ToDelta`
+ends an op at every format marker, so two adjacent ops can carry the same
+attributes. Number attribute values compare by value across Go types.
+
+### Fixed
+
+- **Text inserted at a format boundary landed on the wrong side of the
+  marker.** `Insert` stepped over every format marker after the index, so text
+  typed at the end of a bold run was plain and text typed at its start was
+  bold; yjs does the opposite. `Insert` now goes in after the content before
+  the index, past tombstones and markers that set a value already in effect,
+  and before the first marker that changes one (yjs `findPosition` and
+  `minimizeAttributeChanges`). In a text that has had a format marker, the
+  position comes from a walk from the start, as in yjs, which uses no search
+  markers on such a text; a cached position can point past a format marker.
+- **`InsertWithAttributes` kept inherited attributes.** Inserting
+  `{italic: true}` inside bold text gave bold italic text; yjs gives italic.
+  Every attribute in effect that the call does not name is now cleared for the
+  inserted text and restored after it (yjs `insertText`), and an empty non-nil
+  map clears all of them, as yjs `{}` does.
+- **`InsertEmbed` inherited the formatting at the index.** yjs
+  `insertEmbed(index, embed)` passes `{}` for the attributes, so the embed
+  goes in unformatted. A string passed to `InsertEmbed` is now inserted as
+  text, as yjs classifies a string.
+- **`ApplyDelta` resolved each op by index.** yjs carries one cursor through a
+  delta, so an op continues after the markers the previous insert wrote and
+  after a delete's gap cleanup. `ApplyDelta` now does the same: an insert runs
+  `insertText` with its attributes or none, a retain `formatText`, a delete a
+  port of `deleteText`, whose gap cleanup also corrects the cursor's
+  attributes. A retain that runs past the end appends `'\n'` for each missing
+  unit, as yjs does (up to `math.MaxInt32` units; a longer one fails before
+  the op writes anything); it used to fail with attributes and do nothing
+  without. A delete past the end deletes what is there.
+- **`ToDelta` merged runs that yjs keeps apart.** yjs `toDelta` ends an op at
+  every live format marker, also one that changes nothing; `ToDelta` merged
+  adjacent strings with equal attributes. An attribute named `ychange`, which
+  yjs `toDelta` reserves for snapshot diffs and drops at the next string
+  without snapshots, is now dropped too.
+- **Attribute keys were written in ascending string order.** yjs walks an
+  attributes object in JavaScript property order, which puts integer-like keys
+  first, by value: the markers for `{"10": true, "2": true}` were written `10`,
+  `2` and are now written `2`, `10`, in `Format` too. The inherited keys an
+  insert clears come after the caller's other keys, in the order they took
+  effect; an integer-like key comes first in either group.
+- **Number attribute values compared by Go type.** `int(1)`, `int64(1)` (a
+  lib0 integer) and `float64(1)` (a JSON number) were different values, so
+  inserting `{level: 1}` next to text a peer formatted with `level: 1` wrote
+  two markers that yjs does not write. Numbers now compare by value. NaN is
+  not equal to itself, as in JavaScript, so text inserted where a NaN
+  attribute is in effect gets the two markers yjs writes for it.
+
+### Added
+
+- `Text.InsertEmbedWithAttributes(txn, idx, value, attrs)`, yjs
+  `insertEmbed(index, embed, attributes)`.
+- Benchmarks for typing into formatted text (`BenchmarkRichText_TypePlain`,
+  `BenchmarkRichText_TypeWithAttributes`).
+
+### Infrastructure
+
+- The rich-text fixtures (55 scenarios, 20 new) have no pinned divergence left
+  and count in the README totals: 218 to 273. The update-event fixtures gain
+  11 rich-text scenarios (87), compared byte for byte, including deltas,
+  attributed embeds and integer-like attribute keys.
+
 ## [1.24.0] - 2026-10-12
 
 **Upgrade impact** - Deleting a nested shared type now deletes everything

@@ -33,11 +33,11 @@
 - **What:** yrs's integrate handles five content-specific paths (`block.rs:786-818`):
   - `KindMove`: re-integrates left+right moved ranges if they share a Move pointer.
   - `KindDoc`: registers child subdoc, emits `subdocs.added` / `loaded`.
-  - `KindFormat`: `@todo searchmarker` no-op upstream — we mirror.
+  - `KindFormat`: sets `Branch.HasFormatting` (yjs `ContentFormat.integrate` sets `_hasFormatting` and drops the search markers; ygo keeps its markers for positions and walks from the start for text inserts).
   - `KindType`: weak-link source materialization (only with `weak` feature).
   - Weak-link inheritance from left when overriding map-key.
   We handle only the `KindDeleted` case (set FlagDeleted) and skip the rest.
-- **When to address:** Move post-MVP; Subdoc post-MVP; Weak post-MVP; Format with rich-text `Y.Text` formatting (Days 25-28 per ROADMAP).
+- **When to address:** Move post-MVP; Subdoc post-MVP; Weak post-MVP.
 
 ### TransactionMut.changedTypes drops the parent_sub dimension
 
@@ -186,11 +186,16 @@
 - **What:** yjs walks the whole delete set and insertion set it captured, ranges outside the manager's scope included, and so cuts merged structs at those ranges too (the restored pieces carry `redone` and stay apart). ygo records and cuts only the ranges in scope, so a tombstone merged across such a range stays one struct: the content is the same, the struct layout and its encoding differ.
 - **When to address:** if byte-exact layouts after multi-scope undo are needed; it needs the out-of-scope ranges kept on the step.
 
-### Rich-text local inserts at a format boundary
+### Rich-text inserts: differences from yjs that stay
 
-- **Where:** `Text.Insert` / `InsertWithAttributes` (`internal/types/text.go`, `text_format.go`).
-- **What:** plain text typed right before a formatted run goes after the run's format marker and takes its format, where yjs puts it before the marker; an insert with explicit attributes inside formatted text keeps the surrounding attributes, where yjs closes them around it (bold=null before, bold=true after).
-- **When to address:** with the rich-text insert semantics work (yjs `insertText`, `findNextPosition`, `insertNegatedAttributes`).
+- **Where:** `Text.InsertWithAttributes`, `InsertEmbed`, `ApplyDelta`, `attrValuesEqual` (`internal/types/text.go`, `text_format.go`).
+- **What:** (1) `ApplyDelta` treats `{retain: 0}` and `{insert: ""}` as no-ops: a `DeltaOp` cannot say which field was given. yjs runs `formatText` for a zero retain, which moves the cursor across markers that clear a value and, with attributes, can write two markers. Quill does not emit zero retains. (2) A Go map has no key order, so the caller's attribute keys are taken in ascending order (after integer-like keys, which JavaScript enumerates first either way); yjs takes the object's insertion order, which decides the order of the opening markers. (3) Two empty slices cannot be told apart in Go, so one empty slice reused as the value of two markers compares as two objects where yjs's `===` sees one; the gap cleanup after a delete can then keep a marker yjs removes. (4) Attribute keys that name `Object.prototype` members (`toString`, `constructor`, `__proto__`, ...) are not cleared by a yjs insert that omits them, because the inherited property is not `undefined`; ygo clears them like any other key. (5) `Insert`, `Delete` and `Format` return an error for an index or range past the end; yjs appends, deletes what is there, or pads with newlines. `ApplyDelta` follows yjs. (6) ygo has no call that embeds a shared type in a text (yjs `insertEmbed` with a `Y.AbstractType`). (7) yjs `insertText` writes the nulls of cleared attributes into the attributes object the caller passed, so a caller that reuses one object across calls or delta ops sees them in the next call; ygo never writes into the caller's `Attrs`. (8) A retain past the end of the text pads at most `math.MaxInt32` newlines; a longer one fails.
+- **When to address:** (1) if `DeltaOp` gains an op kind; the others are API choices.
+
+### Rich-text local inserts at a format boundary (resolved)
+
+- **Was:** plain text typed right before a formatted run went after the run's format marker and took its format, where yjs puts it before the marker; text typed at the end of a run went after the closing marker; an insert with explicit attributes inside formatted text kept the surrounding attributes, where yjs closes them around it; embeds inherited formatting; `ApplyDelta` resolved every op by index.
+- **Resolved by:** `insertText` in `internal/types/text_format.go`, a port of yjs `insertText` (null-filled inherited keys in JavaScript property order, `minimizeAttributeChanges`, `insertAttributes`, `insertNegatedAttributes`), used by `Insert`, `InsertWithAttributes`, `InsertEmbedWithAttributes` and `ApplyDelta`, which carries one cursor through the delta with ports of `formatText` (newline padding) and `deleteText` (gap cleanup that corrects the cursor's attributes). `Branch.HasFormatting` (yjs `_hasFormatting`) selects the walk from the start for a text that has had a format marker. `ToDelta` ends an op at every format marker, as yjs `toDelta`. The 8 pinned rich-text fixtures match; 20 new rich-text and 11 update-event scenarios, plus two Go tests with bytes from yjs (an inherited NaN attribute, a Go `int` against a peer's number).
 
 ### Delete-set order inside a client, and subdocument order after a queue retry
 

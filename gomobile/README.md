@@ -113,6 +113,14 @@ attributesJSON)` (bold a selection, `{"bold":null}` clears a key),
 `InsertEmbed(index, embedJSON)`. Pair these with `ObserveChanges` and a
 native editor renders and edits formatted text end to end.
 
+Inserts follow yjs. Text inserted without attributes (`Insert`, or
+`InsertWithAttributes` with empty or `null` attributes) takes the
+formatting in effect at the index, so typing at the end of a bold run
+continues it and typing at its start does not. Text inserted with an
+attributes object carries exactly those attributes, and `{}` means none:
+other formatting in effect is closed around it. Embeds, and delta inserts
+without `attributes`, carry no formatting unless they name it.
+
 ## Map, Array, and nested types
 
 Beyond `Text`, the SDK binds the full shared type set. Values cross the
