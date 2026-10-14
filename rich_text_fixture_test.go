@@ -55,88 +55,7 @@ type knownRichTextDivergence struct {
 	result string
 }
 
-var knownRichTextDivergences = map[string]knownRichTextDivergence{
-	"insert-partial-attrs-inside-run": {
-		reason: "InsertWithAttributes keeps inherited attributes it was not given",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"he"},{"attributes":{"bold":true,"italic":true},"insert":"X"},{"attributes":{"bold":true},"insert":"llo"}]
-  yjs: [{"attributes":{"bold":true},"insert":"he"},{"attributes":{"italic":true},"insert":"X"},{"attributes":{"bold":true},"insert":"llo"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"he"},{"attributes":{"bold":true,"italic":true},"insert":"X"},{"attributes":{"bold":true},"insert":"llo"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"he"},{"attributes":{"italic":true},"insert":"X"},{"attributes":{"bold":true},"insert":"llo"}]]
-`,
-	},
-	"insert-empty-attrs-inside-run": {
-		reason: "InsertWithAttributes with an empty map behaves like Insert",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"heXllo"}]
-  yjs: [{"attributes":{"bold":true},"insert":"he"},{"insert":"X"},{"attributes":{"bold":true},"insert":"llo"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"heXllo"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"he"},{"insert":"X"},{"attributes":{"bold":true},"insert":"llo"}]]
-`,
-	},
-	"insert-plain-at-run-end": {
-		reason: "Insert steps over the closing marker at the index instead of continuing the run",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"hello"},{"insert":"!"}]
-  yjs: [{"attributes":{"bold":true},"insert":"hello!"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"hello"},{"insert":"!"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"hello!"}]]
-`,
-	},
-	"insert-plain-at-run-start": {
-		reason: "Insert steps over the opening marker at the index and joins the run",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"^hello"}]
-  yjs: [{"insert":"^"},{"attributes":{"bold":true},"insert":"hello"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"^hello"}]]
-  yjs: [[{"insert":"^"},{"attributes":{"bold":true},"insert":"hello"}]]
-`,
-	},
-	"insert-plain-at-run-end-next-transaction": {
-		reason: "Insert steps over the closing marker at the index instead of continuing the run",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"hello"},{"insert":"!"}]
-  yjs: [{"attributes":{"bold":true},"insert":"hello!"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"hello"}],[{"retain":5},{"insert":"!"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"hello"}],[{"retain":5},{"attributes":{"bold":true},"insert":"!"}]]
-`,
-	},
-	"embed-inside-run": {
-		reason: "InsertEmbed inherits the formatting at the index; yjs inserts it unformatted",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"he"},{"attributes":{"bold":true},"insert":{"image":"a"}},{"attributes":{"bold":true},"insert":"llo"}]
-  yjs: [{"attributes":{"bold":true},"insert":"he"},{"insert":{"image":"a"}},{"attributes":{"bold":true},"insert":"llo"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"he"},{"attributes":{"bold":true},"insert":{"image":"a"}},{"attributes":{"bold":true},"insert":"llo"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"he"},{"insert":{"image":"a"}},{"attributes":{"bold":true},"insert":"llo"}]]
-`,
-	},
-	"delta-insert-partial-attrs": {
-		reason: "ApplyDelta insert keeps inherited attributes it was not given",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"he"},{"attributes":{"bold":true,"italic":true},"insert":"Z"},{"attributes":{"bold":true},"insert":"llo"}]
-  yjs: [{"attributes":{"bold":true},"insert":"he"},{"attributes":{"italic":true},"insert":"Z"},{"attributes":{"bold":true},"insert":"llo"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"he"},{"attributes":{"bold":true,"italic":true},"insert":"Z"},{"attributes":{"bold":true},"insert":"llo"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"he"},{"attributes":{"italic":true},"insert":"Z"},{"attributes":{"bold":true},"insert":"llo"}]]
-`,
-	},
-	"delta-insert-plain-inside-run": {
-		reason: "ApplyDelta insert without attributes inherits the formatting at the cursor",
-		result: ` delta
-  ygo: [{"attributes":{"bold":true},"insert":"heWllo"}]
-  yjs: [{"attributes":{"bold":true},"insert":"he"},{"insert":"W"},{"attributes":{"bold":true},"insert":"llo"}]
- events
-  ygo: [[{"attributes":{"bold":true},"insert":"heWllo"}]]
-  yjs: [[{"attributes":{"bold":true},"insert":"he"},{"insert":"W"},{"attributes":{"bold":true},"insert":"llo"}]]
-`,
-	},
-}
+var knownRichTextDivergences = map[string]knownRichTextDivergence{}
 
 func TestRichText_Fixtures(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "rich-text-fixtures.json"))
@@ -262,10 +181,10 @@ func applyRichTextOp(txt *ygo.Text, txn *ygo.TransactionMut, op richTextOp) erro
 		}
 		return txt.InsertWithAttributes(txn, op.Index, op.Text, ygo.Attrs(op.Attrs))
 	case "embed":
-		if op.Attrs != nil {
-			return fmt.Errorf("ygo has no call that inserts an embed with attributes")
+		if op.Attrs == nil {
+			return txt.InsertEmbed(txn, op.Index, op.Embed)
 		}
-		return txt.InsertEmbed(txn, op.Index, op.Embed)
+		return txt.InsertEmbedWithAttributes(txn, op.Index, op.Embed, ygo.Attrs(op.Attrs))
 	case "format":
 		return txt.Format(txn, op.Index, op.Length, ygo.Attrs(op.Attrs))
 	case "delete":

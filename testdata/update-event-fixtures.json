@@ -5041,6 +5041,657 @@
       ]
     },
     {
+      "name": "text-insert-integer-attribute-keys",
+      "description": "insert with attribute keys that JavaScript enumerates as array indices",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "x",
+              "attrs": {
+                "2": true,
+                "10": true
+              }
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0105cdcc83da0b00060101740132047472756586cdcc83da0b00023130047472756584cdcc83da0b01017886cdcc83da0b020132046e756c6c86cdcc83da0b03023130046e756c6c00",
+          "v2": "000300030106cd9987b41703030003010007060086008400860f0874323130783231304100024100020101000001050078787e7e00"
+        }
+      ]
+    },
+    {
+      "name": "text-insert-inherited-integer-key",
+      "description": "insert with one attribute where an integer-keyed attribute is in effect",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "ab",
+              "attrs": {
+                "2": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "X",
+              "attrs": {
+                "z": true
+              }
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b00060101740132047472756584cdcc83da0b0002616286cdcc83da0b020132046e756c6c00",
+          "v2": "0002000206cd9987b41701020004000506008400860a0574326162324100020101010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0105cdcc83da0b04c6cdcc83da0b01cdcc83da0b020132046e756c6cc6cdcc83da0b04cdcc83da0b02017a0474727565c4cdcc83da0b05cdcc83da0b020158c6cdcc83da0b06cdcc83da0b0201320474727565c6cdcc83da0b07cdcc83da0b02017a046e756c6c00",
+          "v2": "000300030106cd9987b4170904020603010304010205c601c400c60805327a58327a41030000000105047e78787e00"
+        }
+      ]
+    },
+    {
+      "name": "text-insert-empty-attrs-inside-run",
+      "description": "insert with an empty attribute object inside bold text",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "hello",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "X",
+              "attrs": {}
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000601017404626f6c64047472756584cdcc83da0b000568656c6c6f86cdcc83da0b0504626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170102000a00050600840086130e74626f6c6468656c6c6f626f6c640104050401010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b07c6cdcc83da0b02cdcc83da0b0304626f6c64046e756c6cc4cdcc83da0b07cdcc83da0b030158c6cdcc83da0b08cdcc83da0b0304626f6c64047472756500",
+          "v2": "0002000206cd9987b4170503040a020306010005c600c400c60d09626f6c6458626f6c640401040000000103077e7800"
+        }
+      ]
+    },
+    {
+      "name": "text-insert-plain-at-run-end",
+      "description": "insert without attributes at the end of bold text",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "hello",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "!"
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000601017404626f6c64047472756584cdcc83da0b000568656c6c6f86cdcc83da0b0504626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170102000a00050600840086130e74626f6c6468656c6c6f626f6c640104050401010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b07c4cdcc83da0b05cdcc83da0b06012100",
+          "v2": "000006cd9987b41701010a010c01c40301210100000001010700"
+        }
+      ]
+    },
+    {
+      "name": "text-insert-plain-at-run-start",
+      "description": "insert without attributes at the start of bold text",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "hello",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "^"
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000601017404626f6c64047472756584cdcc83da0b000568656c6c6f86cdcc83da0b0504626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170102000a00050600840086130e74626f6c6468656c6c6f626f6c640104050401010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0744cdcc83da0b00015e00",
+          "v2": "000006cd9987b41700000100014403015e0100000001010700"
+        }
+      ]
+    },
+    {
+      "name": "text-insert-plain-after-deleted-run-end",
+      "description": "insert without attributes where the last bold character was deleted",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "text:t",
+              "index": 3,
+              "len": 1
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "e"
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000601017404626f6c64047472756584cdcc83da0b00046162636486cdcc83da0b0404626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170102000800050600840086110d74626f6c6461626364626f6c6401440101010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010401",
+          "v2": "00000000000001000000000001cdcc83da0b010400"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b06c4cdcc83da0b04cdcc83da0b05016500",
+          "v2": "000006cd9987b417010108010a01c40301650100000001010600"
+        }
+      ]
+    },
+    {
+      "name": "text-embed-attrs-inside-run",
+      "description": "insert an embed with another attribute inside bold text",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "hello",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "embed",
+              "path": "text:t",
+              "index": 2,
+              "value": {
+                "image": "a"
+              },
+              "attrs": {
+                "link": "x"
+              }
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000601017404626f6c64047472756584cdcc83da0b000568656c6c6f86cdcc83da0b0504626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170102000a00050600840086130e74626f6c6468656c6c6f626f6c640104050401010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0105cdcc83da0b07c6cdcc83da0b02cdcc83da0b03046c696e6b03227822c6cdcc83da0b07cdcc83da0b0304626f6c64046e756c6cc5cdcc83da0b08cdcc83da0b030d7b22696d616765223a2261227dc6cdcc83da0b09cdcc83da0b03046c696e6b046e756c6cc6cdcc83da0b0acdcc83da0b0304626f6c64047472756500",
+          "v2": "000300030106cd9987b4170904040a03010306010205c601c500c613106c696e6b626f6c646c696e6b626f6c6444020000000105077701787e760105696d6167657701617e7800"
+        }
+      ]
+    },
+    {
+      "name": "text-embed-plain-inside-run",
+      "description": "insert an embed without attributes inside bold text",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "hello",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "embed",
+              "path": "text:t",
+              "index": 2,
+              "value": {
+                "image": "a"
+              }
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000601017404626f6c64047472756584cdcc83da0b000568656c6c6f86cdcc83da0b0504626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170102000a00050600840086130e74626f6c6468656c6c6f626f6c640104050401010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b07c6cdcc83da0b02cdcc83da0b0304626f6c64046e756c6cc5cdcc83da0b07cdcc83da0b030d7b22696d616765223a2261227dc6cdcc83da0b08cdcc83da0b0304626f6c64047472756500",
+          "v2": "0002000206cd9987b4170503040a020306010005c600c500c60b08626f6c64626f6c6444000000000103077e760105696d6167657701617800"
+        }
+      ]
+    },
+    {
+      "name": "text-delta-cursor",
+      "description": "deltas whose ops continue from the cursor the previous op left",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delta",
+              "path": "text:t",
+              "delta": [
+                {
+                  "insert": "ab",
+                  "attributes": {
+                    "bold": true
+                  }
+                },
+                {
+                  "insert": "c"
+                },
+                {
+                  "insert": "d",
+                  "attributes": {
+                    "bold": true
+                  }
+                },
+                {
+                  "insert": "e",
+                  "attributes": {
+                    "italic": true
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delta",
+              "path": "text:t",
+              "delta": [
+                {
+                  "retain": 1
+                },
+                {
+                  "delete": 2
+                },
+                {
+                  "insert": "Z"
+                },
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": null
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "010acdcc83da0b000601017404626f6c64047472756584cdcc83da0b0002616286cdcc83da0b0204626f6c64046e756c6c84cdcc83da0b03016386cdcc83da0b0404626f6c64047472756584cdcc83da0b05016486cdcc83da0b0604626f6c64046e756c6c86cdcc83da0b07066974616c6963047472756584cdcc83da0b08016586cdcc83da0b09066974616c6963046e756c6c00",
+          "v2": "000300030306cd9987b417080400040305001106008400860084008600840086018400862e2274626f6c646162626f6c6463626f6c6464626f6c646974616c6963656974616c6963010402040104010406010601010000010a00787e787e787e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0104cdcc83da0b0bc6cdcc83da0b05cdcc83da0b0604626f6c64046e756c6cc4cdcc83da0b0bcdcc83da0b06015ac6cdcc83da0b0ccdcc83da0b0604626f6c640474727565c6cdcc83da0b0dcdcc83da0b0604626f6c64046e756c6c01cdcc83da0b0202040701",
+          "v2": "000300030006cd9987b41707040a0c0300030c010105c600c400c6120d626f6c645a626f6c64626f6c640401440000000001040b7e787e01cdcc83da0b0202030100"
+        }
+      ]
+    },
+    {
+      "name": "text-delta-retain-past-end",
+      "description": "a delta formats past the end of the text",
+      "gc": true,
+      "clients": [
+        3141592653
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "ab"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delta",
+              "path": "text:t",
+              "delta": [
+                {
+                  "retain": 4,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b000401017402616200",
+          "v2": "0000058d9987b41700000104060374616201020101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b0246cdcc83da0b0004626f6c64047472756584cdcc83da0b01020a0a86cdcc83da0b0404626f6c64046e756c6c00",
+          "v2": "0002000206cd9987b4170202020601000546008400860e0a626f6c640a0a626f6c64040204000000010302787e00"
+        }
+      ]
+    },
+    {
+      "name": "text-insert-number-attr-from-peer",
+      "description": "insert with a number attribute equal to the one a peer wrote",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "steps": [
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "ab",
+              "attrs": {
+                "level": 1
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": null,
+            "what": "state",
+            "update": "0103d689cf81010006010174056c6576656c013184d689cf81010002616286d689cf810102056c6576656c046e756c6c00"
+          }
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "X",
+              "attrs": {
+                "level": 1
+              }
+            }
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 1,
+          "origin": null,
+          "v1": "0103d689cf81010006010174056c6576656c013184d689cf81010002616286d689cf810102056c6576656c046e756c6c00",
+          "v2": "0002000206d6939e83020102000400050600840086120d746c6576656c61626c6576656c01050205010100000103007d017e00"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103d689cf81010006010174056c6576656c013184d689cf81010002616286d689cf810102056c6576656c046e756c6c00",
+          "v2": "0002000206d6939e83020102000400050600840086120d746c6576656c61626c6576656c01050205010100000103007d017e00"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b00c4d689cf810101d689cf810102015800",
+          "v2": "00000b8d9987b417d6939e8302000102010401c40301580100000001010000"
+        }
+      ]
+    },
+    {
       "name": "emoji-append",
       "description": "an append after a surrogate pair; diffs include a state vector inside the pair",
       "gc": true,

@@ -46,7 +46,9 @@ func TestText_InsertWithAttributes_InheritedThenPlain(t *testing.T) {
 	_ = tx.Insert(wtxn, 0, "Hello ")
 	// Insert bold text at end.
 	_ = tx.InsertWithAttributes(wtxn, 6, "world", types.Attrs{"bold": true})
-	// Insert plain text at end again.
+	// Insert without attributes at the end of the bold run: as yjs
+	// insert(index, text), it takes the formatting in effect there
+	// (rich-text fixture insert-plain-at-run-end).
 	_ = tx.Insert(wtxn, 11, "!")
 	wtxn.Commit()
 
@@ -57,8 +59,7 @@ func TestText_InsertWithAttributes_InheritedThenPlain(t *testing.T) {
 	delta := tx.ToDelta()
 	want := []types.DeltaOp{
 		{Insert: "Hello ", Attributes: nil},
-		{Insert: "world", Attributes: types.Attrs{"bold": true}},
-		{Insert: "!", Attributes: nil},
+		{Insert: "world!", Attributes: types.Attrs{"bold": true}},
 	}
 	if !reflect.DeepEqual(delta, want) {
 		t.Errorf("ToDelta = %+v, want %+v", delta, want)
@@ -148,7 +149,7 @@ func TestText_InsertEmbed_AppearsInDelta(t *testing.T) {
 	wtxn.Commit()
 
 	wtxn = d.WriteTxn()
-	embedVal := "embed-payload"
+	embedVal := map[string]any{"image": "embed-payload"}
 	if err := tx.InsertEmbed(wtxn, 6, embedVal); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestText_InsertEmbed_AppearsInDelta(t *testing.T) {
 	if delta[0].Insert != "before" {
 		t.Errorf("delta[0] = %+v, want Insert=before", delta[0])
 	}
-	if delta[1].Embed != embedVal {
+	if !reflect.DeepEqual(delta[1].Embed, embedVal) {
 		t.Errorf("delta[1] = %+v, want Embed=%v", delta[1], embedVal)
 	}
 	if delta[2].Insert != " after" {

@@ -102,6 +102,14 @@ type Branch struct {
 	// B4 entry for the workload that motivated this.
 	Markers *MarkerList
 
+	// HasFormatting is set when a format item integrates into this
+	// branch, local or remote, and is never cleared (yjs
+	// _hasFormatting). Until it is set the branch holds no format
+	// item, so a text insert needs no attributes in effect and can take
+	// its position from Markers; once it is set, text inserts walk from
+	// Start as yjs does for a type with formatting.
+	HasFormatting bool
+
 	// Observers / DeepObservers hold the shared-type change-event
 	// callbacks registered on this branch (yjs _eObservers / _dEH).
 	// Stored untyped (the concrete event is built in the types layer,

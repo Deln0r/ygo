@@ -241,9 +241,13 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 		// ContentDeleted.integrate does (addToDeleteSet + markDeleted),
 		// so the transaction's update and GC merge see it.
 		ctx.Delete(i)
-	case KindMove, KindDoc, KindFormat:
+	case KindFormat:
+		// yjs ContentFormat.integrate: the type has formatting from now
+		// on (_hasFormatting, and _searchMarker = null).
+		parent.HasFormatting = true
+	case KindMove, KindDoc:
 		// Defer per tech-debt.md (Move integration, subdoc
-		// registration, format searchmarker).
+		// registration).
 	case KindType:
 		// Nested-type init: wire the embedded Branch's back-
 		// reference to this Item so subsequent extractValue calls

@@ -2,9 +2,11 @@ package types
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -23,9 +25,8 @@ import (
 type Attrs = map[string]any
 
 // DeltaOp is a single op from a Quill-style delta. Exactly one of
-// Insert / Retain / Delete is non-zero for any given op. Used by
-// ToDelta to expose the doc and by ApplyDelta to ingest one (the
-// ApplyDelta API ships in a follow-up commit; see tech-debt.md).
+// Insert / Embed / Retain / Delete is set for any given op. Used by
+// ToDelta to expose the doc and by ApplyDelta to ingest one.
 type DeltaOp struct {
 	// Insert is the text to insert at the cursor. Mutually exclusive
 	// with Embed, Retain, Delete.
@@ -46,90 +47,129 @@ type DeltaOp struct {
 	// with Insert, Embed, Retain.
 	Delete uint64
 
-	// Attributes applies to Insert, Embed, or Retain. Nil-valued keys
-	// inside Attributes mean "clear this attribute" on the affected
-	// range; absent keys preserve the current value.
+	// Attributes applies to Insert, Embed, or Retain. An Insert or
+	// Embed carries exactly these attributes: one in effect at the
+	// cursor that is absent here is cleared for the inserted content,
+	// and nil means none. On a Retain, a nil-valued key clears that
+	// attribute over the range and an absent key leaves it as it is.
 	Attributes Attrs
 }
 
-// InsertWithAttributes inserts str at idx, opening format markers
-// before the text for any attribute whose value differs from the
-// current formatting, and closing them afterward to restore the
-// prior state.
+// InsertWithAttributes inserts str at idx carrying exactly attrs, as yjs
+// insert(index, text, attributes) does: an attribute in effect at idx
+// that attrs does not name is cleared for the inserted text, an opening
+// marker is written for each value that differs from the one in effect,
+// and the values in effect are restored after the text.
 //
-// nil attrs is equivalent to Insert(idx, str). An empty map (zero
-// keys) is also equivalent.
-//
-// Per docs/yrs-port-notes/types-text-rich.md §5, the algorithm
-// mirrors yrs Text::insert_with_attributes (text.rs:280-295) +
-// JS Y.Text._insertWithAttributes (ytype.js:330-350).
+// nil attrs is Insert(idx, str): the text takes the formatting in effect
+// at idx. A non-nil empty map is yjs's {}: the text is inserted with no
+// attributes, every inherited one closed around it.
 func (t *Text) InsertWithAttributes(txn *doc.TransactionMut, idx uint64, str string, attrs Attrs) error {
 	if str == "" {
 		return nil
 	}
-	if len(attrs) == 0 {
+	if attrs == nil {
 		return t.Insert(txn, idx, str)
 	}
-
 	length := t.Length()
 	if idx > length {
 		return fmt.Errorf("text: insert index %d out of range [0, %d]", idx, length)
 	}
+	return t.insertContent(txn, idx, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str), attrs, sortedAttrKeys(attrs))
+}
 
-	left, right, err := findTextPosition(t.branch, txn, idx)
-	if err != nil {
-		return err
-	}
-	// Skip past tombstones AND existing format markers at the cursor
-	// so the new content lands at the natural end of the position
-	// (after any close markers that would otherwise leave the new
-	// text inside the prior formatting range).
-	for right != nil && (right.IsDeleted() || right.Content.Kind == block.KindFormat) {
-		left = right
-		right = right.Right
-	}
-
-	currentAttrs := currentAttributesAt(t.branch, right)
-	keys := sortedAttrKeys(attrs)
-
-	// Emit opening markers for every attr whose target value differs
-	// from current. Skip keys that already match.
-	for _, key := range keys {
-		value := attrs[key]
-		if attrValuesEqual(currentAttrs[key], value) {
-			continue
+// insertContent inserts content at idx through insertText, with attrs in
+// the key order keys. A text that never had a format item has no
+// attributes in effect anywhere, so the position comes from the search
+// markers and insertText starts from empty attributes; otherwise the
+// cursor walks from the start and collects them, as yjs findPosition does
+// for a type with formatting.
+func (t *Text) insertContent(txn *doc.TransactionMut, idx uint64, content block.Content, length uint64, attrs Attrs, keys []string) error {
+	var pos *textPos
+	if t.branch.HasFormatting {
+		var err error
+		if pos, err = findTextPos(txn, t.branch, idx); err != nil {
+			return err
 		}
-		marker := buildFormatMarker(txn, left, right, t.branch, key, value)
-		// The new marker is now the left neighbour for subsequent
-		// inserts at this cursor.
-		left = marker
-		// right stays — markers sit between left and the next item.
-	}
-
-	// Insert the text itself.
-	if err := insertStringBetween(txn, t.branch, left, right, str); err != nil {
-		return err
-	}
-
-	// Compute the post-insert cursor for closing markers: walk to
-	// just past the string item we just inserted.
-	postLeft := postInsertLeftOf(t.branch, idx+utf16.Length(str))
-	postRight := neighbourRightOf(postLeft)
-
-	// Emit closing markers to restore the previous formatting where
-	// our applied attrs differ. For each key we opened, emit a
-	// marker carrying its previous value (which may be nil = clear).
-	for _, key := range keys {
-		value := attrs[key]
-		prev := currentAttrs[key]
-		if attrValuesEqual(prev, value) {
-			continue
+	} else {
+		left, right, err := findTextPosition(t.branch, txn, idx)
+		if err != nil {
+			return err
 		}
-		closeMarker := buildFormatMarker(txn, postLeft, postRight, t.branch, key, prev)
-		postLeft = closeMarker
+		pos = &textPos{left: left, right: right, index: idx, attrs: Attrs{}}
 	}
-
+	item, at := insertText(txn, t.branch, pos, content, length, attrs, keys)
+	if !item.IsDeleted() {
+		t.branch.Markers.ShiftAfter(at, item.Len)
+		rememberMarker(t.branch, item, at)
+	}
 	return nil
+}
+
+// insertText inserts content at pos carrying exactly attrs, and leaves
+// pos after the content and the markers that restore the attributes
+// that were in effect. A port of yjs insertText: every attribute in
+// effect that attrs does not name is set to nil (cleared), the cursor
+// steps over tombstones and markers that already set the requested
+// values, an opening marker goes in for each value that differs, then
+// the content, then insertNegatedAttributes. keys is the caller's key
+// order; the keys filled in come after it, in the cursor's order, and the
+// whole list is enumerated as JavaScript enumerates the object yjs
+// builds (jsPropertyOrder). attrs is not modified. It returns the
+// content item and the index it went in at.
+func insertText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, content block.Content, length uint64, attrs Attrs, keys []string) (*block.Item, uint64) {
+	full := make(Attrs, len(attrs)+len(pos.attrs))
+	for k, v := range attrs {
+		full[k] = v
+	}
+	order := append([]string(nil), keys...)
+	for _, k := range pos.order {
+		if _, ok := full[k]; !ok {
+			full[k] = nil
+			order = append(order, k)
+		}
+	}
+	order = jsPropertyOrder(order)
+	minimizeAttributeChanges(pos, full)
+	negated := insertAttributes(txn, branch, pos, full, order)
+	at := pos.index
+	item := integrateContent(txn, branch, pos.left, pos.right, content, length)
+	pos.right = item
+	pos.forward()
+	insertNegatedAttributes(txn, branch, pos, negated)
+	return item, at
+}
+
+// integrateContent builds an item of the local client holding content
+// between left and right, and integrates it. Format markers are built by
+// buildFormatMarker.
+func integrateContent(txn *doc.TransactionMut, branch *block.Branch, left, right *block.Item, content block.Content, length uint64) *block.Item {
+	var origin, rightOrigin *block.ID
+	if left != nil {
+		lid := left.LastID()
+		origin = &lid
+	}
+	if right != nil {
+		rid := right.ID
+		rightOrigin = &rid
+	}
+	clientID := txn.Doc().ClientID()
+	item := &block.Item{
+		ID:          block.ID{Client: clientID, Clock: txn.Store().GetClock(clientID)},
+		Len:         length,
+		Origin:      origin,
+		Left:        left,
+		RightOrigin: rightOrigin,
+		Right:       right,
+		Content:     content,
+		Parent:      block.Parent{Kind: block.ParentBranch, Branch: branch},
+		Flags:       block.FlagCountable,
+	}
+	txn.Store().PushBlock(item)
+	if dropped := item.Integrate(txn, 0); dropped {
+		txn.Delete(item)
+	}
+	return item
 }
 
 // Format applies attrs to the range [idx, idx+length). It is a port of
@@ -166,6 +206,10 @@ type textPos struct {
 	left, right *block.Item
 	index       uint64
 	attrs       Attrs
+	// order lists the keys of attrs in the order a JavaScript Map
+	// iterates yjs's currentAttributes: a set on a present key keeps its
+	// place, a delete removes it, a set on an absent key appends it.
+	order []string
 }
 
 // forward steps the cursor over right, which must not be nil. A live
@@ -175,13 +219,54 @@ func (p *textPos) forward() {
 	r := p.right
 	if !r.IsDeleted() {
 		if r.Content.Kind == block.KindFormat {
-			updateCurrentAttrs(p.attrs, r.Content.FormatKey, formatValue(r))
+			p.updateAttr(r.Content.FormatKey, formatValue(r))
 		} else {
 			p.index += r.Len
 		}
 	}
 	p.left = r
 	p.right = r.Right
+}
+
+// setAttr is currentAttributes.set(key, value); value may be nil.
+func (p *textPos) setAttr(key string, value any) {
+	if _, ok := p.attrs[key]; !ok {
+		p.order = append(p.order, key)
+	}
+	p.attrs[key] = value
+}
+
+// deleteAttr is currentAttributes.delete(key).
+func (p *textPos) deleteAttr(key string) {
+	if _, ok := p.attrs[key]; !ok {
+		return
+	}
+	delete(p.attrs, key)
+	for i, k := range p.order {
+		if k == key {
+			p.order = append(p.order[:i:i], p.order[i+1:]...)
+			return
+		}
+	}
+}
+
+// updateAttr is yjs updateCurrentAttributes: nil clears the key.
+func (p *textPos) updateAttr(key string, value any) {
+	if value == nil {
+		p.deleteAttr(key)
+		return
+	}
+	p.setAttr(key, value)
+}
+
+// currentAttrs returns a copy of the attributes in effect and their keys
+// in Map order.
+func (p *textPos) currentAttrs() (Attrs, []string) {
+	attrs := make(Attrs, len(p.attrs))
+	for k, v := range p.attrs {
+		attrs[k] = v
+	}
+	return attrs, append([]string(nil), p.order...)
 }
 
 // findTextPos walks from the start of the text to index, splitting a
@@ -258,12 +343,13 @@ func minimizeAttributeChanges(pos *textPos, attrs Attrs) {
 }
 
 // insertAttributes writes an opening marker for every attribute whose
-// requested value differs from the one in effect, and returns the values
-// that were in effect so they can be restored after the range. Mirrors
-// yjs insertAttributes, with keys in ascending order.
-func insertAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, attrs Attrs) *negatedAttrs {
+// requested value differs from the one in effect, in the order of keys,
+// and returns the values that were in effect so they can be restored
+// after the range. Mirrors yjs insertAttributes, whose keys come in the
+// order JavaScript enumerates the attributes object (jsPropertyOrder).
+func insertAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, attrs Attrs, keys []string) *negatedAttrs {
 	negated := &negatedAttrs{}
-	for _, key := range sortedAttrKeys(attrs) {
+	for _, key := range keys {
 		value := attrs[key]
 		current := pos.attrs[key]
 		if attrValuesEqual(current, value) {
@@ -283,7 +369,7 @@ func insertAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPo
 // a marker that already restores a value is reused instead of doubled.
 func formatText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, length uint64, attrs Attrs) error {
 	minimizeAttributeChanges(pos, attrs)
-	negated := insertAttributes(txn, branch, pos, attrs)
+	negated := insertAttributes(txn, branch, pos, attrs, sortedAttrKeys(attrs))
 walk:
 	for pos.right != nil {
 		r := pos.right
@@ -304,7 +390,7 @@ walk:
 					}
 					txn.Delete(r)
 				} else {
-					pos.attrs[key] = value
+					pos.setAttr(key, value)
 				}
 			} else {
 				if length < r.Len {
@@ -315,6 +401,17 @@ walk:
 				length -= r.Len
 			}
 		}
+		pos.forward()
+	}
+	// The range runs past the end of the text: yjs appends a newline for
+	// each missing unit (Quill keeps a trailing newline). Format checks
+	// its range first, so only ApplyDelta gets here.
+	if length > 0 {
+		if length > maxRetainPadding {
+			return fmt.Errorf("text: retain runs %d units past the end, more than %d", length, maxRetainPadding)
+		}
+		item := integrateContent(txn, branch, pos.left, pos.right, block.Content{Kind: block.KindString, Str: strings.Repeat("\n", int(length))}, length)
+		pos.right = item
 		pos.forward()
 	}
 	insertNegatedAttributes(txn, branch, pos, negated)
@@ -354,56 +451,47 @@ func formatValue(it *block.Item) any {
 	return nil
 }
 
-// InsertEmbed inserts a single embedded value at idx. The value
-// must be a type representable through lib0 Any encoding —
-// typically map[string]any or one of the scalar Any types.
+// InsertEmbed inserts a single embedded value at idx with no
+// attributes: as yjs insertEmbed(index, embed) does, the attributes in
+// effect at idx are closed around it. It is
+// InsertEmbedWithAttributes(txn, idx, value, nil).
+func (t *Text) InsertEmbed(txn *doc.TransactionMut, idx uint64, value any) error {
+	return t.InsertEmbedWithAttributes(txn, idx, value, nil)
+}
+
+// InsertEmbedWithAttributes inserts a single embedded value at idx
+// carrying exactly attrs, as yjs insertEmbed(index, embed, attributes).
+// nil attrs and an empty map both mean no attributes. The value must be
+// representable as a lib0 Any, typically a map[string]any or a scalar.
+// A string value is inserted as text, as yjs does with a string embed;
+// an empty string inserts nothing.
 //
 // Embeds count as one UTF-16 position in Text.Length. They are
 // emitted by Range / ToDelta as an Embed op rather than a string
 // chunk.
-func (t *Text) InsertEmbed(txn *doc.TransactionMut, idx uint64, value any) error {
+func (t *Text) InsertEmbedWithAttributes(txn *doc.TransactionMut, idx uint64, value any, attrs Attrs) error {
 	total := t.Length()
 	if idx > total {
 		return fmt.Errorf("text: embed index %d out of range [0, %d]", idx, total)
 	}
-	left, right, err := findTextPosition(t.branch, txn, idx)
-	if err != nil {
-		return err
+	content, length := embedContent(value)
+	if length == 0 {
+		return nil
 	}
-	for right != nil && right.IsDeleted() {
-		left = right
-		right = right.Right
+	if attrs == nil {
+		attrs = Attrs{}
 	}
+	return t.insertContent(txn, idx, content, length, attrs, sortedAttrKeys(attrs))
+}
 
-	var origin, rightOrigin *block.ID
-	if left != nil {
-		lid := left.LastID()
-		origin = &lid
+// embedContent classifies an inserted value as yjs insertText does: a
+// string is text, anything else an embed. It returns the content and its
+// length in UTF-16 units.
+func embedContent(value any) (block.Content, uint64) {
+	if s, ok := value.(string); ok {
+		return block.Content{Kind: block.KindString, Str: s}, utf16.Length(s)
 	}
-	if right != nil {
-		rid := right.ID
-		rightOrigin = &rid
-	}
-
-	clientID := txn.Doc().ClientID()
-	clock := txn.Store().GetClock(clientID)
-
-	item := &block.Item{
-		ID:          block.ID{Client: clientID, Clock: clock},
-		Len:         1,
-		Origin:      origin,
-		Left:        left,
-		RightOrigin: rightOrigin,
-		Right:       right,
-		Content:     block.Content{Kind: block.KindEmbed, Anys: []block.Any{value}},
-		Parent:      block.Parent{Kind: block.ParentBranch, Branch: t.branch},
-		Flags:       block.FlagCountable,
-	}
-	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
-		txn.Delete(item)
-	}
-	return nil
+	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{value}}, 1
 }
 
 // ChunkKind discriminates the variants emitted by Text.Range.
@@ -461,112 +549,119 @@ func (t *Text) Range(fn func(kind ChunkKind, value any, attrs Attrs) bool) {
 	}
 }
 
-// ApplyDelta walks ops in order and dispatches each to the
-// appropriate primitive (InsertWithAttributes / InsertEmbed /
-// Format / Delete) while maintaining a cursor through the text.
+// maxRetainPadding bounds the newlines a retain past the end of a text may
+// append, so the count fits an int on every platform.
+const maxRetainPadding = math.MaxInt32
+
+// ApplyDelta applies a Quill-style delta, as yjs applyDelta does with its
+// default options: one cursor starts at the beginning of the text and
+// every op continues from where the previous one left it.
 //
-// Op semantics (mirrors JS Y.Text.applyDelta from
-// testdata/gen/node_modules/yjs/src/types/YText.js):
+//   - Insert (string) or Embed inserts at the cursor carrying exactly
+//     Attributes; nil Attributes means none, so inherited attributes are
+//     closed around the insert. A string Embed is inserted as text.
+//   - Retain N formats the next N units with Attributes (nil means none,
+//     which only moves the cursor). A retain that runs past the end of
+//     the text appends a newline for each missing unit, up to
+//     math.MaxInt32; a longer one fails before the op writes anything.
+//   - Delete N deletes the next N units, or as many as there are.
 //
-//   - Insert string with optional Attributes — insert text at
-//     cursor, advance cursor by len(text)
-//   - Insert non-string (Embed) with optional Attributes — insert a
-//     single embed at cursor, format it with Attributes, advance
-//     cursor by 1
-//   - Retain N with optional Attributes — if Attributes is non-nil,
-//     apply Format(cursor, N, Attributes); advance cursor by N
-//   - Delete N — delete N units at cursor; cursor unchanged
-//     (the text shifts left under the cursor)
+// An op with every field zero is a no-op. yjs runs an explicit
+// {retain: 0}, which can move the cursor across markers; a DeltaOp cannot
+// say whether its Retain was given, so ygo cannot. Quill does not emit
+// zero retains. yjs also writes the nulls of cleared attributes into the
+// attributes object it is given, so a caller reusing one object across
+// ops sees them in later ops; ygo never writes into Attributes.
 //
-// All ops execute inside the supplied txn so the entire delta is
-// atomic from peers' perspective. Errors abort mid-delta — the
-// txn caller must decide whether to commit the partial result or
-// roll back (the doc layer's TransactionMut has no Rollback, so
-// the partial mutation persists; this mirrors yrs's behaviour).
-//
-// Per docs/yrs-port-notes/types-text-rich.md §7. Empty ops slice
-// is a no-op; nil ops also a no-op.
+// All ops execute inside the supplied txn so the entire delta is atomic
+// from peers' perspective. Errors abort mid-delta; the partial mutation
+// persists (the doc layer's TransactionMut has no Rollback).
 func (t *Text) ApplyDelta(txn *doc.TransactionMut, ops []DeltaOp) error {
-	var cursor uint64
+	pos := &textPos{right: t.branch.Start, attrs: Attrs{}}
+	defer t.branch.Markers.Invalidate()
 	for i, op := range ops {
+		attrs := op.Attributes
+		if attrs == nil {
+			attrs = Attrs{}
+		}
 		switch {
 		case op.Insert != "":
-			if err := t.InsertWithAttributes(txn, cursor, op.Insert, op.Attributes); err != nil {
-				return fmt.Errorf("ApplyDelta op[%d] insert: %w", i, err)
-			}
-			cursor += utf16.Length(op.Insert)
+			insertText(txn, t.branch, pos, block.Content{Kind: block.KindString, Str: op.Insert}, utf16.Length(op.Insert), attrs, sortedAttrKeys(attrs))
 		case op.Embed != nil:
-			if err := t.InsertEmbed(txn, cursor, op.Embed); err != nil {
-				return fmt.Errorf("ApplyDelta op[%d] embed: %w", i, err)
+			if content, length := embedContent(op.Embed); length > 0 {
+				insertText(txn, t.branch, pos, content, length, attrs, sortedAttrKeys(attrs))
 			}
-			if len(op.Attributes) > 0 {
-				if err := t.Format(txn, cursor, 1, op.Attributes); err != nil {
-					return fmt.Errorf("ApplyDelta op[%d] embed attributes: %w", i, err)
-				}
-			}
-			cursor++
 		case op.Retain > 0:
-			if op.Attributes != nil {
-				if err := t.Format(txn, cursor, op.Retain, op.Attributes); err != nil {
-					return fmt.Errorf("ApplyDelta op[%d] retain+format: %w", i, err)
-				}
+			// Refuse padding that cannot be built before anything is written.
+			if rest := t.branch.BlockLen - pos.index; op.Retain > rest && op.Retain-rest > maxRetainPadding {
+				return fmt.Errorf("ApplyDelta op[%d] retain: runs %d units past the end, more than %d", i, op.Retain-rest, maxRetainPadding)
 			}
-			cursor += op.Retain
+			if err := formatText(txn, t.branch, pos, op.Retain, attrs); err != nil {
+				return fmt.Errorf("ApplyDelta op[%d] retain: %w", i, err)
+			}
 		case op.Delete > 0:
-			if err := t.Delete(txn, cursor, op.Delete); err != nil {
+			if err := deleteText(txn, t.branch, pos, op.Delete); err != nil {
 				return fmt.Errorf("ApplyDelta op[%d] delete: %w", i, err)
 			}
-			// cursor unchanged — text shifts left under cursor
-		default:
-			// All-zero op (or a Retain == 0 with nil attrs) is a no-op.
 		}
 	}
 	return nil
 }
 
 // ToDelta returns the Quill-style delta representation of the doc.
-// Adjacent same-attribute string chunks are coalesced into single
-// insert ops. Embeds appear as separate ops.
+// Consecutive strings are joined into one insert op up to the next live
+// format marker or embed. As in yjs toDelta, every live format marker
+// ends the op, even one that changes no attribute, so two adjacent ops
+// can carry equal attributes, and an attribute named "ychange", which
+// yjs reserves for snapshot diffs, is dropped at the next string. Embeds
+// appear as separate ops.
 //
 // The returned slice has no Retain / Delete ops — those exist only
 // in deltas representing CHANGES, not snapshots.
 func (t *Text) ToDelta() []DeltaOp {
 	var out []DeltaOp
-	var pendingStr string
-	var pendingAttrs Attrs
+	var str strings.Builder
+	current := Attrs{}
 
 	flush := func() {
-		if pendingStr == "" {
+		if str.Len() == 0 {
 			return
 		}
 		out = append(out, DeltaOp{
-			Insert:     pendingStr,
-			Attributes: pendingAttrs,
+			Insert:     str.String(),
+			Attributes: copyAttrs(current),
 		})
-		pendingStr = ""
-		pendingAttrs = nil
+		str.Reset()
 	}
 
-	t.Range(func(kind ChunkKind, v any, attrs Attrs) bool {
-		switch kind {
-		case ChunkString:
-			s, _ := v.(string)
-			if pendingStr != "" && !attrsEqual(pendingAttrs, attrs) {
-				flush()
-			}
-			pendingStr += s
-			if pendingAttrs == nil {
-				pendingAttrs = attrs
-			}
-		case ChunkEmbed:
+	for cur := t.branch.Start; cur != nil; cur = cur.Right {
+		if cur.IsDeleted() {
+			continue
+		}
+		switch cur.Content.Kind {
+		case block.KindFormat:
 			flush()
+			updateCurrentAttrs(current, cur.Content.FormatKey, formatValue(cur))
+		case block.KindString:
+			// yjs toDelta reserves "ychange" for snapshot diffs: without
+			// snapshots, a string drops it from the attributes in effect.
+			if _, ok := current["ychange"]; ok {
+				flush()
+				delete(current, "ychange")
+			}
+			str.WriteString(cur.Content.Str)
+		case block.KindEmbed:
+			flush()
+			var v any
+			if len(cur.Content.Anys) > 0 {
+				v = cur.Content.Anys[0]
+			}
 			out = append(out, DeltaOp{
 				Embed:      v,
-				Attributes: copyNonEmptyAttrs(attrs),
+				Attributes: copyNonEmptyAttrs(current),
 			})
 		}
-		return true
-	})
+	}
 	flush()
 	return out
 }
@@ -606,39 +701,6 @@ func buildFormatMarker(txn *doc.TransactionMut, left, right *block.Item, parentB
 	return marker
 }
 
-// insertStringBetween emits a KindString Item between left and
-// right neighbours. Used by InsertWithAttributes after format
-// markers have been placed.
-func insertStringBetween(txn *doc.TransactionMut, parentBranch *block.Branch, left, right *block.Item, str string) error {
-	var origin, rightOrigin *block.ID
-	if left != nil {
-		lid := left.LastID()
-		origin = &lid
-	}
-	if right != nil {
-		rid := right.ID
-		rightOrigin = &rid
-	}
-	clientID := txn.Doc().ClientID()
-	clock := txn.Store().GetClock(clientID)
-	item := &block.Item{
-		ID:          block.ID{Client: clientID, Clock: clock},
-		Len:         utf16.Length(str),
-		Origin:      origin,
-		Left:        left,
-		RightOrigin: rightOrigin,
-		Right:       right,
-		Content:     block.Content{Kind: block.KindString, Str: str},
-		Parent:      block.Parent{Kind: block.ParentBranch, Branch: parentBranch},
-		Flags:       block.FlagCountable,
-	}
-	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
-		txn.Delete(item)
-	}
-	return nil
-}
-
 // currentAttributesAt is the branch-aware accumulator used by
 // InsertWithAttributes / Format. Walks branch.Start forward until
 // it reaches the supplied right neighbour (or the end), accumulating
@@ -667,39 +729,6 @@ func currentAttributesAt(branch *block.Branch, right *block.Item) Attrs {
 	return out
 }
 
-// postInsertLeftOf finds the leftmost Item at or after position pos
-// in the branch — essentially the same as findTextPosition's left
-// return but without triggering a split. Used by InsertWithAttributes
-// to position closing markers after the just-inserted string.
-//
-// Walks from branch.Start counting UTF-16 units in live String items.
-// Returns nil if pos is at the very start (no item to anchor left of).
-func postInsertLeftOf(branch *block.Branch, pos uint64) *block.Item {
-	var counted uint64
-	var lastSeen *block.Item
-	for cur := branch.Start; cur != nil; cur = cur.Right {
-		if cur.IsDeleted() || cur.Content.Kind == block.KindFormat {
-			continue
-		}
-		counted += cur.Len
-		lastSeen = cur
-		if counted >= pos {
-			return cur
-		}
-	}
-	return lastSeen
-}
-
-// neighbourRightOf returns the Item immediately after item in the
-// branch linked list, or nil if item is at the tail. Used to compute
-// the right-neighbour for marker insertion.
-func neighbourRightOf(item *block.Item) *block.Item {
-	if item == nil {
-		return nil
-	}
-	return item.Right
-}
-
 // updateCurrentAttrs applies one KindFormat marker to the running
 // attrs map: a nil value clears the key, a non-nil value sets it.
 func updateCurrentAttrs(attrs Attrs, key string, value any) {
@@ -710,20 +739,59 @@ func updateCurrentAttrs(attrs Attrs, key string, value any) {
 	attrs[key] = value
 }
 
-// sortedAttrKeys returns the keys of attrs in ascending order. Each
-// attribute becomes its own format marker, and the order the markers
-// are emitted in is part of the encoded update. yjs walks the
-// attribute object in property order and closes in that same order;
-// a Go map has no order of its own and ranging over one is randomised,
-// which made the same edit encode to different bytes from run to run.
-// Sorted keys give one order, for opening and closing markers alike.
+// sortedAttrKeys returns the keys of attrs in the order yjs walks an
+// attributes object the caller wrote with its keys in ascending order:
+// integer-index keys first, by value, then the others ascending (see
+// jsPropertyOrder). Each attribute becomes its own format marker, and the
+// order the markers are emitted in is part of the encoded update. A Go
+// map has no order of its own and ranging over one is randomised, which
+// made the same edit encode to different bytes from run to run.
 func sortedAttrKeys(attrs Attrs) []string {
 	keys := make([]string, 0, len(attrs))
 	for k := range attrs {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	return keys
+	return jsPropertyOrder(keys)
+}
+
+// jsPropertyOrder reorders keys, given in insertion order, the way
+// JavaScript enumerates the own string keys of an object: integer-index
+// keys (canonical decimal below 2^32-1, such as "0" or "10") first, in
+// numeric order, then the rest in the order given. keys is reordered in
+// place and returned.
+func jsPropertyOrder(keys []string) []string {
+	var ints []string
+	for _, k := range keys {
+		if isArrayIndexKey(k) {
+			ints = append(ints, k)
+		}
+	}
+	if len(ints) == 0 {
+		return keys
+	}
+	sort.Slice(ints, func(i, j int) bool {
+		a, _ := strconv.ParseUint(ints[i], 10, 32)
+		b, _ := strconv.ParseUint(ints[j], 10, 32)
+		return a < b
+	})
+	rest := make([]string, 0, len(keys)-len(ints))
+	for _, k := range keys {
+		if !isArrayIndexKey(k) {
+			rest = append(rest, k)
+		}
+	}
+	return append(append(keys[:0], ints...), rest...)
+}
+
+// isArrayIndexKey reports whether k is an array index in the sense of
+// ECMAScript: the canonical decimal form of an integer below 2^32-1.
+func isArrayIndexKey(k string) bool {
+	if k == "" || len(k) > 10 || (len(k) > 1 && k[0] == '0') {
+		return false
+	}
+	n, err := strconv.ParseUint(k, 10, 64)
+	return err == nil && n < 1<<32-1
 }
 
 // copyAttrs returns a shallow copy of attrs so callers cannot
@@ -771,9 +839,10 @@ func copyNonEmptyAttrs(attrs Attrs) Attrs {
 // ToDelta across two such runs, or building an observer event for them crashed
 // the process - and the event path runs on updates from peers.
 //
-// Scalars keep the semantics they had, including float64(1) != int(1) where JS
-// has one number type; changing that would change which markers existing
-// callers produce.
+// JS has one number type, so every Go integer and float kind compares by
+// value as a number: int(1), int64(1) (how lib0 integers and bigints decode)
+// and float64(1) (how JSON numbers decode) are equal, NaN is not equal to
+// itself, and 0 equals -0.
 func attrValuesEqual(a, b any) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -881,6 +950,10 @@ func strictEqual(a, b any) bool {
 		return a == nil && b == nil
 	}
 	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if na, ok := jsNumber(va); ok {
+		nb, ok := jsNumber(vb)
+		return ok && na == nb
+	}
 	if va.Type() != vb.Type() {
 		return false
 	}
@@ -894,17 +967,16 @@ func strictEqual(a, b any) bool {
 	return a == b
 }
 
-// attrsEqual reports whether two Attrs maps contain identical
-// (key, value) sets. Order-independent.
-func attrsEqual(a, b Attrs) bool {
-	if len(a) != len(b) {
-		return false
+// jsNumber reports the value of v as a JavaScript number when v is a Go
+// integer or float kind.
+func jsNumber(v reflect.Value) (float64, bool) {
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(v.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return float64(v.Uint()), true
+	case reflect.Float32, reflect.Float64:
+		return v.Float(), true
 	}
-	for k, va := range a {
-		vb, ok := b[k]
-		if !ok || !attrValuesEqual(va, vb) {
-			return false
-		}
-	}
-	return true
+	return 0, false
 }

@@ -43,8 +43,11 @@ func (t *Text) Format(index, length int, attributesJSON []byte) error {
 	return t.inner.Format(txn, uint64(index), uint64(length), attrs)
 }
 
-// InsertWithAttributes inserts s at the UTF-16 index with formatting
-// already applied (attributesJSON is an object like {"italic":true}).
+// InsertWithAttributes inserts s at the UTF-16 index carrying exactly the
+// attributes in attributesJSON, an object like {"italic":true}; other
+// formatting in effect at the index is closed around it, and {} means no
+// attributes. Empty input or null inherits the formatting at the index,
+// as Insert does.
 func (t *Text) InsertWithAttributes(index int, s string, attributesJSON []byte) error {
 	if index < 0 {
 		return fmt.Errorf("gomobile: negative index %d", index)
@@ -60,7 +63,9 @@ func (t *Text) InsertWithAttributes(index int, s string, attributesJSON []byte) 
 
 // InsertEmbed inserts a single embedded value (an image, mention, or
 // other non-text node) at the UTF-16 index. embedJSON is any JSON value,
-// typically an object: {"image":"https://..."}.
+// typically an object: {"image":"https://..."}. The embed carries no
+// attributes; formatting in effect at the index is closed around it, as
+// yjs insertEmbed does. A JSON string is inserted as text, as in yjs.
 func (t *Text) InsertEmbed(index int, embedJSON []byte) error {
 	if index < 0 {
 		return fmt.Errorf("gomobile: negative index %d", index)

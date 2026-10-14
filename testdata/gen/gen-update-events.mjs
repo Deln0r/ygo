@@ -40,7 +40,8 @@ const CLIENTS = [3141592653, 271828182, 141421356, 57721566];
 const ins = (path, index, text, attrs) => ({ op: "insert", path, index, text, ...(attrs ? { attrs } : {}) });
 const del = (path, index, len) => ({ op: "delete", path, index, len });
 const fmt = (path, index, len, attrs) => ({ op: "format", path, index, len, attrs });
-const embed = (path, index, value) => ({ op: "embed", path, index, value });
+const embed = (path, index, value, attrs) => ({ op: "embed", path, index, value, ...(attrs !== undefined ? { attrs } : {}) });
+const delta = (path, ops) => ({ op: "delta", path, delta: ops });
 const push = (path, values) => ({ op: "push", path, values });
 const insv = (path, index, values) => ({ op: "insertValues", path, index, values });
 const set = (path, key, value) => ({ op: "set", path, key, value });
@@ -152,6 +153,65 @@ const scenarios = [
     description: "an embed between appends",
     steps: [txn(0, null, ins(T, 0, "ab")), txn(0, null, embed(T, 2, { image: "x.png" })), txn(0, null, ins(T, 3, "c"))],
     diffs: true,
+  },
+  {
+    name: "text-insert-integer-attribute-keys",
+    description: "insert with attribute keys that JavaScript enumerates as array indices",
+    steps: [txn(0, null, ins(T, 0, "x", { "10": true, "2": true }))],
+  },
+  {
+    name: "text-insert-inherited-integer-key",
+    description: "insert with one attribute where an integer-keyed attribute is in effect",
+    steps: [txn(0, null, ins(T, 0, "ab", { "2": true })), txn(0, null, ins(T, 1, "X", { z: true }))],
+  },
+  {
+    name: "text-insert-empty-attrs-inside-run",
+    description: "insert with an empty attribute object inside bold text",
+    steps: [txn(0, null, ins(T, 0, "hello", { bold: true })), txn(0, null, ins(T, 2, "X", {}))],
+  },
+  {
+    name: "text-insert-plain-at-run-end",
+    description: "insert without attributes at the end of bold text",
+    steps: [txn(0, null, ins(T, 0, "hello", { bold: true })), txn(0, null, ins(T, 5, "!"))],
+  },
+  {
+    name: "text-insert-plain-at-run-start",
+    description: "insert without attributes at the start of bold text",
+    steps: [txn(0, null, ins(T, 0, "hello", { bold: true })), txn(0, null, ins(T, 0, "^"))],
+  },
+  {
+    name: "text-insert-plain-after-deleted-run-end",
+    description: "insert without attributes where the last bold character was deleted",
+    steps: [txn(0, null, ins(T, 0, "abcd", { bold: true })), txn(0, null, del(T, 3, 1)), txn(0, null, ins(T, 3, "e"))],
+  },
+  {
+    name: "text-embed-attrs-inside-run",
+    description: "insert an embed with another attribute inside bold text",
+    steps: [txn(0, null, ins(T, 0, "hello", { bold: true })), txn(0, null, embed(T, 2, { image: "a" }, { link: "x" }))],
+  },
+  {
+    name: "text-embed-plain-inside-run",
+    description: "insert an embed without attributes inside bold text",
+    steps: [txn(0, null, ins(T, 0, "hello", { bold: true })), txn(0, null, embed(T, 2, { image: "a" }))],
+  },
+  {
+    name: "text-delta-cursor",
+    description: "deltas whose ops continue from the cursor the previous op left",
+    steps: [
+      txn(0, null, delta(T, [{ insert: "ab", attributes: { bold: true } }, { insert: "c" }, { insert: "d", attributes: { bold: true } }, { insert: "e", attributes: { italic: true } }])),
+      txn(0, null, delta(T, [{ retain: 1 }, { delete: 2 }, { insert: "Z" }, { retain: 1, attributes: { bold: null } }])),
+    ],
+  },
+  {
+    name: "text-delta-retain-past-end",
+    description: "a delta formats past the end of the text",
+    steps: [txn(0, null, ins(T, 0, "ab")), txn(0, null, delta(T, [{ retain: 4, attributes: { bold: true } }]))],
+  },
+  {
+    name: "text-insert-number-attr-from-peer",
+    description: "insert with a number attribute equal to the one a peer wrote",
+    docs: 2,
+    steps: [txn(1, null, ins(T, 0, "ab", { level: 1 })), apply(1, 0, null, "state"), txn(0, null, ins(T, 1, "X", { level: 1 }))],
   },
   {
     name: "emoji-append",
@@ -1150,7 +1210,8 @@ const applyOp = (doc, op) => {
     case "insert": return op.attrs ? t.insert(op.index, op.text, copy(op.attrs)) : t.insert(op.index, op.text);
     case "delete": return t.delete(op.index, op.len);
     case "format": return t.format(op.index, op.len, copy(op.attrs));
-    case "embed": return t.insertEmbed(op.index, copy(op.value));
+    case "embed": return "attrs" in op ? t.insertEmbed(op.index, copy(op.value), copy(op.attrs)) : t.insertEmbed(op.index, copy(op.value));
+    case "delta": return t.applyDelta(copy(op.delta));
     case "push": return t.push(copy(op.values));
     case "insertValues": return t.insert(op.index, copy(op.values));
     case "set": return t.set(op.key, copy(op.value));

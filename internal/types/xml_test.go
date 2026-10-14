@@ -140,7 +140,7 @@ func TestXml_Text_RichFormatting(t *testing.T) {
 	txn := d.WriteTxn()
 	txt := frag.InsertXmlText(txn, 0)
 	_ = txt.InsertWithAttributes(txn, 0, "bold", types.Attrs{"bold": true})
-	_ = txt.Insert(txn, 4, " plain")
+	_ = txt.InsertWithAttributes(txn, 4, " plain", types.Attrs{})
 	txn.Commit()
 
 	if got, want := txt.String(), "bold plain"; got != want {

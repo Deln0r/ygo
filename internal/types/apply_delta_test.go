@@ -141,7 +141,7 @@ func TestApplyDelta_Embed(t *testing.T) {
 	w := d.WriteTxn()
 	if err := tx.ApplyDelta(w, []types.DeltaOp{
 		{Insert: "before"},
-		{Embed: "embed-val"},
+		{Embed: map[string]any{"image": "embed-val"}},
 		{Insert: "after"},
 	}); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestApplyDelta_Embed(t *testing.T) {
 	if delta[0].Insert != "before" {
 		t.Errorf("delta[0] = %+v", delta[0])
 	}
-	if delta[1].Embed != "embed-val" {
+	if !reflect.DeepEqual(delta[1].Embed, map[string]any{"image": "embed-val"}) {
 		t.Errorf("delta[1] = %+v, want Embed=embed-val", delta[1])
 	}
 	if delta[2].Insert != "after" {
@@ -272,7 +272,7 @@ func TestApplyDelta_RetainNoAttrs_PreservesFormatting(t *testing.T) {
 
 	w := d.WriteTxn()
 	_ = tx.InsertWithAttributes(w, 0, "bold", types.Attrs{"bold": true})
-	_ = tx.Insert(w, 4, " plain")
+	_ = tx.InsertWithAttributes(w, 4, " plain", types.Attrs{})
 	w.Commit()
 
 	w = d.WriteTxn()
@@ -291,5 +291,34 @@ func TestApplyDelta_RetainNoAttrs_PreservesFormatting(t *testing.T) {
 	}
 	if !reflect.DeepEqual(delta, want) {
 		t.Errorf("delta after no-attr retain = %+v, want %+v", delta, want)
+	}
+}
+
+// A retain past the end pads with newlines, as yjs does, but only as many
+// as fit an int: a longer one fails before the op writes anything, where
+// it used to reach strings.Repeat with a negative count.
+func TestApplyDelta_RetainPaddingBounded(t *testing.T) {
+	d := doc.NewDocWithOptions(doc.Options{ClientID: 1120})
+	tx := types.NewText(d.Branch("body"))
+	w := d.WriteTxn()
+	defer w.Commit()
+	for _, op := range []types.DeltaOp{
+		{Retain: 1 << 63},
+		{Retain: 1 << 32, Attributes: types.Attrs{"bold": true}},
+	} {
+		if err := tx.ApplyDelta(w, []types.DeltaOp{op}); err == nil {
+			t.Errorf("ApplyDelta(%+v) = nil, want an error", op)
+		}
+	}
+	if tx.Length() != 0 || tx.Branch().Start != nil {
+		t.Errorf("text changed: length %d, start %v", tx.Length(), tx.Branch().Start)
+	}
+	if err := tx.ApplyDelta(w, []types.DeltaOp{{Insert: "ab"}, {Retain: 4, Attributes: types.Attrs{"bold": true}}}); err != nil {
+		t.Fatal(err)
+	}
+	// The retain starts where the insert left the cursor, at the end, so
+	// all 4 units are missing (rich-text fixture delta-retain-past-end).
+	if got := tx.String(); got != "ab\n\n\n\n" {
+		t.Errorf("String = %q, want %q", got, "ab\n\n\n\n")
 	}
 }

@@ -69,6 +69,12 @@ func (t *Text) String() string {
 // be in [0, Length()]. str may contain any Unicode characters; non-BMP
 // chars (e.g. emoji) contribute 2 UTF-16 units each.
 //
+// The text takes the formatting in effect at idx, as yjs insert(index,
+// text) does: it goes in right after the content before idx, past
+// tombstones and past markers that set a value already in effect, and
+// before the first marker that changes one. So text typed at the end of
+// a bold run is bold, and text typed at its start is not.
+//
 // Multiple consecutive Insert calls produce separate Items;
 // commit-time TrySquash merges adjacent same-client adjacent-clock
 // String items into one (yrs/src/block.rs:1987-1990).
@@ -82,50 +88,34 @@ func (t *Text) Insert(txn *doc.TransactionMut, idx uint64, str string) error {
 	if idx > length {
 		return fmt.Errorf("text: insert index %d out of range [0, %d]", idx, length)
 	}
+	if t.branch.HasFormatting {
+		pos, err := findTextPos(txn, t.branch, idx)
+		if err != nil {
+			return err
+		}
+		attrs, keys := pos.currentAttrs()
+		item, at := insertText(txn, t.branch, pos, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str), attrs, keys)
+		if !item.IsDeleted() {
+			t.branch.Markers.ShiftAfter(at, item.Len)
+			rememberMarker(t.branch, item, at)
+		}
+		return nil
+	}
 
+	// No format item in this text: nothing is in effect anywhere, and
+	// insertText reduces to stepping over the tombstones after the
+	// position. YATA convergence needs concurrent inserts at the same
+	// index to attach to the same live successor as right origin.
 	left, right, err := findTextPosition(t.branch, txn, idx)
 	if err != nil {
 		return err
 	}
-	// Skip past tombstones AND format markers at the cursor — matches
-	// text.rs:219-225 "just like Yjs does." YATA convergence requires
-	// concurrent inserts at the same logical index to attach to the
-	// same live successor as right_origin; skipping format markers
-	// in addition means plain Insert at the end of a formatted range
-	// produces unformatted text (the close marker has already taken
-	// effect).
-	for right != nil && (right.IsDeleted() || right.Content.Kind == block.KindFormat) {
+	for right != nil && right.IsDeleted() {
 		left = right
 		right = right.Right
 	}
-
-	var origin, rightOrigin *block.ID
-	if left != nil {
-		lid := left.LastID()
-		origin = &lid
-	}
-	if right != nil {
-		rid := right.ID
-		rightOrigin = &rid
-	}
-
-	clientID := txn.Doc().ClientID()
-	clock := txn.Store().GetClock(clientID)
-
-	item := &block.Item{
-		ID:          block.ID{Client: clientID, Clock: clock},
-		Len:         utf16.Length(str),
-		Origin:      origin,
-		Left:        left,
-		RightOrigin: rightOrigin,
-		Right:       right,
-		Content:     block.Content{Kind: block.KindString, Str: str},
-		Parent:      block.Parent{Kind: block.ParentBranch, Branch: t.branch},
-		Flags:       block.FlagCountable,
-	}
-	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
-		txn.Delete(item)
+	item := integrateContent(txn, t.branch, left, right, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str))
+	if item.IsDeleted() {
 		return nil
 	}
 	t.branch.Markers.ShiftAfter(idx, item.Len)
@@ -201,37 +191,95 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 // and tombstones that starts at start and ends at the next live content
 // that no longer mark anything: a marker that a later marker in the
 // run overrides for the same key, or one that sets the value already
-// in effect before the run. Ports yjs cleanupFormattingGap, including
-// its strict (identity) comparison of values. yjs builds the attributes
-// in effect from its cursor, which starts empty when it came from a
-// search marker; these are always the full ones, so a redundant marker
-// yjs would keep in that case is removed here. Nothing a reader sees
-// depends on it.
+// in effect before the run. Text.Delete calls it after deleting; the
+// attributes in effect before the run are collected only when the run
+// holds a live marker.
 func cleanupFormattingGap(txn *doc.TransactionMut, branch *block.Branch, start *block.Item) {
 	if start == nil {
 		return
 	}
-	last := map[string]*block.Item{}
-	end := start
-	for end != nil && (end.IsDeleted() || end.Content.Kind == block.KindFormat) {
+	for end := start; end != nil && (end.IsDeleted() || end.Content.Kind == block.KindFormat); end = end.Right {
 		if !end.IsDeleted() {
+			cleanupFormattingGapFrom(txn, start, nil, currentAttributesAt(branch, start), nil)
+			return
+		}
+	}
+}
+
+// cleanupFormattingGapFrom is yjs cleanupFormattingGap: in the run of
+// markers and tombstones from start to the next live content, it deletes
+// each marker that a later marker in the run overrides for the same key
+// or that sets the value startAttrs already holds, comparing values
+// strictly (identity for objects, as JS ===). When pos is not nil, its
+// attributes follow for the markers before curr (the cursor's right): a
+// deleted marker's value is taken back, a kept marker applied. It returns
+// the number of markers deleted.
+func cleanupFormattingGapFrom(txn *doc.TransactionMut, start, curr *block.Item, startAttrs Attrs, pos *textPos) int {
+	end := start
+	last := map[string]*block.Item{}
+	for end != nil && (end.IsDeleted() || !end.IsCountable()) {
+		if !end.IsDeleted() && end.Content.Kind == block.KindFormat {
 			last[end.Content.FormatKey] = end
 		}
 		end = end.Right
 	}
-	if len(last) == 0 {
-		return
-	}
-	before := currentAttributesAt(branch, start)
-	for it := start; it != end; it = it.Right {
-		if it.IsDeleted() || it.Content.Kind != block.KindFormat {
+	cleanups := 0
+	reachedCurr := false
+	for ; start != end; start = start.Right {
+		if start == curr {
+			reachedCurr = true
+		}
+		if start.IsDeleted() || start.Content.Kind != block.KindFormat {
 			continue
 		}
-		key := it.Content.FormatKey
-		if last[key] != it || strictEqual(before[key], formatValue(it)) {
-			txn.Delete(it)
+		key, value := start.Content.FormatKey, formatValue(start)
+		before := startAttrs[key]
+		if last[key] != start || strictEqual(before, value) {
+			txn.Delete(start)
+			cleanups++
+			if !reachedCurr && pos != nil && strictEqual(pos.attrs[key], value) && !strictEqual(before, value) {
+				if before == nil {
+					pos.deleteAttr(key)
+				} else {
+					pos.setAttr(key, before)
+				}
+			}
+		}
+		if !reachedCurr && pos != nil && !start.IsDeleted() {
+			pos.updateAttr(key, value)
 		}
 	}
+	return cleanups
+}
+
+// deleteText deletes length units of content from pos, or as many as
+// the text holds after it, and leaves pos after them. A port of yjs
+// deleteText, used by ApplyDelta: markers in the range stay, and
+// cleanupFormattingGapFrom then removes the ones that no longer mark
+// anything and corrects the cursor's attributes.
+func deleteText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, length uint64) error {
+	startAttrs, _ := pos.currentAttrs()
+	start := pos.right
+	for length > 0 && pos.right != nil {
+		r := pos.right
+		if !r.IsDeleted() {
+			switch r.Content.Kind {
+			case block.KindString, block.KindEmbed, block.KindType:
+				if length < r.Len {
+					if txn.Store().SplitBlock(r, length) == nil {
+						return fmt.Errorf("text: split failed at offset %d in item %v", length, r.ID)
+					}
+				}
+				length -= r.Len
+				txn.Delete(r)
+			}
+		}
+		pos.forward()
+	}
+	if start != nil {
+		cleanupFormattingGapFrom(txn, start, pos.right, startAttrs, pos)
+	}
+	return nil
 }
 
 // findTextPosition resolves a UTF-16 cursor index into the (left,

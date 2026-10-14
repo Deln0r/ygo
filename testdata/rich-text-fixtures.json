@@ -814,6 +814,559 @@
       ]
     },
     {
+      "name": "insert-plain-at-seam-of-two-runs",
+      "description": "insert without attributes where a bold run ends and an italic run starts",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "cd",
+            "attrs": {
+              "italic": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abX",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "cd",
+          "attributes": {
+            "italic": true
+          }
+        }
+      ],
+      "expected_string": "abXcd",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "abX",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "cd",
+            "attributes": {
+              "italic": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-before-tombstone-and-marker",
+      "description": "insert without attributes at the end of bold text whose last character was deleted",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcd",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delete",
+            "index": 3,
+            "length": 1
+          },
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "e"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "abce",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abce",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "abce",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-at-run-end-in-long-text",
+      "description": "type at the end of a bold run deep in a long text after other edits",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "op": "format",
+            "index": 100,
+            "length": 50,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 120,
+            "text": "y"
+          },
+          {
+            "op": "insert",
+            "index": 30,
+            "text": "w"
+          },
+          {
+            "op": "delete",
+            "index": 10,
+            "length": 1
+          },
+          {
+            "op": "insert",
+            "index": 151,
+            "text": "z"
+          },
+          {
+            "op": "insert",
+            "index": 152,
+            "text": "z"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxwxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "insert": "xxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxzz",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ],
+      "expected_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxwxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxzzxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected_length": 203,
+      "expected_events": [
+        [
+          {
+            "insert": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxwxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "insert": "xxxxxxxxxxxxxxxxxxxxyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxzz",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-plain-surrogate-in-run",
+      "description": "insert without attributes after an emoji inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "a😀b",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "X"
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a😀Xb",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "a😀Xb",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "a😀Xb",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-attrs-equal-to-current",
+      "description": "insert with the attributes already in effect",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "heXllo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heXllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "heXllo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-attrs-null-inside-run",
+      "description": "insert with a null attribute inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X",
+            "attrs": {
+              "bold": null
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "X"
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "heXllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X"
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-attrs-two-keys-while-two-others-apply",
+      "description": "insert with two attributes inside text that carries two others",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X",
+            "attrs": {
+              "color": "red",
+              "italic": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true,
+            "underline": true
+          }
+        },
+        {
+          "insert": "X",
+          "attributes": {
+            "color": "red",
+            "italic": true
+          }
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true,
+            "underline": true
+          }
+        }
+      ],
+      "expected_string": "heXllo",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "color": "red",
+              "italic": true
+            }
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true,
+              "underline": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-attrs-at-run-start",
+      "description": "insert with another attribute at the start of bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "X",
+            "attrs": {
+              "italic": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "X",
+          "attributes": {
+            "italic": true
+          }
+        },
+        {
+          "insert": "hello",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "Xhello",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "X",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "hello",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-attrs-at-run-end",
+      "description": "insert with another attribute at the end of bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 5,
+            "text": "X",
+            "attrs": {
+              "italic": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "hello",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "X",
+          "attributes": {
+            "italic": true
+          }
+        }
+      ],
+      "expected_string": "helloX",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "hello",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "italic": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "insert-empty-attrs-in-plain-text",
+      "description": "insert with an empty attribute object into unformatted text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc"
+          },
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "X",
+            "attrs": {}
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "aXbc"
+        }
+      ],
+      "expected_string": "aXbc",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "aXbc"
+          }
+        ]
+      ]
+    },
+    {
       "name": "embed-inside-run",
       "description": "insert an embed without attributes inside bold text",
       "txns": [
@@ -1043,6 +1596,314 @@
             "insert": "b",
             "attributes": {
               "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "embed-attrs-inside-run",
+      "description": "insert an embed with another attribute inside bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "embed",
+            "index": 2,
+            "embed": {
+              "image": "a"
+            },
+            "attrs": {
+              "link": "x"
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": {
+            "image": "a"
+          },
+          "attributes": {
+            "link": "x"
+          }
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "hello",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": {
+              "image": "a"
+            },
+            "attributes": {
+              "link": "x"
+            }
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "embed-plain-at-run-end",
+      "description": "insert an embed without attributes at the end of bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "embed",
+            "index": 5,
+            "embed": {
+              "image": "a"
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "hello",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": {
+            "image": "a"
+          }
+        }
+      ],
+      "expected_string": "hello",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "hello",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": {
+              "image": "a"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "embed-string-is-text",
+      "description": "insertEmbed with a string inserts text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "embed",
+            "index": 2,
+            "embed": "ab"
+          },
+          {
+            "op": "embed",
+            "index": 0,
+            "embed": "cd",
+            "attrs": {
+              "italic": true
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "cd",
+          "attributes": {
+            "italic": true
+          }
+        },
+        {
+          "insert": "he",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "ab"
+        },
+        {
+          "insert": "llo",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "cdheabllo",
+      "expected_length": 9,
+      "expected_events": [
+        [
+          {
+            "insert": "cd",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "he",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "ab"
+          },
+          {
+            "insert": "llo",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "ychange-attribute",
+      "description": "an attribute named ychange, which toDelta reserves for snapshots",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab",
+            "attrs": {
+              "ychange": {
+                "user": 3,
+                "type": "added"
+              }
+            }
+          },
+          {
+            "op": "embed",
+            "index": 1,
+            "embed": {
+              "image": "a"
+            },
+            "attrs": {
+              "ychange": {
+                "user": 3,
+                "type": "added"
+              }
+            }
+          },
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "c",
+            "attrs": {
+              "bold": true,
+              "ychange": 1
+            }
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "c",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "a"
+        },
+        {
+          "insert": {
+            "image": "a"
+          }
+        },
+        {
+          "insert": "b"
+        }
+      ],
+      "expected_string": "cab",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "c",
+            "attributes": {
+              "bold": true,
+              "ychange": 1
+            }
+          },
+          {
+            "insert": "a",
+            "attributes": {
+              "ychange": {
+                "user": 3,
+                "type": "added"
+              }
+            }
+          },
+          {
+            "insert": {
+              "image": "a"
+            },
+            "attributes": {
+              "ychange": {
+                "user": 3,
+                "type": "added"
+              }
+            }
+          },
+          {
+            "insert": "b",
+            "attributes": {
+              "ychange": {
+                "user": 3,
+                "type": "added"
+              }
             }
           }
         ]
@@ -1988,6 +2849,314 @@
           },
           {
             "insert": "def"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-insert-after-formatted-insert",
+      "description": "a delta inserts plain text right after text it inserted bold",
+      "txns": [
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": "ab",
+                "attributes": {
+                  "bold": true
+                }
+              },
+              {
+                "insert": "c"
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ab",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "c"
+        }
+      ],
+      "expected_string": "abc",
+      "expected_length": 3,
+      "expected_events": [
+        [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "c"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-insert-twice-same-attrs",
+      "description": "a delta inserts two bold pieces in a row",
+      "txns": [
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": "ab",
+                "attributes": {
+                  "bold": true
+                }
+              },
+              {
+                "insert": "c",
+                "attributes": {
+                  "bold": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ab",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "c",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "abc",
+      "expected_length": 3,
+      "expected_events": [
+        [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "c",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-insert-plain-at-run-end",
+      "description": "a delta inserts without attributes at the end of bold text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "hello",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 5
+              },
+              {
+                "insert": "!"
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "hello",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "!"
+        }
+      ],
+      "expected_string": "hello!",
+      "expected_length": 6,
+      "expected_events": [
+        [
+          {
+            "insert": "hello",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "!"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-delete-into-run-then-insert",
+      "description": "a delta deletes into a bold run, then inserts without attributes",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          },
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 1
+              },
+              {
+                "delete": 2
+              },
+              {
+                "insert": "Z"
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": "Z"
+        },
+        {
+          "insert": "d",
+          "attributes": {
+            "bold": true
+          }
+        },
+        {
+          "insert": "ef"
+        }
+      ],
+      "expected_string": "aZdef",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "Z"
+          },
+          {
+            "insert": "d",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-retain-format-past-end",
+      "description": "a delta formats past the end of the text",
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab"
+          },
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 4,
+                "attributes": {
+                  "bold": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ab\n\n",
+          "attributes": {
+            "bold": true
+          }
+        }
+      ],
+      "expected_string": "ab\n\n",
+      "expected_length": 4,
+      "expected_events": [
+        [
+          {
+            "insert": "ab\n\n",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "delta-retain-past-end",
+      "description": "a delta retains past the end of the text without attributes",
+      "txns": [
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": "ab"
+              },
+              {
+                "retain": 3
+              }
+            ]
+          }
+        ]
+      ],
+      "expected_delta": [
+        {
+          "insert": "ab\n\n\n"
+        }
+      ],
+      "expected_string": "ab\n\n\n",
+      "expected_length": 5,
+      "expected_events": [
+        [
+          {
+            "insert": "ab\n\n\n"
           }
         ]
       ]

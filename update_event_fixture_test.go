@@ -98,6 +98,7 @@ type updateEventOp struct {
 	Key    string          `json:"key"`
 	Kind   string          `json:"kind"`
 	Name   string          `json:"name"`
+	Delta  json.RawMessage `json:"delta"`
 }
 
 type updateEvent struct {
@@ -671,7 +672,12 @@ func applyUpdateEventOp(t *testing.T, txn *ygo.TransactionMut, ed *updateEventDo
 		case "format":
 			return v.Format(txn, op.Index, op.Len, jsonAttrs(t, op.Attrs))
 		case "embed":
+			if len(op.Attrs) > 0 {
+				return v.InsertEmbedWithAttributes(txn, op.Index, jsonValue(t, op.Value), jsonAttrs(t, op.Attrs))
+			}
 			return v.InsertEmbed(txn, op.Index, jsonValue(t, op.Value))
+		case "delta":
+			return v.ApplyDelta(txn, jsonDelta(t, op.Delta))
 		}
 	case *ygo.Array:
 		switch op.Op {
@@ -762,6 +768,41 @@ func numbersToGo(v any) any {
 	default:
 		return v
 	}
+}
+
+// jsonDelta converts a Quill delta as the generator records it.
+func jsonDelta(t *testing.T, raw json.RawMessage) []ygo.DeltaOp {
+	t.Helper()
+	list, ok := jsonValue(t, raw).([]any)
+	if !ok {
+		t.Fatalf("delta %s is not an array", raw)
+	}
+	ops := make([]ygo.DeltaOp, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("delta op %v is not an object", item)
+		}
+		var op ygo.DeltaOp
+		switch v := m["insert"].(type) {
+		case string:
+			op.Insert = v
+		case nil:
+		default:
+			op.Embed = v
+		}
+		if n, ok := m["retain"].(int64); ok {
+			op.Retain = uint64(n)
+		}
+		if n, ok := m["delete"].(int64); ok {
+			op.Delete = uint64(n)
+		}
+		if a, ok := m["attributes"].(map[string]any); ok {
+			op.Attributes = ygo.Attrs(a)
+		}
+		ops = append(ops, op)
+	}
+	return ops
 }
 
 func jsonAttrs(t *testing.T, raw json.RawMessage) ygo.Attrs {
