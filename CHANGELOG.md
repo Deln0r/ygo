@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.25.0] - 2026-10-14
 
 **Upgrade impact** - Text inserts now place and format text as yjs
 `insertText` does. `Insert` takes the formatting in effect at the index:
@@ -1655,6 +1655,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.25.0]: https://github.com/Deln0r/ygo/releases/tag/v1.25.0
 [1.24.0]: https://github.com/Deln0r/ygo/releases/tag/v1.24.0
 [1.23.0]: https://github.com/Deln0r/ygo/releases/tag/v1.23.0
 [1.22.0]: https://github.com/Deln0r/ygo/releases/tag/v1.22.0
