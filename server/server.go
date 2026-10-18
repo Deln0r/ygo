@@ -33,6 +33,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -705,7 +706,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = wsConn.Close(websocket.StatusInternalError,
-			fmt.Sprintf("load doc: %v", err))
+			closeReason(fmt.Sprintf("load doc: %v", err)))
 		return
 	}
 	if !ok {
@@ -1422,6 +1423,23 @@ func (c *conn) publishBackplane(ctx context.Context, kind byte, payload []byte) 
 	}
 }
 
+// closeReason fits s into a WebSocket close frame, whose reason may be at
+// most 123 bytes (RFC 6455 5.5: a control frame carries 125, two of them the
+// code). A longer reason makes Close fail, and the connection then drops
+// without a close frame, so the peer sees EOF instead of the code. The cut
+// falls on a character boundary.
+func closeReason(s string) string {
+	const maxReason = 123
+	if len(s) <= maxReason {
+		return s
+	}
+	cut := maxReason
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
 // readLoop runs the per-connection message-receive loop until the
 // underlying WS closes or a fatal protocol error surfaces. The
 // caller (serveWS) is responsible for cleanup via the deferred
@@ -1436,7 +1454,7 @@ func (c *conn) readLoop(ctx context.Context) {
 		if err != nil {
 			// Malformed frame — close with a protocol-error reason.
 			_ = c.ws.Close(websocket.StatusProtocolError,
-				fmt.Sprintf("decode envelope: %v", err))
+				closeReason(fmt.Sprintf("decode envelope: %v", err)))
 			return
 		}
 		if err := c.handler.HandleFrame(frame); err != nil {
@@ -1444,7 +1462,7 @@ func (c *conn) readLoop(ctx context.Context) {
 			// failure) close the connection — the doc state is
 			// preserved for the next reconnect.
 			_ = c.ws.Close(websocket.StatusInternalError,
-				fmt.Sprintf("handle frame: %v", err))
+				closeReason(fmt.Sprintf("handle frame: %v", err)))
 			return
 		}
 		// Hocuspocus auth: the handler sets AuthFailed when it has
