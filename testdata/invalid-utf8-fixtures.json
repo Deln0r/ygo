@@ -1,0 +1,896 @@
+{
+  "generator": "gen-invalid-utf8.mjs (yjs@13.6.33, lib0@0.2.119, y-protocols@1.0.7)",
+  "cases": [
+    {
+      "name": "v1/root-name/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103517e51016100",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/root-name/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103805151016100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/root-name/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103e28251016100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/root-name/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103eda080016100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/root-name/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103c0af51016100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/root-name/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103ff5151016100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/root-name/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040704517e516103010101000001010000",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/root-name/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000010407048051516103010101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/root-name/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040704e282516103010101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/root-name/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040704eda0806103010101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/root-name/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040704c0af516103010101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/root-name/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040704ff51516103010101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/map-key/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002801016d03517e51017d0100",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/map-key/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002801016d03805151017d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/map-key/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002801016d03e28251017d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/map-key/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002801016d03eda080017d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/map-key/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002801016d03c0af51017d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/map-key/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002801016d03ff5151017d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/map-key/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000012807046d517e51010301010001010101007d0100",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/map-key/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000012807046d805151010301010001010101007d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/map-key/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000012807046de28251010301010001010101007d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/map-key/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000012807046deda080010301010001010101007d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/map-key/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000012807046dc0af51010301010001010101007d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/map-key/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000012807046dff5151010301010001010101007d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/text-content/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000401017403517e5100",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/text-content/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040101740380515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/text-content/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000401017403e2825100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/text-content/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000401017403eda08000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/text-content/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000401017403c0af5100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/text-content/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000401017403ff515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/text-content/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000104070474517e5101030101000001010000",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/text-content/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b4170000010407047480515101030101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/text-content/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000104070474e2825101030101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/text-content/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000104070474eda08001030101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/text-content/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000104070474c0af5101030101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/text-content/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000104070474ff515101030101000001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-key/original",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017403517e51047472756584cdcc83da0b00016186cdcc83da0b0103517e51046e756c6c00",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/format-key/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017403805151047472756584cdcc83da0b00016186cdcc83da0b0103805151046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-key/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017403e28251047472756584cdcc83da0b00016186cdcc83da0b0103e28251046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-key/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017403eda080047472756584cdcc83da0b00016186cdcc83da0b0103eda080046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-key/overlong",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017403c0af51047472756584cdcc83da0b00016186cdcc83da0b0103c0af51046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-key/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017403ff5151047472756584cdcc83da0b00016186cdcc83da0b0103ff5151046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-key/original",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860d0874517e5161517e510103010301010000010300787e00",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/format-key/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860d0874805151618051510103010301010000010300787e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-key/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860d0874e2825161e282510103010301010000010300787e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-key/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860d0874eda08061eda0800103010301010000010300787e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-key/overlong",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860d0874c0af5161c0af510103010301010000010300787e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-key/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860d0874ff515161ff51510103010301010000010300787e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-value/original",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017404626f6c640522517e512284cdcc83da0b00016186cdcc83da0b0104626f6c64046e756c6c00",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/format-value/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017404626f6c6405228051512284cdcc83da0b00016186cdcc83da0b0104626f6c64046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-value/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017404626f6c640522e282512284cdcc83da0b00016186cdcc83da0b0104626f6c64046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-value/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017404626f6c640522eda0802284cdcc83da0b00016186cdcc83da0b0104626f6c64046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-value/overlong",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017404626f6c640522c0af512284cdcc83da0b00016186cdcc83da0b0104626f6c64046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/format-value/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0103cdcc83da0b000601017404626f6c640522ff51512284cdcc83da0b00016186cdcc83da0b0104626f6c64046e756c6c00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-value/original",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860f0a74626f6c6461626f6c6401040104010100000103007703517e517e00",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/format-value/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860f0a74626f6c6461626f6c64010401040101000001030077038051517e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-value/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860f0a74626f6c6461626f6c6401040104010100000103007703e282517e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-value/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860f0a74626f6c6461626f6c6401040104010100000103007703eda0807e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-value/overlong",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860f0a74626f6c6461626f6c6401040104010100000103007703c0af517e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/format-value/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0002000206cd9987b41701020002000506008400860f0a74626f6c6461626f6c6401040104010100000103007703ff51517e00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/embed/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00050101740f7b22696d616765223a22517e51227d00",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/embed/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00050101740f7b22696d616765223a22805151227d00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/embed/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00050101740f7b22696d616765223a22e28251227d00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/embed/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00050101740f7b22696d616765223a22eda080227d00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/embed/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00050101740f7b22696d616765223a22c0af51227d00",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/embed/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00050101740f7b22696d616765223a22ff5151227d00",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/embed/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001050301740101010000010100760105696d6167657703517e5100",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/embed/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001050301740101010000010100760105696d616765770380515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/embed/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001050301740101010000010100760105696d6167657703e2825100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/embed/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001050301740101010000010100760105696d6167657703eda08000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/embed/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001050301740101010000010100760105696d6167657703c0af5100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/embed/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001050301740101010000010100760105696d6167657703ff515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-string/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0008010161017703517e5100",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/any-string/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000801016101770380515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-string/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0008010161017703e2825100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-string/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0008010161017703eda08000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-string/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0008010161017703c0af5100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-string/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0008010161017703ff515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-string/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001080301610101010001010101007703517e5100",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/any-string/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000108030161010101000101010100770380515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-string/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001080301610101010001010101007703e2825100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-string/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001080301610101010001010101007703eda08000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-string/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001080301610101010001010101007703c0af5100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-string/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001080301610101010001010101007703ff515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-object-key/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000801016101760103517e517d0100",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/any-object-key/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0008010161017601038051517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-object-key/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000801016101760103e282517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-object-key/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000801016101760103eda0807d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-object-key/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000801016101760103c0af517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/any-object-key/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b000801016101760103ff51517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-object-key/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000108030161010101000101010100760103517e517d0100",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/any-object-key/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001080301610101010001010101007601038051517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-object-key/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000108030161010101000101010100760103e282517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-object-key/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000108030161010101000101010100760103eda0807d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-object-key/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000108030161010101000101010100760103c0af517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/any-object-key/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b41700000108030161010101000101010100760103ff51517d0100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-element-name/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00070101780303512d5100",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/xml-element-name/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b0007010178030380515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-element-name/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00070101780303e2825100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-element-name/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00070101780303eda08000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-element-name/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00070101780303c0af5100",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-element-name/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00070101780303ff515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-element-name/original",
+      "kind": "update-v2",
+      "bytes": "000100058d9987b41700000107070478512d510103010101030001010000",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/xml-element-name/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "000100058d9987b417000001070704788051510103010101030001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-element-name/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "000100058d9987b41700000107070478e282510103010101030001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-element-name/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "000100058d9987b41700000107070478eda0800103010101030001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-element-name/overlong",
+      "kind": "update-v2",
+      "bytes": "000100058d9987b41700000107070478c0af510103010101030001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-element-name/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "000100058d9987b41700000107070478ff51510103010101030001010000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-attribute-name/original",
+      "kind": "update-v1",
+      "bytes": "0102cdcc83da0b00070101780301702800cdcc83da0b0003517e510177017600",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/xml-attribute-name/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0102cdcc83da0b00070101780301702800cdcc83da0b00038051510177017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-attribute-name/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0102cdcc83da0b00070101780301702800cdcc83da0b0003e282510177017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-attribute-name/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0102cdcc83da0b00070101780301702800cdcc83da0b0003eda0800177017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-attribute-name/overlong",
+      "kind": "update-v1",
+      "bytes": "0102cdcc83da0b00070101780301702800cdcc83da0b0003c0af510177017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/xml-attribute-name/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0102cdcc83da0b00070101780301702800cdcc83da0b0003ff51510177017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-attribute-name/original",
+      "kind": "update-v2",
+      "bytes": "00010006cd9987b417000100000307002809057870517e51410003030100000103010101020077017600",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/xml-attribute-name/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "00010006cd9987b417000100000307002809057870805151410003030100000103010101020077017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-attribute-name/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "00010006cd9987b417000100000307002809057870e28251410003030100000103010101020077017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-attribute-name/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "00010006cd9987b417000100000307002809057870eda080410003030100000103010101020077017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-attribute-name/overlong",
+      "kind": "update-v2",
+      "bytes": "00010006cd9987b417000100000307002809057870c0af51410003030100000103010101020077017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/xml-attribute-name/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "00010006cd9987b417000100000307002809057870ff5151410003030100000103010101020077017600",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/subdocument-guid/original",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002901016d0373756203517e51760000",
+      "js_rejects": false
+    },
+    {
+      "name": "v1/subdocument-guid/lone-continuation",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002901016d0373756203805151760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/subdocument-guid/truncated-sequence",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002901016d0373756203e28251760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/subdocument-guid/encoded-surrogate",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002901016d0373756203eda080760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/subdocument-guid/overlong",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002901016d0373756203c0af51760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v1/subdocument-guid/invalid-lead",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b002901016d0373756203ff5151760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/subdocument-guid/original",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001290b076d737562517e5101430001010000010100760000",
+      "js_rejects": false
+    },
+    {
+      "name": "v2/subdocument-guid/lone-continuation",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001290b076d73756280515101430001010000010100760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/subdocument-guid/truncated-sequence",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001290b076d737562e2825101430001010000010100760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/subdocument-guid/encoded-surrogate",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001290b076d737562eda08001430001010000010100760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/subdocument-guid/overlong",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001290b076d737562c0af5101430001010000010100760000",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/subdocument-guid/invalid-lead",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001290b076d737562ff515101430001010000010100760000",
+      "js_rejects": true
+    },
+    {
+      "name": "awareness/state/original",
+      "kind": "awareness",
+      "bytes": "01cdcc83da0b010e7b2275736572223a22517e51227d",
+      "js_rejects": false
+    },
+    {
+      "name": "awareness/state/lone-continuation",
+      "kind": "awareness",
+      "bytes": "01cdcc83da0b010e7b2275736572223a22805151227d",
+      "js_rejects": true
+    },
+    {
+      "name": "awareness/state/truncated-sequence",
+      "kind": "awareness",
+      "bytes": "01cdcc83da0b010e7b2275736572223a22e28251227d",
+      "js_rejects": true
+    },
+    {
+      "name": "awareness/state/encoded-surrogate",
+      "kind": "awareness",
+      "bytes": "01cdcc83da0b010e7b2275736572223a22eda080227d",
+      "js_rejects": true
+    },
+    {
+      "name": "awareness/state/overlong",
+      "kind": "awareness",
+      "bytes": "01cdcc83da0b010e7b2275736572223a22c0af51227d",
+      "js_rejects": true
+    },
+    {
+      "name": "awareness/state/invalid-lead",
+      "kind": "awareness",
+      "bytes": "01cdcc83da0b010e7b2275736572223a22ff5151227d",
+      "js_rejects": true
+    },
+    {
+      "name": "relpos/type-name/original",
+      "kind": "relpos",
+      "bytes": "0103517e5100",
+      "js_rejects": false
+    },
+    {
+      "name": "relpos/type-name/lone-continuation",
+      "kind": "relpos",
+      "bytes": "010380515100",
+      "js_rejects": true
+    },
+    {
+      "name": "relpos/type-name/truncated-sequence",
+      "kind": "relpos",
+      "bytes": "0103e2825100",
+      "js_rejects": true
+    },
+    {
+      "name": "relpos/type-name/encoded-surrogate",
+      "kind": "relpos",
+      "bytes": "0103eda08000",
+      "js_rejects": true
+    },
+    {
+      "name": "relpos/type-name/overlong",
+      "kind": "relpos",
+      "bytes": "0103c0af5100",
+      "js_rejects": true
+    },
+    {
+      "name": "relpos/type-name/invalid-lead",
+      "kind": "relpos",
+      "bytes": "0103ff515100",
+      "js_rejects": true
+    },
+    {
+      "name": "v2/split-surrogate/root-name-and-text",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040704f09f988041000101000001010000",
+      "js_rejects": false,
+      "ygo_error": "split-surrogate"
+    },
+    {
+      "name": "v1/split-surrogate/root-name-and-text",
+      "kind": "update-v1",
+      "bytes": "0101cdcc83da0b00040103efbfbd03efbfbd00",
+      "js_rejects": false,
+      "expect_text": {
+        "root": "�",
+        "text": "�"
+      }
+    },
+    {
+      "name": "v2/whole-emoji",
+      "kind": "update-v2",
+      "bytes": "0000058d9987b417000001040a077461f09f98806201040101000001010000",
+      "js_rejects": false,
+      "expect_text": {
+        "root": "t",
+        "text": "a😀b"
+      }
+    }
+  ]
+}

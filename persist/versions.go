@@ -115,7 +115,7 @@ func LoadVersion(ctx context.Context, vs VersionStore, docName string, versionID
 	d := doc.NewDocWithOptions(opts)
 	txn := d.WriteTxn()
 	defer txn.Commit()
-	upd, _, err := encoding.DecodeUpdate(state)
+	upd, _, err := encoding.DecodeStoredUpdate(state)
 	if err != nil {
 		return nil, fmt.Errorf("persist.LoadVersion(%q, %d) decode: %w", docName, versionID, err)
 	}

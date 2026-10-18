@@ -109,7 +109,7 @@ func LoadDoc(ctx context.Context, s Store, docName string, opts doc.Options) (*d
 	txn := d.WriteTxn()
 	defer txn.Commit()
 	for i, raw := range updates {
-		upd, _, err := encoding.DecodeUpdate(raw)
+		upd, _, err := encoding.DecodeStoredUpdate(raw)
 		if err != nil {
 			return nil, fmt.Errorf("persist.LoadDoc(%q) update[%d] decode: %w", docName, i, err)
 		}
@@ -225,7 +225,7 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 	d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
 	wtxn := d.WriteTxn()
 	for i, raw := range updates {
-		upd, _, err := encoding.DecodeUpdate(raw)
+		upd, _, err := encoding.DecodeStoredUpdate(raw)
 		if err != nil {
 			wtxn.Commit()
 			return nil, fmt.Errorf("persist.MergeUpdates update[%d] decode: %w", i, err)

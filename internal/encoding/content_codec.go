@@ -32,8 +32,8 @@ func writeJSON(buf []byte, v block.Any) []byte {
 // readJSON consumes a varstring + JSON-parses it. Returns the
 // parsed value plus the unconsumed tail. Mirrors yjs
 // UpdateDecoderV1.readJSON (UpdateDecoder.js:113).
-func readJSON(buf []byte) (block.Any, []byte, error) {
-	s, n, err := lib0.ReadVarString(buf)
+func readJSON(buf []byte, strs stringMode) (block.Any, []byte, error) {
+	s, n, err := strs.readString(buf)
 	if err != nil {
 		return nil, buf, err
 	}
@@ -122,6 +122,10 @@ func EncodeContent(buf []byte, c block.Content) []byte {
 //
 // Mirrors yrs/src/block.rs ItemContent::decode dispatch.
 func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
+	return decodeContent(buf, refNum, strictStrings)
+}
+
+func decodeContent(buf []byte, refNum uint8, strs stringMode) (block.Content, []byte, error) {
 	switch block.ContentKind(refNum) {
 	case block.KindAny:
 		count, n, err := lib0.ReadVarUint(buf)
@@ -134,7 +138,7 @@ func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
 		}
 		anys := make([]block.Any, count)
 		for i := uint64(0); i < count; i++ {
-			v, tail, err := DecodeAny(buf)
+			v, tail, err := decodeAny(buf, strs)
 			if err != nil {
 				return block.Content{}, buf, err
 			}
@@ -143,7 +147,7 @@ func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
 		}
 		return block.Content{Kind: block.KindAny, Anys: anys}, buf, nil
 	case block.KindString:
-		s, n, err := lib0.ReadVarString(buf)
+		s, n, err := strs.readString(buf)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
@@ -168,18 +172,18 @@ func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
 	case block.KindEmbed:
 		// JSON-string payload, NOT lib0 Any. Mirrors
 		// yjs UpdateDecoder.readJSON.
-		v, tail, err := readJSON(buf)
+		v, tail, err := readJSON(buf, strs)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
 		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}}, tail, nil
 	case block.KindFormat:
-		key, n, err := lib0.ReadVarString(buf)
+		key, n, err := strs.readString(buf)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
 		buf = buf[n:]
-		v, tail, err := readJSON(buf)
+		v, tail, err := readJSON(buf, strs)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
@@ -200,7 +204,7 @@ func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
 		br := &block.Branch{TypeRef: typeRef}
 		switch typeRef {
 		case block.TypeRefXmlElement, block.TypeRefXmlHook:
-			name, n, err := lib0.ReadVarString(buf)
+			name, n, err := strs.readString(buf)
 			if err != nil {
 				return block.Content{}, buf, err
 			}
@@ -210,12 +214,12 @@ func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
 		return block.Content{Kind: block.KindType, Branch: br}, buf, nil
 	case block.KindDoc:
 		// Mirror of EncodeContent.KindDoc: varstring(guid) + Any(opts).
-		guid, n, err := lib0.ReadVarString(buf)
+		guid, n, err := strs.readString(buf)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
 		buf = buf[n:]
-		optsAny, tail, err := DecodeAny(buf)
+		optsAny, tail, err := decodeAny(buf, strs)
 		if err != nil {
 			return block.Content{}, buf, err
 		}

@@ -259,6 +259,9 @@ jobs:
       - name: regenerate update-event fixtures
         working-directory: testdata/gen
         run: node gen-update-events.mjs
+      - name: regenerate invalid UTF-8 fixtures
+        working-directory: testdata/gen
+        run: node gen-invalid-utf8.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff
@@ -283,6 +286,7 @@ jobs:
           go test . -run TestRichText_Fixtures
           go test . -run TestObservers_Fixtures
           go test . -run TestUpdateEvents_Fixtures
+          go test . -run TestInvalidUTF8_Fixtures
       - name: validate reverse fixtures (JS applies Go-encoded bytes)
         working-directory: testdata/gen
         run: node validate-go-fixtures.mjs

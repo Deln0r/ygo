@@ -48,7 +48,7 @@ func (c *Client) loadLocal(ctx context.Context) {
 		txn := c.doc.WriteTxn()
 		txn.Origin = c
 		for _, raw := range updates {
-			upd, _, derr := encoding.DecodeUpdate(raw)
+			upd, _, derr := encoding.DecodeStoredUpdate(raw)
 			if derr != nil {
 				continue // skip a corrupt blob rather than abort the load
 			}

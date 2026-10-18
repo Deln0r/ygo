@@ -1,5 +1,7 @@
 package lib0
 
+import "errors"
+
 // Run-length-encoded (RLE) and diff-RLE primitives matching the
 // stateful encoders in lib0's encoding.js (RleEncoder,
 // UintOptRleEncoder, IntDiffOptRleEncoder, StringEncoder). These
@@ -486,12 +488,24 @@ func stringUTF16Length(s string) uint64 {
 // of concatenated content followed by a UintOptRle length stream.
 type StringDecoder struct {
 	str  string
-	pos  int // byte position in str — JS uses string indexing which is UTF-16; for ASCII columns Go bytes match.
+	pos  int // byte position in str
 	lens *UintOptRleDecoder
 }
 
+// ErrSplitSurrogate reports a V2 string column whose lengths cut a
+// surrogate pair in two. lib0 concatenates a column's strings before it
+// encodes them and slices them back by UTF-16 length, so a JS string that
+// ends in a lone high surrogate, followed by one that starts with a lone
+// low surrogate, travels as valid UTF-8 and comes back as the two lone
+// halves. A Go string cannot hold a lone surrogate, and replacing the
+// halves would change keys and names that yjs keeps apart, so the update
+// is refused. In V1 each string is encoded on its own, and JS TextEncoder
+// writes a lone surrogate as U+FFFD.
+var ErrSplitSurrogate = errors.New("lib0: V2 string column splits a surrogate pair (a string with a lone surrogate)")
+
 // NewStringDecoder constructs a decoder over the StringEncoder
-// column bytes.
+// column bytes. A column that is not valid UTF-8 returns ErrInvalidUTF8,
+// as lib0 reads the column with readVarString.
 func NewStringDecoder(buf []byte) (*StringDecoder, error) {
 	s, n, err := ReadVarString(buf)
 	if err != nil {
@@ -501,40 +515,31 @@ func NewStringDecoder(buf []byte) (*StringDecoder, error) {
 	return &StringDecoder{str: s, lens: lens}, nil
 }
 
-// Read returns the next string slice.
+// Read returns the next string slice. Lengths count UTF-16 units, as JS
+// string slicing does: a character outside the BMP counts two. A length
+// that ends between the two units of such a character returns
+// ErrSplitSurrogate.
 func (d *StringDecoder) Read() (string, error) {
 	length, err := d.lens.Read()
 	if err != nil {
 		return "", err
 	}
-	// length is in UTF-16 code units. For ASCII-only content the
-	// byte length matches; for non-BMP content we need to walk
-	// runes. We do the walk unconditionally — the cost is one
-	// pass per Read call, negligible for typical column sizes.
-	byteLen := utf16PrefixByteLength(d.str[d.pos:], length)
-	res := d.str[d.pos : d.pos+byteLen]
-	d.pos += byteLen
-	return res, nil
-}
-
-// utf16PrefixByteLength returns the number of UTF-8 bytes from
-// the start of s that span exactly utf16Count UTF-16 code units.
-// Used by StringDecoder to slice the concatenated string by the
-// length-stream values.
-func utf16PrefixByteLength(s string, utf16Count uint64) int {
-	if utf16Count == 0 {
-		return 0
-	}
+	rest := d.str[d.pos:]
+	end := len(rest)
 	var consumed uint64
-	for i, r := range s {
-		if consumed == utf16Count {
-			return i
+	for i, r := range rest {
+		if consumed == length {
+			end = i
+			break
 		}
-		if r <= 0xFFFF {
+		consumed++
+		if r > 0xFFFF {
+			if consumed == length {
+				return "", ErrSplitSurrogate
+			}
 			consumed++
-		} else {
-			consumed += 2
 		}
 	}
-	return len(s)
+	d.pos += end
+	return rest[:end], nil
 }

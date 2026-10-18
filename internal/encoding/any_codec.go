@@ -195,6 +195,10 @@ func encodeFloatAny(buf []byte, f float64) []byte {
 //
 // Unknown tags return ErrUnsupportedAnyTag.
 func DecodeAny(buf []byte) (any, []byte, error) {
+	return decodeAny(buf, strictStrings)
+}
+
+func decodeAny(buf []byte, strs stringMode) (any, []byte, error) {
 	if len(buf) < 1 {
 		return nil, buf, lib0.ErrTruncated
 	}
@@ -208,7 +212,7 @@ func DecodeAny(buf []byte) (any, []byte, error) {
 	case AnyTagFalse:
 		return false, buf, nil
 	case AnyTagString:
-		s, n, err := lib0.ReadVarString(buf)
+		s, n, err := strs.readString(buf)
 		if err != nil {
 			return nil, buf, err
 		}
@@ -256,7 +260,7 @@ func DecodeAny(buf []byte) (any, []byte, error) {
 		}
 		arr := make([]any, count)
 		for i := uint64(0); i < count; i++ {
-			el, tail, err := DecodeAny(buf)
+			el, tail, err := decodeAny(buf, strs)
 			if err != nil {
 				return nil, buf, fmt.Errorf("decode Any array element %d: %w", i, err)
 			}
@@ -275,12 +279,12 @@ func DecodeAny(buf []byte) (any, []byte, error) {
 		}
 		m := make(map[string]any, count)
 		for i := uint64(0); i < count; i++ {
-			key, kn, err := lib0.ReadVarString(buf)
+			key, kn, err := strs.readString(buf)
 			if err != nil {
 				return nil, buf, fmt.Errorf("decode Any object key %d: %w", i, err)
 			}
 			buf = buf[kn:]
-			val, tail, err := DecodeAny(buf)
+			val, tail, err := decodeAny(buf, strs)
 			if err != nil {
 				return nil, buf, fmt.Errorf("decode Any object value for key %q: %w", key, err)
 			}

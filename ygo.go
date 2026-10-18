@@ -26,6 +26,7 @@ import (
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
+	"github.com/Deln0r/ygo/internal/lib0"
 	"github.com/Deln0r/ygo/internal/store"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/internal/undo"
@@ -364,7 +365,9 @@ func RestoreSnapshot(d *Doc, snap Snapshot) (*Doc, error) {
 	txn.Commit()
 
 	nd := NewDocWithOptions(Options{DisableGC: true})
-	if err := ApplyUpdate(nd, update); err != nil {
+	// The bytes come from d itself, which may hold strings that a release
+	// before v1.26 stored with invalid UTF-8: rebuild them as stored.
+	if err := encoding.ApplyStoredUpdate(nd, update); err != nil {
 		return nil, err
 	}
 	return nd, nil
@@ -476,6 +479,23 @@ func ApplyUpdateV2(d *Doc, raw []byte) error {
 func ApplyUpdateV2WithOrigin(d *Doc, raw []byte, origin any) error {
 	return encoding.ApplyUpdateV2WithOrigin(d, raw, origin)
 }
+
+// ErrInvalidUTF8 is wrapped by the errors ApplyUpdate, ApplyUpdateV2,
+// ValidateUpdate, MergeUpdates, MergeUpdatesV2, Awareness.Apply and
+// DecodeRelativePosition return when a string in the bytes is not valid
+// UTF-8. lib0 reads every string with a fatal UTF-8 decoder, so yjs rejects
+// the same bytes; accepting them would let one update keep every JS client
+// of a document from loading it. Test with errors.Is.
+var ErrInvalidUTF8 = lib0.ErrInvalidUTF8
+
+// ErrSplitSurrogate is wrapped by the error ApplyUpdateV2 and MergeUpdatesV2
+// return for a V2 update whose string column cuts a surrogate pair in two:
+// two JS strings, one ending in a lone high surrogate and the next starting
+// with a lone low one, which yjs accepts. A Go string cannot hold a lone
+// surrogate, and replacing the halves with U+FFFD would change keys and
+// names yjs keeps apart, so ygo refuses the update. The V1 encoding of the
+// same document (which writes the halves as U+FFFD) applies.
+var ErrSplitSurrogate = lib0.ErrSplitSurrogate
 
 // ValidateUpdate returns an error unless raw is a well-formed V1 update that
 // is consumed in its entirety, WITHOUT integrating it into any document. Use

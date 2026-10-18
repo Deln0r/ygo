@@ -220,7 +220,7 @@ func (d *DecoderV2) AdvanceRest(n int) {
 
 // ReadAny consumes the next lib0 Any TLV from the rest stream.
 func (d *DecoderV2) ReadAny() (block.Any, error) {
-	v, tail, err := DecodeAny(d.rest[d.restPos:])
+	v, tail, err := decodeAny(d.rest[d.restPos:], strictStrings)
 	if err != nil {
 		return nil, err
 	}

@@ -304,7 +304,20 @@ func checkClockRange(start, length uint64) error {
 	return nil
 }
 
+// DecodeUpdate decodes a V1 update. A string with invalid UTF-8 returns
+// lib0.ErrInvalidUTF8, as yjs throws on it.
 func DecodeUpdate(buf []byte) (*Update, []byte, error) {
+	return decodeUpdate(buf, strictStrings)
+}
+
+// DecodeStoredUpdate is DecodeUpdate for bytes ygo itself stored: strings
+// are read as stored, so an update a release before v1.26 stored with
+// invalid UTF-8 still decodes, unchanged (lib0.ReadVarStringAsStored).
+func DecodeStoredUpdate(buf []byte) (*Update, []byte, error) {
+	return decodeUpdate(buf, storedStrings)
+}
+
+func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
 	clientCount, n, err := lib0.ReadVarUint(buf)
 	if err != nil {
 		return nil, buf, err
@@ -337,7 +350,7 @@ func DecodeUpdate(buf []byte) (*Update, []byte, error) {
 		}
 		blocks := make([]Block, 0, blockCount)
 		for j := uint64(0); j < blockCount; j++ {
-			b, tail, err := decodeBlock(buf, block.ID{Client: client, Clock: clock})
+			b, tail, err := decodeBlock(buf, block.ID{Client: client, Clock: clock}, strs)
 			if err != nil {
 				return nil, buf, err
 			}
@@ -375,7 +388,7 @@ func (b Block) startClock() uint64 {
 // decodeBlock parses one block record at the given starting ID.
 //
 // Mirrors yrs Update::decode_block (update.rs:364-393).
-func decodeBlock(buf []byte, id block.ID) (Block, []byte, error) {
+func decodeBlock(buf []byte, id block.ID, strs stringMode) (Block, []byte, error) {
 	if len(buf) < 1 {
 		return Block{}, buf, lib0.ErrTruncated
 	}
@@ -430,7 +443,7 @@ func decodeBlock(buf []byte, id block.ID) (Block, []byte, error) {
 		parentInfo := buf[0]
 		buf = buf[1:]
 		if parentInfo == 0x01 {
-			name, n, err := lib0.ReadVarString(buf)
+			name, n, err := strs.readString(buf)
 			if err != nil {
 				return Block{}, buf, err
 			}
@@ -448,7 +461,7 @@ func decodeBlock(buf []byte, id block.ID) (Block, []byte, error) {
 
 	var parentSub *string
 	if cantCopyParentInfo && info&block.InfoHasParentSub != 0 {
-		s, n, err := lib0.ReadVarString(buf)
+		s, n, err := strs.readString(buf)
 		if err != nil {
 			return Block{}, buf, err
 		}
@@ -456,7 +469,7 @@ func decodeBlock(buf []byte, id block.ID) (Block, []byte, error) {
 		buf = buf[n:]
 	}
 
-	content, tail, err := DecodeContent(buf, info&block.InfoContentMask)
+	content, tail, err := decodeContent(buf, info&block.InfoContentMask, strs)
 	if err != nil {
 		return Block{}, buf, err
 	}
@@ -573,6 +586,18 @@ func ApplyUpdateWithOrigin(d *doc.Doc, raw []byte, origin any) error {
 	}
 	txn := d.WriteTxn()
 	txn.Origin = origin
+	defer txn.Commit()
+	return upd.Apply(txn)
+}
+
+// ApplyStoredUpdate is ApplyUpdate for bytes ygo itself stored, decoded
+// with DecodeStoredUpdate.
+func ApplyStoredUpdate(d *doc.Doc, raw []byte) error {
+	upd, _, err := DecodeStoredUpdate(raw)
+	if err != nil {
+		return fmt.Errorf("ApplyUpdate decode: %w", err)
+	}
+	txn := d.WriteTxn()
 	defer txn.Commit()
 	return upd.Apply(txn)
 }

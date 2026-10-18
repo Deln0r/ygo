@@ -867,7 +867,7 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 			return nil, fmt.Errorf("OnLoadDocument(%q): %w", docName, err)
 		}
 		if len(seed) > 0 {
-			if err := encoding.ApplyUpdate(d, seed); err != nil {
+			if err := encoding.ApplyStoredUpdate(d, seed); err != nil {
 				return nil, fmt.Errorf("apply OnLoadDocument seed for %q: %w", docName, err)
 			}
 		}

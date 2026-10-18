@@ -3,7 +3,9 @@ package lib0
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
+	"unicode/utf8"
 )
 
 // ErrTruncated is returned when a decoder runs past the end of the input.
@@ -11,6 +13,11 @@ var ErrTruncated = errors.New("lib0: truncated input")
 
 // ErrOverflow is returned when a varuint/varint exceeds 64 bits.
 var ErrOverflow = errors.New("lib0: varint overflow")
+
+// ErrInvalidUTF8 reports a string whose bytes are not valid UTF-8. lib0
+// reads every string with TextDecoder('utf-8', {fatal: true}), so yjs
+// rejects the same bytes.
+var ErrInvalidUTF8 = errors.New("lib0: string is not valid UTF-8")
 
 // ReadVarUint reads a LEB128-style varuint from buf and returns the value plus
 // the number of bytes consumed.
@@ -66,17 +73,42 @@ func signedFromMagnitude(mag uint64, negative bool) int64 {
 	return -int64(mag)
 }
 
-// ReadVarString reads a varuint-prefixed UTF-8 string.
+// ReadVarString reads a varuint-prefixed UTF-8 string. Bytes that are not
+// valid UTF-8 return ErrInvalidUTF8, as lib0 readVarString throws on them; a
+// BOM, NUL and noncharacters are valid and kept.
 func ReadVarString(buf []byte) (string, int, error) {
-	length, headerLen, err := ReadVarUint(buf)
+	b, end, err := readVarStringBytes(buf)
 	if err != nil {
 		return "", 0, err
 	}
+	if !utf8.Valid(b) {
+		return "", 0, fmt.Errorf("%w (%d bytes)", ErrInvalidUTF8, len(b))
+	}
+	return string(b), end, nil
+}
+
+// ReadVarStringAsStored reads a varuint-prefixed string without checking
+// its encoding. Updates ygo stored before v1.26 can hold strings with
+// invalid UTF-8; reading them through this keeps them loading as they
+// always did, byte for byte. Use it only for bytes ygo itself stored.
+func ReadVarStringAsStored(buf []byte) (string, int, error) {
+	b, end, err := readVarStringBytes(buf)
+	if err != nil {
+		return "", 0, err
+	}
+	return string(b), end, nil
+}
+
+func readVarStringBytes(buf []byte) ([]byte, int, error) {
+	length, headerLen, err := ReadVarUint(buf)
+	if err != nil {
+		return nil, 0, err
+	}
 	end := headerLen + int(length)
 	if end > len(buf) || end < headerLen {
-		return "", 0, ErrTruncated
+		return nil, 0, ErrTruncated
 	}
-	return string(buf[headerLen:end]), end, nil
+	return buf[headerLen:end], end, nil
 }
 
 // ReadVarUint8Array reads a varuint-prefixed byte slice. The returned slice
