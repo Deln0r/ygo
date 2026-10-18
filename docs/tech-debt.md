@@ -186,6 +186,24 @@
 - **What:** yjs walks the whole delete set and insertion set it captured, ranges outside the manager's scope included, and so cuts merged structs at those ranges too (the restored pieces carry `redone` and stay apart). ygo records and cuts only the ranges in scope, so a tombstone merged across such a range stays one struct: the content is the same, the struct layout and its encoding differ.
 - **When to address:** if byte-exact layouts after multi-scope undo are needed; it needs the out-of-scope ranges kept on the step.
 
+### Strings with invalid UTF-8
+
+- **Where:** the Go API (`Text.Insert`, `Map.Set`, format keys and values, XML names, embeds) and the encoders (`lib0.WriteVarString`, `EncoderV2.WriteString` / `WriteKey`); `lib0.ReadVarStringAsStored` for stored bytes.
+- **What:** (1) The API still takes strings with invalid UTF-8, and the encoders write them as they are, so a document built that way produces updates lib0 (and now ygo's own decoders) reject. (2) Documents that a release before v1.26 stored with such strings load as stored, unchanged, through the stored-bytes paths (`persist.LoadDoc`, `LoadVersion`, `MergeUpdates`, SQLite flush, a client's `LocalStore`, `OnLoadDocument`, `RestoreSnapshot`); JS clients still cannot read them. There is no repair: replacing the bytes after the items have clocks cannot keep replicas consistent (two invalid fragments of one client can merge into a valid character with the old length, a peer that holds the raw bytes never receives the replaced item again, replaced keys can collide with each other and with real U+FFFD keys and turn into deletions). Find affected documents by running `ValidateUpdate` over their stored updates.
+- **When to address:** (1) in R2: the API makes every string valid before it gets a clock.
+
+### Lone surrogates in V2 string columns
+
+- **Where:** `lib0.StringDecoder.Read` (`internal/lib0/rle.go`).
+- **What:** a V2 update whose string column cuts a surrogate pair in two (JS strings with lone surrogates, which yjs accepts) is refused with `ErrSplitSurrogate`. A Go string cannot hold a lone surrogate, and U+FFFD in its place would change keys and names that yjs keeps apart. The V1 encoding of the same document applies: JS `TextEncoder` writes each lone surrogate as U+FFFD.
+- **When to address:** if a V2 producer with lone surrogates turns up; content strings (not keys or names) could then take U+FFFD per half.
+
+### Wire details yjs reads that ygo does not
+
+- **Where:** `internal/encoding/content_codec.go`, `readJSON`.
+- **What:** (1) `ContentJSON` (content kind 2, the legacy JSON content) is not decoded; an update holding it fails. (2) Go's JSON decoder turns an escaped lone surrogate (`"\ud800"`) into U+FFFD, where yjs keeps it, so two such JSON keys can become one. (3) Bytes after a complete update are ignored by both yjs and ygo, so the server relays a payload with a trailing remainder as it came; `ValidateUpdate` is the strict check.
+- **When to address:** (1) if a document from an old yjs version turns up; (2) and (3) are documented differences.
+
 ### Rich-text inserts: differences from yjs that stay
 
 - **Where:** `Text.InsertWithAttributes`, `InsertEmbed`, `ApplyDelta`, `attrValuesEqual` (`internal/types/text.go`, `text_format.go`).

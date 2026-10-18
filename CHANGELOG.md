@@ -14,6 +14,63 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact** - Decoding now rejects strings that are not valid UTF-8,
+as lib0 does: `ApplyUpdate`, `ApplyUpdateV2`, `ValidateUpdate`,
+`MergeUpdates`, `MergeUpdatesV2`, `EncodeStateVectorFromUpdate`,
+`DiffUpdate`, `Awareness.Apply` and `DecodeRelativePosition` return an
+error that wraps `ErrInvalidUTF8`. Over the network, a server closes the
+connection of a peer that sends such an update or awareness message (for
+instance an older ygo client whose application wrote such a string); a
+client reports such a document update through `OnError` and drops such an
+awareness message, as it drops other malformed ones. Bytes ygo itself stored load as before, unchanged:
+`persist.LoadDoc`, `persist.LoadVersion`, `persist.MergeUpdates`, the SQLite
+store's flush, a client's `LocalStore`, `OnLoadDocument` seeds and
+`RestoreSnapshot`. A V2 update whose string column cuts a surrogate pair in
+two is refused with `ErrSplitSurrogate`; it used to be misread.
+
+### Fixed
+
+- **One update with invalid UTF-8 kept every JS client from loading a
+  document.** lib0 reads every string with a fatal UTF-8 decoder, so yjs
+  throws on such an update; ygo accepted it, stored it and relayed it, and
+  every JS client of the document failed to load it from then on. ygo now
+  rejects it at every place bytes arrive: the server refuses the update
+  before it reaches the document, the other clients, the store, `OnChange`
+  or the backplane, and closes the sender's connection. A BOM, NUL and
+  noncharacters are valid UTF-8 and pass, as in lib0.
+- **A V2 string column that cut a surrogate pair was misread.** lib0
+  concatenates a column's strings and slices them back by UTF-16 length, so
+  two JS strings, one ending in a lone high surrogate and the next starting
+  with a lone low one, travel as one valid character. ygo sliced by
+  characters and gave the first string the whole character and the second
+  nothing, an item of length 0. A Go string cannot hold a lone surrogate,
+  and replacing the halves would change keys and names that yjs keeps apart,
+  so ygo refuses such an update. The V1 encoding of the same document, in
+  which JS writes each lone surrogate as U+FFFD, applies.
+
+- **A connection the server closed with a long error was dropped without a
+  close frame.** A WebSocket close reason is at most 123 bytes; the server put
+  the whole error text in it, `Close` failed on a longer one, and the peer saw
+  EOF instead of the close code (1011 for a refused update). The reason is
+  now cut to 123 bytes at a character boundary.
+
+### Added
+
+- `ErrInvalidUTF8` and `ErrSplitSurrogate`, for `errors.Is`.
+
+### Infrastructure
+
+- Fixtures for invalid UTF-8, generated from yjs 13.6.33, lib0 0.2.119 and
+  y-protocols 1.0.7 (`gen-invalid-utf8.mjs`, 147 cases): eleven places a
+  string sits in an update (root name, map key, text, format key and value,
+  embed, Any string and object key, XML element and attribute name,
+  subdocument GUID) in V1 and V2, awareness state and relative position,
+  each with five kinds of invalid bytes; the unpatched bytes as positive
+  controls; the split surrogate pair and a whole emoji in V2. ygo rejects
+  what yjs rejects and accepts what yjs accepts, except the split pair.
+
 ## [1.25.0] - 2026-10-14
 
 **Upgrade impact** - Text inserts now place and format text as yjs
