@@ -188,9 +188,15 @@
 
 ### Strings with invalid UTF-8
 
-- **Where:** the Go API (`Text.Insert`, `Map.Set`, format keys and values, XML names, embeds) and the encoders (`lib0.WriteVarString`, `EncoderV2.WriteString` / `WriteKey`); `lib0.ReadVarStringAsStored` for stored bytes.
-- **What:** (1) The API still takes strings with invalid UTF-8, and the encoders write them as they are, so a document built that way produces updates lib0 (and now ygo's own decoders) reject. (2) Documents that a release before v1.26 stored with such strings load as stored, unchanged, through the stored-bytes paths (`persist.LoadDoc`, `LoadVersion`, `MergeUpdates`, SQLite flush, a client's `LocalStore`, `OnLoadDocument`, `RestoreSnapshot`); JS clients still cannot read them. There is no repair: replacing the bytes after the items have clocks cannot keep replicas consistent (two invalid fragments of one client can merge into a valid character with the old length, a peer that holds the raw bytes never receives the replaced item again, replaced keys can collide with each other and with real U+FFFD keys and turn into deletions). Find affected documents by running `ValidateUpdate` over their stored updates.
-- **When to address:** (1) in R2: the API makes every string valid before it gets a clock.
+- **Where:** documents stored by a release before v1.26; `lib0.ReadVarStringAsStored` for stored bytes; values reachable after the call.
+- **What:** (1) Since v1.27 the API makes every string valid at the call (`utf16.ValidString`, `anyval.Valid` / `ValidJSON`). Content that a release before v1.26 stored with invalid bytes still loads as stored, unchanged, and JS clients still cannot read it; items derived from it keep its bytes (negation markers for a raw format key in effect, undo copies of raw text, keys and names). There is no repair: replacing the bytes after the items have clocks cannot keep replicas consistent (two invalid fragments of one client can merge into a valid character with the old length, a peer that holds the raw bytes never receives the replaced item again, replaced keys can collide with each other and with real U+FFFD keys and turn into deletions). Find affected documents by running `ValidateUpdate` over their stored updates. A raw key stored that way is reachable through iteration only; lookups use the fixed key. (2) A caller that mutates a value after passing it to the API, or one a read returned, or reaches into `Branch` / `Item`, can still put invalid bytes on the wire; that is outside the API contract (package docs). (3) A caller-set `doc.Options.GUID` must be valid UTF-8: reconstruction passes stored GUIDs through the same constructor, so it is not changed.
+- **When to address:** a repair tool only together with a way to make every replica take the repaired items.
+
+### Cyclic or very deep values in Map and Array
+
+- **Where:** `encoding.EncodeAny` (`internal/encoding/any_codec.go`).
+- **What:** a `Map.Set` / `Array` value that refers back to itself recurses without bound when the document is encoded, a crash that predates the UTF-8 work; a value nested deeper than `anyval.MaxTreeDepth` (1000) is not checked for invalid UTF-8 below that depth. For JSON contents (embeds, format values) a cyclic value becomes `null`, and a deep acyclic one is marshaled whole, so it is checked at every depth.
+- **When to address:** with a cycle check in `EncodeAny`, if a caller hits it.
 
 ### Lone surrogates in V2 string columns
 

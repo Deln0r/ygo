@@ -14,6 +14,56 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact** - A string with invalid UTF-8 given to the API is stored
+with U+FFFD for each invalid byte: text, map keys and values, array values,
+format attribute keys and values, embeds, XML element and attribute names
+and values, root type names, and the strings the server and client send
+(tokens, permission-denied and close reasons, stateless messages), a
+hand-built relative position's type name and awareness states. A lookup by
+a key with such bytes finds the fixed key. An embed or format value of any
+type other than a plain value (string, number, bool, nil, `[]byte`, `[]any`,
+`map[string]any`, all the way down) is marshaled once, when it is inserted,
+and stored as that JSON, a `json.RawMessage`, which is what it reads back
+as; two such values with the same JSON compare equal.
+
+### Fixed
+
+- **The Go API could write strings that no peer accepts.** A string with
+  invalid UTF-8 passed to the API went into the document as it was, and the
+  updates the document produced were refused by every JS client and, since
+  v1.26.0, by ygo's own decoders. Each such byte now becomes U+FFFD at the
+  call, before the string is part of an item. Replacing the bytes later,
+  when encoding, cannot work: two fragments of one character inserted by
+  one client merge into one item, and a repaired copy and a raw copy of an
+  item never converge. ygo already counted each such byte as one UTF-16
+  unit, as U+FFFD is, so indexes stay where they were. Fragments fixed in
+  separate calls stay apart (`"\xc2"` then `"\xa2"` are two U+FFFD, not
+  `"¢"`).
+- **A value with its own `MarshalJSON` was marshaled again for every
+  encoding.** An embed or format value that is not a plain value went
+  through `encoding/json` each time the document was encoded, so a
+  marshaler that returns different bytes on different calls gave one item
+  different content in V1 and V2, or in a state and a diff, and replicas
+  diverged. Such a value is marshaled once, at the call, and the item keeps
+  that JSON.
+
+### Documented
+
+- A value passed to the API belongs to the document: mutating it after the
+  call, or a value a read returns, or the `Branch` / `Item` internals, is not
+  supported (package docs, README "Strings and values"). ygo copies a plain
+  value only where a string in it needs fixing; values nested deeper than
+  1000 levels are not checked below that depth.
+
+### Infrastructure
+
+- Reverse fixtures for documents built from strings with invalid UTF-8 (text,
+  a root name, a format key and value, embeds including `json.RawMessage`,
+  map keys and values, array values, XML names), validated by yjs in V1 and
+  V2: 60 to 74, README totals 273 to 287.
+
 ## [1.26.0] - 2026-10-19
 
 **Upgrade impact** - Decoding now rejects strings that are not valid UTF-8,
