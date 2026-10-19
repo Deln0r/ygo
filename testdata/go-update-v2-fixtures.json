@@ -366,7 +366,7 @@
       "description": "invalid UTF-8: a root name",
       "go_client_id": 971,
       "root_kind": "text",
-      "root_name": "r\ufffd",
+      "root_name": "r�",
       "update_hex": "0000028b0f00000104080572efbfbd7802010101000001010000",
       "expected_text": "x",
       "expected_length": 1
@@ -415,7 +415,7 @@
       "root_name": "m",
       "update_hex": "0000028e0f000001280c076d6befbfbd6d6e01024100010100024100010200770476efbfbd760103efbfbd75027703efbfbd77026f6b00",
       "expected_map": {
-        "k\ufffd": "v�",
+        "k�": "v�",
         "n": {
           "�": [
             "�",

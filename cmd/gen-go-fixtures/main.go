@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 
 	"github.com/Deln0r/ygo"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // encoder selects between V1 and V2 wire formats.
@@ -108,13 +109,13 @@ func captureMap(enc encoder, description, rootName string, clientID uint64, keys
 		if v == nil && !m.Has(k) {
 			continue
 		}
-		expected[k] = v
+		expected[utf16.ValidString(k)] = v
 	}
 	return scenario{
 		Description: description,
 		GoClientID:  clientID,
 		RootKind:    "map",
-		RootName:    rootName,
+		RootName:    utf16.ValidString(rootName),
 		UpdateHex:   hex.EncodeToString(bytes),
 		ExpectedMap: expected,
 	}
@@ -132,7 +133,7 @@ func captureArray(enc encoder, description, rootName string, clientID uint64, mu
 		Description:   description,
 		GoClientID:    clientID,
 		RootKind:      "array",
-		RootName:      rootName,
+		RootName:      utf16.ValidString(rootName),
 		UpdateHex:     hex.EncodeToString(bytes),
 		ExpectedArray: a.ToSlice(),
 	}
@@ -150,7 +151,7 @@ func captureText(enc encoder, description, rootName string, clientID uint64, mut
 		Description:    description,
 		GoClientID:     clientID,
 		RootKind:       "text",
-		RootName:       rootName,
+		RootName:       utf16.ValidString(rootName),
 		UpdateHex:      hex.EncodeToString(bytes),
 		ExpectedText:   t.String(),
 		ExpectedLength: t.Length(),
@@ -190,7 +191,7 @@ func captureXml(enc encoder, description, rootName string, clientID uint64, muta
 		Description:         description,
 		GoClientID:          clientID,
 		RootKind:            "xml",
-		RootName:            rootName,
+		RootName:            utf16.ValidString(rootName),
 		UpdateHex:           hex.EncodeToString(bytes),
 		ExpectedXmlChildren: children,
 	}
@@ -334,6 +335,8 @@ func captureAll(enc encoder) []scenario {
 			}),
 		// Strings with invalid UTF-8 given to the API are stored with U+FFFD
 		// for each invalid byte, so the bytes ygo writes are bytes lib0 reads.
+		// Names and keys are recorded fixed: how encoding/json writes an
+		// invalid byte differs between Go releases.
 		captureText(enc, "invalid UTF-8: text inserts", "x", 970, func(t *ygo.Text, txn *ygo.TransactionMut) {
 			must(t.Insert(txn, 0, "a\xffb"))
 			must(t.Insert(txn, 3, "\xe2\x82"))
