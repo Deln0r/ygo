@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Deln0r/ygo/internal/lib0"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // Frame is the decoded outer-envelope message. Type indicates which
@@ -124,7 +125,7 @@ func EncodePong() []byte {
 func EncodeAuthToken(token string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageAuth))
 	buf = lib0.WriteVarUint(buf, uint64(AuthToken))
-	return lib0.WriteVarString(buf, token)
+	return lib0.WriteVarString(buf, utf16.ValidString(token))
 }
 
 // EncodeAuthAuthenticated builds the server-side "your token was
@@ -144,7 +145,7 @@ func EncodeAuthAuthenticated() []byte {
 func EncodeAuthPermissionDenied(reason string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageAuth))
 	buf = lib0.WriteVarUint(buf, uint64(AuthPermissionDenied))
-	return lib0.WriteVarString(buf, reason)
+	return lib0.WriteVarString(buf, utf16.ValidString(reason))
 }
 
 // EncodeStateless builds a MessageStateless envelope carrying an
@@ -152,7 +153,7 @@ func EncodeAuthPermissionDenied(reason string) []byte {
 // callback (single-conn delivery).
 func EncodeStateless(payload string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageStateless))
-	return lib0.WriteVarString(buf, payload)
+	return lib0.WriteVarString(buf, utf16.ValidString(payload))
 }
 
 // EncodeBroadcastStateless builds a MessageBroadcastStateless
@@ -160,7 +161,7 @@ func EncodeStateless(payload string) []byte {
 // fans out to every connection on the doc.
 func EncodeBroadcastStateless(payload string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageBroadcastStateless))
-	return lib0.WriteVarString(buf, payload)
+	return lib0.WriteVarString(buf, utf16.ValidString(payload))
 }
 
 // EncodeClose builds a MessageClose envelope with a reason
@@ -168,7 +169,7 @@ func EncodeBroadcastStateless(payload string) []byte {
 // status code (e.g. 4401 for unauthorized).
 func EncodeClose(reason string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageClose))
-	return lib0.WriteVarString(buf, reason)
+	return lib0.WriteVarString(buf, utf16.ValidString(reason))
 }
 
 // EncodeSyncStatus builds a MessageSyncStatus envelope. The

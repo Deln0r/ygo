@@ -6,6 +6,7 @@ import (
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/internal/undo"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // Text is the gomobile-bindable handle for a shared text type: the
@@ -22,7 +23,7 @@ type Text struct {
 // Text returns the shared text registered under name, creating the
 // root type on first access.
 func (d *Doc) Text(name string) *Text {
-	return &Text{d: d, inner: types.NewText(d.inner.Branch(name))}
+	return &Text{d: d, inner: types.NewText(d.inner.Branch(utf16.ValidString(name)))}
 }
 
 // InsertAt inserts s at the given UTF-16 index.
@@ -106,7 +107,7 @@ type Map struct {
 // Map returns the shared map registered under name, creating the
 // root type on first access.
 func (d *Doc) Map(name string) *Map {
-	return &Map{d: d, inner: types.NewMap(d.inner.Branch(name))}
+	return &Map{d: d, inner: types.NewMap(d.inner.Branch(utf16.ValidString(name)))}
 }
 
 // SetString sets key to a string value.
@@ -158,7 +159,7 @@ type UndoManager struct {
 // handle's origin (see WithOrigin); on the plain handle, those with no
 // origin, which includes updates applied with plain ApplyUpdate.
 func (d *Doc) NewTextUndoManager(name string) *UndoManager {
-	t := types.NewText(d.inner.Branch(name))
+	t := types.NewText(d.inner.Branch(utf16.ValidString(name)))
 	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{t.Branch()}, d.undoOptions())}
 }
 
@@ -166,7 +167,7 @@ func (d *Doc) NewTextUndoManager(name string) *UndoManager {
 // registered under name, tracking this handle's origin as
 // NewTextUndoManager does.
 func (d *Doc) NewMapUndoManager(name string) *UndoManager {
-	m := types.NewMap(d.inner.Branch(name))
+	m := types.NewMap(d.inner.Branch(utf16.ValidString(name)))
 	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{m.Branch()}, d.undoOptions())}
 }
 

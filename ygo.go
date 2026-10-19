@@ -30,6 +30,7 @@ import (
 	"github.com/Deln0r/ygo/internal/store"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/internal/undo"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // Doc is a single CRDT replica — the local view of a collaborative
@@ -111,19 +112,19 @@ const (
 // already holds, so a call inside the transaction blocks forever.
 // yjs allows getMap inside transact; this port does not yet.
 func NewMap(d *Doc, name string) *Map {
-	return types.NewMap(d.Branch(name))
+	return types.NewMap(d.Branch(utf16.ValidString(name)))
 }
 
 func NewArray(d *Doc, name string) *Array {
-	return types.NewArray(d.Branch(name))
+	return types.NewArray(d.Branch(utf16.ValidString(name)))
 }
 
 func NewText(d *Doc, name string) *Text {
-	return types.NewText(d.Branch(name))
+	return types.NewText(d.Branch(utf16.ValidString(name)))
 }
 
 func NewXmlFragment(d *Doc, name string) *XmlFragment {
-	return types.NewXmlFragment(d.Branch(name))
+	return types.NewXmlFragment(d.Branch(utf16.ValidString(name)))
 }
 
 // NewXmlElement wraps a branch as an XmlElement. Typically used
@@ -132,11 +133,11 @@ func NewXmlFragment(d *Doc, name string) *XmlFragment {
 // XmlFragment.InsertXmlElement / XmlElement.InsertXmlElement which
 // set TypeRef and Name automatically.
 func NewXmlElement(d *Doc, name string) *XmlElement {
-	return types.NewXmlElement(d.Branch(name))
+	return types.NewXmlElement(d.Branch(utf16.ValidString(name)))
 }
 
 func NewXmlText(d *Doc, name string) *XmlText {
-	return types.NewXmlText(d.Branch(name))
+	return types.NewXmlText(d.Branch(utf16.ValidString(name)))
 }
 
 // UndoManager records local mutations under a scope of shared types

@@ -332,6 +332,36 @@ func captureAll(enc encoder) []scenario {
 			func(t *ygo.Text, txn *ygo.TransactionMut) {
 				must(t.InsertWithAttributes(txn, 0, "Title\n", map[string]any{"header": 1, "align": "center"}))
 			}),
+		// Strings with invalid UTF-8 given to the API are stored with U+FFFD
+		// for each invalid byte, so the bytes ygo writes are bytes lib0 reads.
+		captureText(enc, "invalid UTF-8: text inserts", "x", 970, func(t *ygo.Text, txn *ygo.TransactionMut) {
+			must(t.Insert(txn, 0, "a\xffb"))
+			must(t.Insert(txn, 3, "\xe2\x82"))
+		}),
+		captureText(enc, "invalid UTF-8: a root name", "r\xff", 971, func(t *ygo.Text, txn *ygo.TransactionMut) {
+			must(t.Insert(txn, 0, "x"))
+		}),
+		captureRichText(enc, "invalid UTF-8: a format key and value", "x", 972,
+			func(t *ygo.Text, txn *ygo.TransactionMut) {
+				must(t.InsertWithAttributes(txn, 0, "ab", map[string]any{"b\xff": "v\xfe"}))
+			}),
+		captureRichText(enc, "invalid UTF-8: embeds, plain and raw JSON", "x", 973,
+			func(t *ygo.Text, txn *ygo.TransactionMut) {
+				must(t.InsertEmbed(txn, 0, map[string]any{"img\xff": "p\xfe"}))
+				must(t.InsertEmbed(txn, 1, json.RawMessage("{\"r\":\"q\xff\"}")))
+			}),
+		captureMap(enc, "invalid UTF-8: map keys and values", "m", 974, []string{"k\xff", "n"},
+			func(m *ygo.Map, txn *ygo.TransactionMut) {
+				m.Set(txn, "k\xff", "v\xfe")
+				m.Set(txn, "n", map[string]any{"\xfd": []any{"\xfc", "ok"}})
+			}),
+		captureArray(enc, "invalid UTF-8: array values", "a", 975, func(a *ygo.Array, txn *ygo.TransactionMut) {
+			a.Push(txn, "x\xff", map[string]any{"\xfb": "y"})
+		}),
+		captureXml(enc, "invalid UTF-8: an element name", "frag", 976, func(f *ygo.XmlFragment, txn *ygo.TransactionMut) {
+			el := f.InsertXmlElement(txn, 0, "p\xff")
+			el.SetAttribute(txn, "a\xfe", "v\xfd")
+		}),
 	)
 }
 

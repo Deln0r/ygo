@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // XmlFragment is the bindable root of an XML document tree — the shape
@@ -31,7 +32,7 @@ type XmlText struct {
 // XmlFragment returns the shared XML fragment registered under name,
 // creating the root type on first access.
 func (d *Doc) XmlFragment(name string) *XmlFragment {
-	return &XmlFragment{d: d, inner: types.NewXmlFragment(d.inner.Branch(name))}
+	return &XmlFragment{d: d, inner: types.NewXmlFragment(d.inner.Branch(utf16.ValidString(name)))}
 }
 
 // Length returns the number of children.

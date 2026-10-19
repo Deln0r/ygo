@@ -6,6 +6,7 @@ import (
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // XmlFragment is a root container of XmlElement and XmlText
@@ -40,7 +41,7 @@ func (f *XmlFragment) Length() uint64 { return f.branch.BlockLen }
 func (f *XmlFragment) InsertXmlElement(txn *doc.TransactionMut, idx uint64, nodeName string) *XmlElement {
 	inner := &block.Branch{
 		TypeRef: block.TypeRefXmlElement,
-		Name:    nodeName,
+		Name:    utf16.ValidString(nodeName),
 		Map:     map[string]*block.Item{},
 	}
 	insertXmlChild(txn, f.branch, idx, inner)
@@ -126,7 +127,7 @@ func (e *XmlElement) Length() uint64 { return e.branch.BlockLen }
 // GetAttribute returns the value of the named attribute. The
 // second return reports whether the attribute is set.
 func (e *XmlElement) GetAttribute(name string) (string, bool) {
-	item, ok := e.branch.Map[name]
+	item, ok := e.branch.Map[utf16.ValidString(name)]
 	if !ok || item.IsDeleted() {
 		return "", false
 	}
@@ -178,7 +179,7 @@ func (e *XmlElement) Attributes() map[string]string {
 func (e *XmlElement) InsertXmlElement(txn *doc.TransactionMut, idx uint64, nodeName string) *XmlElement {
 	inner := &block.Branch{
 		TypeRef: block.TypeRefXmlElement,
-		Name:    nodeName,
+		Name:    utf16.ValidString(nodeName),
 		Map:     map[string]*block.Item{},
 	}
 	insertXmlChild(txn, e.branch, idx, inner)

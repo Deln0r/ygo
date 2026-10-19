@@ -1,8 +1,10 @@
 package types
 
 import (
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // Map is the user-facing wrapper around a map-like Branch. Construct
@@ -40,6 +42,8 @@ func (m *Map) Branch() *block.Branch { return m.branch }
 //
 // Mirrors yrs Map::insert (yrs/src/types/map.rs ~line 73).
 func (m *Map) Set(txn *doc.TransactionMut, key string, value any) {
+	key = utf16.ValidString(key)
+	value = anyval.Valid(value)
 	clientID := txn.Doc().ClientID()
 	clock := txn.Store().GetClock(clientID)
 
@@ -78,7 +82,7 @@ func (m *Map) Set(txn *doc.TransactionMut, key string, value any) {
 // the LWW winner; if it's deleted there is no live predecessor to
 // fall back to.
 func (m *Map) Get(key string) any {
-	item, ok := m.branch.Map[key]
+	item, ok := m.branch.Map[utf16.ValidString(key)]
 	if !ok || item.IsDeleted() {
 		return nil
 	}
@@ -87,7 +91,7 @@ func (m *Map) Get(key string) any {
 
 // Has reports whether key has a live (non-tombstoned) entry.
 func (m *Map) Has(key string) bool {
-	item, ok := m.branch.Map[key]
+	item, ok := m.branch.Map[utf16.ValidString(key)]
 	return ok && !item.IsDeleted()
 }
 
@@ -99,7 +103,7 @@ func (m *Map) Has(key string) bool {
 // subsequent Set can chain off it as Origin/Left, preserving YATA
 // convergence for concurrent writers that didn't see the delete yet.
 func (m *Map) Delete(txn *doc.TransactionMut, key string) {
-	item, ok := m.branch.Map[key]
+	item, ok := m.branch.Map[utf16.ValidString(key)]
 	if !ok || item.IsDeleted() {
 		return
 	}
@@ -217,7 +221,7 @@ func (m *Map) SetDocWithOptions(txn *doc.TransactionMut, key string, autoLoad bo
 // the registered instance for the referenced GUID (created on first
 // access for subdocs surfaced from a decoded update).
 func (m *Map) GetDoc(d *doc.Doc, key string) (*doc.Doc, bool) {
-	item, ok := m.branch.Map[key]
+	item, ok := m.branch.Map[utf16.ValidString(key)]
 	if !ok || item == nil || item.IsDeleted() || item.Content.Kind != block.KindDoc {
 		return nil, false
 	}
@@ -226,6 +230,7 @@ func (m *Map) GetDoc(d *doc.Doc, key string) (*doc.Doc, bool) {
 
 // setDocRefWithOpts integrates a ContentDoc reference item under key.
 func (m *Map) setDocRefWithOpts(txn *doc.TransactionMut, key, guid string, opts map[string]any) {
+	key = utf16.ValidString(key)
 	clientID := txn.Doc().ClientID()
 	clock := txn.Store().GetClock(clientID)
 
@@ -257,6 +262,7 @@ func (m *Map) setDocRefWithOpts(txn *doc.TransactionMut, key, guid string, opts 
 
 // Branch.Item back to the Item.
 func (m *Map) setNested(txn *doc.TransactionMut, key string, inner *block.Branch) {
+	key = utf16.ValidString(key)
 	clientID := txn.Doc().ClientID()
 	clock := txn.Store().GetClock(clientID)
 

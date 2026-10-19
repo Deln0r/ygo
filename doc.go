@@ -10,6 +10,27 @@
 // semantic versioning. The wire formats are validated bidirectionally against
 // yjs on every push.
 //
+// # Strings and values
+//
+// lib0 reads every string with a fatal UTF-8 decoder, so ygo makes every
+// string it is given valid before it becomes part of an item: each byte that
+// does not start a valid UTF-8 sequence becomes U+FFFD. That covers text,
+// keys, names, values, format attributes, embeds, awareness states and the
+// protocol strings the server and client send; UTF-16 indexes into the
+// string a caller passed still point at the same places. Lookups by a key
+// with such bytes find the fixed key. Values nested deeper than 1000 levels
+// are not checked below that depth.
+//
+// A value passed to the API belongs to the document from then on. Do not
+// mutate it after the call, nor a value a read returns, nor an event's
+// delta, nor the Branch and Item internals: the document encodes what they
+// hold, so a change there can put invalid bytes, or other inconsistencies,
+// on the wire. ygo does not copy values defensively: a plain value (strings,
+// numbers, bools, nil, []byte, []any, map[string]any) is copied only where a
+// string in it needs fixing, and an embed or format value of any other type
+// is marshaled once, at the call, and stored as that JSON (a
+// json.RawMessage).
+//
 // See https://github.com/Deln0r/ygo for documentation and examples.
 package ygo
 

@@ -7,6 +7,7 @@ import (
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/lib0"
 	"github.com/Deln0r/ygo/internal/store"
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // RelativePosition is a position anchored to the Yjs document model
@@ -141,7 +142,10 @@ func EncodeRelativePosition(rpos RelativePosition) ([]byte, error) {
 		buf = lib0.WriteVarUint(buf, rpos.Item.Clock)
 	case rpos.TName != nil:
 		buf = lib0.WriteVarUint(buf, 1)
-		buf = lib0.WriteVarString(buf, *rpos.TName)
+		// A root name ygo creates is valid UTF-8 (the typed constructors fix
+		// it); one a caller set by hand is fixed the same way, since lib0
+		// rejects anything else.
+		buf = lib0.WriteVarString(buf, utf16.ValidString(*rpos.TName))
 	case rpos.Type != nil:
 		buf = lib0.WriteVarUint(buf, 2)
 		buf = lib0.WriteVarUint(buf, rpos.Type.Client)

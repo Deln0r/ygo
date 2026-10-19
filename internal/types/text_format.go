@@ -1,13 +1,17 @@
 package types
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/utf16"
@@ -71,10 +75,12 @@ func (t *Text) InsertWithAttributes(txn *doc.TransactionMut, idx uint64, str str
 	if attrs == nil {
 		return t.Insert(txn, idx, str)
 	}
+	str = utf16.ValidString(str)
 	length := t.Length()
 	if idx > length {
 		return fmt.Errorf("text: insert index %d out of range [0, %d]", idx, length)
 	}
+	attrs = validAttrs(attrs)
 	return t.insertContent(txn, idx, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str), attrs, sortedAttrKeys(attrs))
 }
 
@@ -196,7 +202,7 @@ func (t *Text) Format(txn *doc.TransactionMut, idx, length uint64, attrs Attrs) 
 	if err != nil {
 		return err
 	}
-	return formatText(txn, t.branch, pos, length, attrs)
+	return formatText(txn, t.branch, pos, length, validAttrs(attrs))
 }
 
 // textPos is a cursor between two items of a text, carrying the
@@ -481,6 +487,7 @@ func (t *Text) InsertEmbedWithAttributes(txn *doc.TransactionMut, idx uint64, va
 	if attrs == nil {
 		attrs = Attrs{}
 	}
+	attrs = validAttrs(attrs)
 	return t.insertContent(txn, idx, content, length, attrs, sortedAttrKeys(attrs))
 }
 
@@ -489,9 +496,38 @@ func (t *Text) InsertEmbedWithAttributes(txn *doc.TransactionMut, idx uint64, va
 // length in UTF-16 units.
 func embedContent(value any) (block.Content, uint64) {
 	if s, ok := value.(string); ok {
+		s = utf16.ValidString(s)
 		return block.Content{Kind: block.KindString, Str: s}, utf16.Length(s)
 	}
-	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{value}}, 1
+	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{anyval.ValidJSON(value)}}, 1
+}
+
+// validAttrs returns attrs with each key fixed by utf16.ValidString and each
+// value by anyval.ValidJSON (format values are written as JSON), copying the
+// map only when something changes, so the caller's map is not modified; nil
+// stays nil and an empty map stays empty. Two keys that become equal keep
+// the value of the key that sorts last.
+func validAttrs(attrs Attrs) Attrs {
+	changed := false
+	for k, v := range attrs {
+		if !utf8.ValidString(k) || anyval.NeedsJSONFix(v) {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return attrs
+	}
+	keys := make([]string, 0, len(attrs))
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make(Attrs, len(attrs))
+	for _, k := range keys {
+		out[utf16.ValidString(k)] = anyval.ValidJSON(attrs[k])
+	}
+	return out
 }
 
 // ChunkKind discriminates the variants emitted by Text.Range.
@@ -580,13 +616,14 @@ func (t *Text) ApplyDelta(txn *doc.TransactionMut, ops []DeltaOp) error {
 	pos := &textPos{right: t.branch.Start, attrs: Attrs{}}
 	defer t.branch.Markers.Invalidate()
 	for i, op := range ops {
-		attrs := op.Attributes
+		attrs := validAttrs(op.Attributes)
 		if attrs == nil {
 			attrs = Attrs{}
 		}
 		switch {
 		case op.Insert != "":
-			insertText(txn, t.branch, pos, block.Content{Kind: block.KindString, Str: op.Insert}, utf16.Length(op.Insert), attrs, sortedAttrKeys(attrs))
+			s := utf16.ValidString(op.Insert)
+			insertText(txn, t.branch, pos, block.Content{Kind: block.KindString, Str: s}, utf16.Length(s), attrs, sortedAttrKeys(attrs))
 		case op.Embed != nil:
 			if content, length := embedContent(op.Embed); length > 0 {
 				insertText(txn, t.branch, pos, content, length, attrs, sortedAttrKeys(attrs))
@@ -846,6 +883,14 @@ func copyNonEmptyAttrs(attrs Attrs) Attrs {
 func attrValuesEqual(a, b any) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
+	}
+	// A value stored as its JSON (anyval.ValidJSON) is equal only to another
+	// with the same JSON bytes, never to a container whose entries happen to
+	// match those bytes.
+	ra, aRaw := a.(json.RawMessage)
+	rb, bRaw := b.(json.RawMessage)
+	if aRaw || bRaw {
+		return aRaw && bRaw && bytes.Equal(ra, rb)
 	}
 	if sameObject(a, b) {
 		return true

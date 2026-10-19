@@ -84,6 +84,7 @@ func (t *Text) Insert(txn *doc.TransactionMut, idx uint64, str string) error {
 	if str == "" {
 		return nil
 	}
+	str = utf16.ValidString(str)
 	length := t.Length()
 	if idx > length {
 		return fmt.Errorf("text: insert index %d out of range [0, %d]", idx, length)

@@ -32,6 +32,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // NullStateJSON is the literal four-byte JSON string "null" that
@@ -231,8 +233,9 @@ func (a *Awareness) SetLocalState(jsonState []byte) {
 	if existed {
 		newClock = prev.Clock + 1
 	}
-	stateCopy := make([]byte, len(jsonState))
-	copy(stateCopy, jsonState)
+	// y-protocols reads the state with lib0's fatal UTF-8 decoder: each
+	// invalid byte becomes U+FFFD here, once, as the state is set.
+	stateCopy := []byte(utf16.ValidString(string(jsonState)))
 	a.states[a.clientID] = &ClientState{
 		Clock:       newClock,
 		LastUpdated: now,
@@ -249,7 +252,7 @@ func (a *Awareness) SetLocalState(jsonState []byte) {
 
 	a.fireUpdate(summary, originLocal)
 
-	contentChanged := !existed || prevData == nil || !bytes.Equal(prevData, jsonState)
+	contentChanged := !existed || prevData == nil || !bytes.Equal(prevData, stateCopy)
 	if contentChanged {
 		a.fireChange(summary, originLocal)
 	}

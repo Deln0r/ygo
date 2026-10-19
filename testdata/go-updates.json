@@ -352,6 +352,103 @@
           "insert": "Title\n"
         }
       ]
+    },
+    {
+      "description": "invalid UTF-8: text inserts",
+      "go_client_id": 970,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0101ca0700040101780b61efbfbd62efbfbdefbfbd00",
+      "expected_text": "a�b��",
+      "expected_length": 5
+    },
+    {
+      "description": "invalid UTF-8: a root name",
+      "go_client_id": 971,
+      "root_kind": "text",
+      "root_name": "r\ufffd",
+      "update_hex": "0101cb070004010472efbfbd017800",
+      "expected_text": "x",
+      "expected_length": 1
+    },
+    {
+      "description": "invalid UTF-8: a format key and value",
+      "go_client_id": 972,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0103cc0700060101780462efbfbd062276efbfbd2284cc070002616286cc07020462efbfbd046e756c6c00",
+      "expected_text": "ab",
+      "expected_length": 2,
+      "expected_delta": [
+        {
+          "attributes": {
+            "b�": "v�"
+          },
+          "insert": "ab"
+        }
+      ]
+    },
+    {
+      "description": "invalid UTF-8: embeds, plain and raw JSON",
+      "go_client_id": 973,
+      "root_kind": "text",
+      "root_name": "x",
+      "update_hex": "0102cd070005010178117b22696d67efbfbd223a2270efbfbd227d85cd07000c7b2272223a2271efbfbd227d00",
+      "expected_length": 2,
+      "expected_delta": [
+        {
+          "insert": {
+            "img�": "p�"
+          }
+        },
+        {
+          "insert": {
+            "r": "q�"
+          }
+        }
+      ]
+    },
+    {
+      "description": "invalid UTF-8: map keys and values",
+      "go_client_id": 974,
+      "root_kind": "map",
+      "root_name": "m",
+      "update_hex": "0102ce07002801016d046befbfbd01770476efbfbd2801016d016e01760103efbfbd75027703efbfbd77026f6b00",
+      "expected_map": {
+        "k\ufffd": "v�",
+        "n": {
+          "�": [
+            "�",
+            "ok"
+          ]
+        }
+      }
+    },
+    {
+      "description": "invalid UTF-8: array values",
+      "go_client_id": 975,
+      "root_kind": "array",
+      "root_name": "a",
+      "update_hex": "0101cf07000801016102770478efbfbd760103efbfbd77017900",
+      "expected_array": [
+        "x�",
+        {
+          "�": "y"
+        }
+      ]
+    },
+    {
+      "description": "invalid UTF-8: an element name",
+      "go_client_id": 976,
+      "root_kind": "xml",
+      "root_name": "frag",
+      "update_hex": "0102d0070007010466726167030470efbfbd2800d007000461efbfbd01770476efbfbd00",
+      "expected_xml_children": [
+        {
+          "kind": "element",
+          "name": "p�"
+        }
+      ]
     }
   ]
 }

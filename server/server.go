@@ -41,6 +41,7 @@ import (
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
+	"github.com/Deln0r/ygo/internal/utf16"
 	"github.com/Deln0r/ygo/persist"
 	"github.com/Deln0r/ygo/server/backplane"
 )
@@ -1430,6 +1431,7 @@ func (c *conn) publishBackplane(ctx context.Context, kind byte, payload []byte) 
 // falls on a character boundary.
 func closeReason(s string) string {
 	const maxReason = 123
+	s = utf16.ValidString(s) // a close reason is UTF-8 text (RFC 6455 7.4)
 	if len(s) <= maxReason {
 		return s
 	}

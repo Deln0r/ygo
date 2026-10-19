@@ -12,11 +12,11 @@
 
 Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications, [officially listed](https://docs.yjs.dev/ecosystem/ports-to-other-languages) in the Yjs documentation's ports page.
 
-Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients running `yjs@13.x` synchronize directly with Go servers and vice versa, with both directions verified through **273 cross-language fixture scenarios** generated from `yjs@13.6.33`. The bundled WebSocket server is Hocuspocus-compatible. No CGO; `gomobile bind` produces an iOS xcframework and Android AAR (manually verified, not run in CI).
+Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients running `yjs@13.x` synchronize directly with Go servers and vice versa, with both directions verified through **287 cross-language fixture scenarios** generated from `yjs@13.6.33`. The bundled WebSocket server is Hocuspocus-compatible. No CGO; `gomobile bind` produces an iOS xcframework and Android AAR (manually verified, not run in CI).
 
 ## Highlights
 
-- **Byte-for-byte wire compatibility, verified in both directions.** 273 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push, so a regression in either direction fails the build.
+- **Byte-for-byte wire compatibility, verified in both directions.** 287 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push, so a regression in either direction fails the build.
 - **Pure Go, no CGO — mobile included.** Cross-compiles freely to every Go target. The CRDT core, the sync client and the server also compile to `js/wasm` and `wasip1/wasm`; the one exception is the SQLite-backed store in [`persist/sqlite`](persist/sqlite), since `modernc.org/sqlite` is transpiled C with no wasm target — a browser build supplies its own [`persist.Store`](persist) instead (it is a seven-method interface). `gomobile bind` produces an iOS xcframework and Android AAR (manually verified on 2026-06-12, not run in CI) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
 - **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native y-websocket/Hocuspocus provider: handshake, incremental updates, awareness, reconnect with backoff. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
 - **Complete CRDT type set.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments.
@@ -156,6 +156,10 @@ got, ok := m.GetDoc(d, "child") // got.GUID() == sub.GUID()
 
 The `ContentDoc` wire format (GUID + options) is byte-compatible with `yjs@13.6.33`, verified by cross-language fixtures. Lifecycle events are observable via `d.OnSubdocs` (added / removed / loaded GUIDs per transaction); `SetDocWithOptions(..., autoLoad)` and `subdoc.Load()` drive the loaded set, so a sync provider knows which nested documents to fetch.
 
+### Strings and values
+
+lib0 rejects strings that are not valid UTF-8, so ygo makes every string it is given valid at the call, before it becomes part of an item: each byte that does not start a valid UTF-8 sequence becomes U+FFFD, so UTF-16 indexes into the string you passed still point at the same places (values nested deeper than 1000 levels are not checked below that depth). An embed or format value that is not a plain value (strings, numbers, bools, nil, `[]byte`, `[]any`, `map[string]any`) is marshaled once, at the call, and stored as that JSON. A value passed to the API belongs to the document from then on: do not mutate it, or a value a read returns, after the call. Updates arriving with invalid UTF-8 are rejected (`ygo.ErrInvalidUTF8`); bytes an older release stored load as they were.
+
 ### Observing changes
 
 Subscribe to a shared type to learn exactly what changed in each transaction, local or remote:
@@ -184,7 +188,7 @@ defer unsub()
 | `internal/block` (Item, Content, Branch, Splice, Integrate-YATA, TrySquash, Repair, search markers) | done; full YATA conflict resolution + per-branch LRU position cache |
 | `internal/store` (BlockStore, ItemSlice, Materialize) | done |
 | `internal/doc` (Doc, Transaction, TransactionMut) | done; lock semantics + root-branch registry |
-| `internal/encoding` (StateVector, IdSet, Update encode/decode/apply, Pending buffer, V1 + V2 codecs) | done; JS Yjs → Go proven by 33 V1 + 37 V2 fixture scenarios; Go → JS proven by 60 reverse fixtures (Map / Array / Text / XmlFragment) |
+| `internal/encoding` (StateVector, IdSet, Update encode/decode/apply, Pending buffer, V1 + V2 codecs) | done; JS Yjs → Go proven by 33 V1 + 37 V2 fixture scenarios; Go → JS proven by 74 reverse fixtures (Map / Array / Text / XmlFragment) |
 | `internal/utf16` (UTF-16 length / byte-offset / surrogate-aware split) | done |
 | `internal/types/Map` (Set / Get / Delete / Has / Len / Range / Clear + SetMap / SetArray / SetText) | done; nested-type construction supported |
 | `internal/types/Array` (Insert / InsertRange / Push / Delete / Get / Len / Range / ToSlice + InsertMap / InsertArray / InsertText) | done; nested-type construction supported |
@@ -230,11 +234,11 @@ defer unsub()
 
 ## Wire compatibility
 
-The single most-important guarantee of this project is byte-level wire compatibility with `yjs@13.x`. This is enforced by **273 cross-language fixture scenarios** (plus 56 lib0 primitive vectors):
+The single most-important guarantee of this project is byte-level wire compatibility with `yjs@13.x`. This is enforced by **287 cross-language fixture scenarios** (plus 56 lib0 primitive vectors):
 
 - **33 V1 forward fixtures** (`testdata/yjs-updates.json`) — JS Yjs encodes via `Y.encodeStateAsUpdate`, Go decodes and applies, state matches.
 - **37 V2 forward fixtures** (`testdata/yjs-update-v2-fixtures.json`) — same with `Y.encodeStateAsUpdateV2`.
-- **60 reverse fixtures** (`testdata/go-updates.json` + `go-update-v2-fixtures.json`) — Go encodes via `EncodeStateAsUpdate` / `EncodeStateAsUpdateV2`, JS Yjs decodes via `Y.applyUpdate` / `Y.applyUpdateV2`, state matches.
+- **74 reverse fixtures** (`testdata/go-updates.json` + `go-update-v2-fixtures.json`) — Go encodes via `EncodeStateAsUpdate` / `EncodeStateAsUpdateV2`, JS Yjs decodes via `Y.applyUpdate` / `Y.applyUpdateV2`, state matches.
 - **143 feature fixtures** — XML (5), awareness (6), sync protocol (6), undo (27), snapshots (4), subdocuments (3), wire edge cases incl. 53-bit client IDs (3), nested-type GC (4), relative positions (11), observers (19, which observers fire and in what order), rich text (55, what inserts, embeds, formatting, deletes and Quill deltas do to a formatted text, compared as deltas, strings and events, not as bytes; the update-event set below compares rich-text updates byte for byte), all captured from the pinned JS reference and byte-compared in both directions where the feature has a Go encoder.
 
 One more fixture set compares bytes with yjs but stays out of these totals while any of its scenarios is a pinned divergence: per-transaction updates and diffs (87 scenarios, every `OnUpdate` / `OnUpdateV2` event and `EncodeDiff` / `EncodeDiffV2` against state vectors that end inside a block, undo of nested types and rich-text inserts and deltas among them; 2 pinned). Each pin is listed with its cause in the test and fails the build when the behaviour changes, in either direction.

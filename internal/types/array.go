@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
 )
@@ -83,9 +84,28 @@ func (a *Array) InsertRange(txn *doc.TransactionMut, idx uint64, values []any) {
 	a.insertBetween(txn, idx, left, right, values)
 }
 
+// validValues returns values with anyval.Valid applied to each, copying the
+// slice only when one of them changes, so the caller's slice is not modified.
+func validValues(values []any) []any {
+	var out []any
+	for i, v := range values {
+		if anyval.NeedsFix(v) {
+			if out == nil {
+				out = append([]any(nil), values...)
+			}
+			out[i] = anyval.Valid(v)
+		}
+	}
+	if out == nil {
+		return values
+	}
+	return out
+}
+
 // insertBetween integrates values as one item between left and right,
 // at user index idx (for the search markers).
 func (a *Array) insertBetween(txn *doc.TransactionMut, idx uint64, left, right *block.Item, values []any) {
+	values = validValues(values)
 	var origin, rightOrigin *block.ID
 	if left != nil {
 		lid := left.LastID()
