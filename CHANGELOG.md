@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.26.0] - 2026-10-19
 
 **Upgrade impact** - Decoding now rejects strings that are not valid UTF-8,
 as lib0 does: `ApplyUpdate`, `ApplyUpdateV2`, `ValidateUpdate`,
@@ -1712,6 +1712,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.26.0]: https://github.com/Deln0r/ygo/releases/tag/v1.26.0
 [1.25.0]: https://github.com/Deln0r/ygo/releases/tag/v1.25.0
 [1.24.0]: https://github.com/Deln0r/ygo/releases/tag/v1.24.0
 [1.23.0]: https://github.com/Deln0r/ygo/releases/tag/v1.23.0
