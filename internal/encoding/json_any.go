@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 )
 
@@ -42,7 +43,7 @@ import (
 // custom marshaler emitting a literal like 1e1000 marshals but cannot be read
 // back as a float64, and also degrades to null.
 func jsonValueForAny(v block.Any) block.Any {
-	if isAnyTree(v, 0) {
+	if anyval.IsTree(v, 0) {
 		return classifyNumbers(v)
 	}
 	raw, err := json.Marshal(v)
@@ -54,42 +55,6 @@ func jsonValueForAny(v block.Any) block.Any {
 		return nil
 	}
 	return classifyNumbers(out)
-}
-
-// maxAnyTreeDepth bounds the walk over a caller's value. Nothing decoded from
-// the wire is anywhere near this deep; a value that is, or that refers back to
-// itself, is handed to encoding/json instead, which detects the cycle and
-// degrades it to null exactly as the V1 path does. Without the bound a
-// self-referencing map recursed until the stack ran out - a fatal crash, not a
-// recoverable panic - where it used to encode as null.
-const maxAnyTreeDepth = 1000
-
-// isAnyTree reports whether EncodeAny can take v as it is, once its numbers are
-// classified.
-func isAnyTree(v any, depth int) bool {
-	if depth > maxAnyTreeDepth {
-		return false
-	}
-	switch x := v.(type) {
-	case nil, bool, string, []byte, int, int32, int64, float32, float64:
-		return true
-	case []any:
-		for _, el := range x {
-			if !isAnyTree(el, depth+1) {
-				return false
-			}
-		}
-		return true
-	case map[string]any:
-		for _, el := range x {
-			if !isAnyTree(el, depth+1) {
-				return false
-			}
-		}
-		return true
-	default:
-		return false
-	}
 }
 
 // classifyNumbers returns a copy of v with every number classified the way lib0

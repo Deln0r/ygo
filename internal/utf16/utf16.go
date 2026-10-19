@@ -93,3 +93,28 @@ func SplitAt(s string, utf16Offset uint64) (left, right string) {
 	_, prevSize := utf8.DecodeLastRuneInString(s[:byteIdx])
 	return s[:byteIdx-prevSize] + Replacement, Replacement + s[byteIdx:]
 }
+
+// ValidString returns s with each byte that does not start a valid UTF-8
+// sequence replaced by U+FFFD, and s itself when it is valid. Length counts
+// each such byte as one UTF-16 unit, and so does U+FFFD, so a UTF-16 index
+// into s points at the same place in the result. (A lenient WHATWG decoder
+// replaces a maximal invalid subpart with one U+FFFD instead, which would
+// move the indexes.) Strings that ygo writes to the wire go through this
+// at the API, before they become part of an item: lib0 rejects invalid
+// UTF-8, and bytes cannot be replaced once an item holds them.
+func ValidString(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	out := make([]byte, 0, len(s)+8)
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			out = append(out, Replacement...)
+		} else {
+			out = append(out, s[i:i+size]...)
+		}
+		i += size
+	}
+	return string(out)
+}
