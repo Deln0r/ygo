@@ -48,3 +48,6 @@ testdata/b4-trace.json
 /collab-client
 /offline-first
 /yload
+
+# go build ./cmd/... at the repo root drops binaries here
+/gen-go-fixtures
