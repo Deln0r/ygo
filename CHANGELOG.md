@@ -14,6 +14,82 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact** - A client that falls behind its room is now closed, with
+WebSocket code 1013 (try again later) if it still reads, and resyncs when it
+reconnects; it used to slow every other client of the room. A client that
+does not read at all is cut by its write deadline instead, without a close
+code. A client falls behind when its send
+queue holds `MaxSendQueue` messages of the room's traffic (default 4096) or
+`MaxSendQueueBytes` bytes (default 16 MiB, or four times `ReadLimit` when
+that is larger), or when a message has waited in it longer than
+`WriteTimeout` (default 10s). Stateless broadcasts queued to it are dropped
+with the rest and are not resent. `OnDisconnect` fires after the
+connection's socket is closed, and the server now closes the socket of every
+connection it releases.
+
+### Fixed
+
+- **One slow client slowed its whole room.** A broadcast wrote to each peer
+  in turn, on the goroutine of the connection whose update it carried, and
+  waited up to `WriteTimeout` for each. A client that read slowly but
+  steadily never timed out and held back every edit, presence update and
+  sync reply of its room; a client that stopped reading held the room for up
+  to `WriteTimeout` per stall. The awareness sweep and the backplane
+  re-broadcast waited the same way, the sweep for every room of the server.
+  Each connection now has its own send queue and writer goroutine, and a
+  broadcast only queues, so no client waits for another client's socket. A
+  connection's own replies (the initial sync, SyncStep2, auth and ping
+  replies) still wait until they are written, so a client that sends
+  requests without reading stalls only itself. Measured with `yload` (one
+  room of 10 clients, two writers sending 16 KiB 20 times a second, two
+  interleaved runs per server, every delivery made): with one client that
+  stopped reading, the other clients' p99 latency went from 9.8 s to 5-8 ms;
+  with one client reading 100 KB/s, from 17.8-20.9 s to 2-4 ms, and that
+  client is now closed with 1013; with no slow client it stayed at 2-10 ms.
+- **A released connection's socket could stay open.** After an `OnConnect`
+  or `ReadOnly` panic, or a client frame that coder/websocket refuses without
+  closing the connection (an unmasked frame), the server returned without
+  closing the socket, which stayed open until the client closed it.
+- **The Go client sent other clients' changes back with its own.** With
+  every local edit, `client` sent a diff from the state it had last sent,
+  which included what other clients had changed since and the server had
+  delivered to it. In a room with several writers each message grew with the
+  others' edits, and past the server's `ReadLimit` (32 KiB by default) the
+  server closed the client with 1009 and it reconnected in a loop. What the
+  server delivers now counts as sent, as far as it continues what the server
+  is known to have; content the client got from elsewhere still goes out. With the send queues the server
+  delivers sooner, which made such messages more frequent: under the load
+  measured above, the old client met 24-28 such closes per 20 s run against
+  v1.27.0 and 358-367 against the new server; the fixed client met none.
+- **A peer could hold a close the server started forever.** coder/websocket's
+  `Close` reads the payload of a data frame the peer announces after the
+  server's close frame with no deadline, so a peer that sent such a header
+  and withheld the payload kept the closing goroutine, and the connection's
+  slot behind it, waiting. The server now keeps the hijacked transport and
+  cuts it when a close it started takes longer than 15 seconds.
+
+### Added
+
+- `Options.MaxSendQueue` and `Options.MaxSendQueueBytes`: how far behind its
+  room a client may fall before it is closed. `MaxSendQueueBytes` is a
+  backlog threshold checked before each message is queued, not a message
+  size limit. A connection's own replies are not counted.
+- `Stats.SlowClientsClosed`, and `QueuedMessages` and `QueuedBytes` per
+  document in `Stats.Docs`.
+- yserve: `-write-timeout`, `-max-send-queue` and `-max-send-queue-bytes`.
+- yload: `-slow` and `-slowrate` (slow readers that consume a set number of
+  bytes per second), `-payload` and `-grace`.
+
+### Changed
+
+- yload counts only deliveries through the server. It counted a writer's own
+  inserts as deliveries of almost zero latency, which hid missing and late
+  deliveries; a write now carries its writer's id, writing starts once every
+  client is synced, and the report gives the deliveries expected, made and
+  missing. A run with missing deliveries exits 1.
+
 ## [1.27.0] - 2026-10-20
 
 **Upgrade impact** - A string with invalid UTF-8 given to the API is stored

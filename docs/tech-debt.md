@@ -351,12 +351,17 @@
 - **Was:** byte-level wire format asserted only via hand-built fixtures in `framing_test.go` and pure-Go round-trip in `handler_test.go`.
 - **Resolved by:** `testdata/gen/gen-sync.mjs` captures 6 envelope scenarios (SyncStep1 from empty + non-empty doc, SyncStep2 with array state, SyncUpdate incremental text insert, Awareness frame, QueryAwareness handshake) using y-protocols/sync + Hocuspocus outer-tag layout. `internal/sync/fixtures_test.go` decodes each via DecodeEnvelope and verifies Type / SyncSub / Payload match. Reverse-encode test for QueryAwareness (only deterministic-payload type) confirms byte-equality.
 
-### Broadcast fan-out is O(N) per update with no rate limiting
+### Broadcast fan-out is O(N) per update, without batching (slow consumers resolved)
 
-- **Where:** `server/server.go` `(*conn).broadcast`.
-- **What:** every applied SyncUpdate triggers a synchronous send to every connection on the doc. For docs with hundreds of active connections, a single rapid edit producer can saturate the server's write loop. There is no batching, deduplication, or backpressure.
-- **Why deferred:** no real workload yet. The pure-Go reference implementations of y-websocket and Hocuspocus run the same naive fan-out at adopter scale.
-- **When to address:** if benchmarks show fan-out latency dominating. Mitigations in priority order: (a) per-connection bounded write queue with drop-oldest policy, (b) batch updates within a small time window (5-10ms), (c) per-doc dedicated fan-out goroutine to amortize lock acquisition.
+- **Where:** `server/server.go` `(*conn).broadcast`, `server/sendqueue.go`.
+- **Resolved (1.28.0):** the write to each peer no longer runs on the broadcaster's goroutine. Each connection has a bounded send queue and its own writer goroutine; a broadcast only queues, so a slow or stuck client never delays its room, the awareness sweep or the backplane re-broadcast. A client that falls behind (`MaxSendQueue`, `MaxSendQueueBytes`, or a queued message older than `WriteTimeout`) is closed, with 1013 if it still reads (one that does not read is cut by its write deadline), and resyncs when it reconnects. Coalescing a slow client's queued updates into one, instead of closing it, was left out: it costs CPU and allocations on the slow path, only document updates merge, and the resync already recovers the document and presence.
+- **Still open:** a broadcast queues one envelope per peer per update, with no batching window, so one fast producer in a very large room costs O(N) queue appends per update. Batch updates within a short window if a workload shows that cost dominating.
+
+### Server.Close leaves live connections open
+
+- **Where:** `server/server.go` `(*Server).Close`.
+- **What:** `Close` flushes every document, evicts the idle ones and closes the Backplane, but does not close connections that are still open; they keep editing in memory, and their updates still go to the Store if it is open. `http.Server.Shutdown` does not close them either, because WebSocket connections are hijacked. yserve exits after `Close`, which ends them.
+- **When to address:** when an adopter closes a server inside a process that keeps running. Closing them (1001, going away) changes what `Close` does to live clients, so it needs its own release note.
 
 ### Persistence: every SyncUpdate is stored as a separate row
 
