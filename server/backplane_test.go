@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Deln0r/ygo/internal/encoding"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
@@ -339,7 +340,8 @@ func TestServer_Backplane_BuffersUpdateDuringLoad(t *testing.T) {
 
 	wsA, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: hub.Conn()})
 	gate := newGateStore()
-	wsB, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: hub.Conn(), Store: gate})
+	spyB := &handlerSpy{Backplane: hub.Conn(), handled: make(chan struct{}, 16)}
+	wsB, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}, Backplane: spyB, Store: gate})
 
 	const docName = "shared"
 	a := dialClient(t, wsA, docName, 100)
@@ -351,20 +353,27 @@ func TestServer_Backplane_BuffersUpdateDuringLoad(t *testing.T) {
 	b := dialClient(t, wsB, docName, 200)
 	defer b.close()
 	<-gate.entered // B is subscribed and now blocked loading
+	// A failing check below must still let B's load end, or the servers'
+	// cleanup waits for it forever.
+	releaseLoad := sync.OnceFunc(func() { close(gate.release) })
+	defer releaseLoad()
 
-	// A edits while B is mid-load; B's live subscription buffers it.
+	// A edits while B is mid-load; B's live subscription buffers it. The
+	// spy on B's backplane reports B's subscription handler returning for
+	// the edit while B is still inside its load (A's self-echo proves
+	// nothing about that: it is queued before A publishes). A reverted
+	// load-then-subscribe B would have no subscription yet, the handler
+	// would never run, and this wait would fail: the buffer path stays a
+	// revert guard.
 	pushEdit(t, a, "from-A")
-	// A's self-echo is broadcast in the same goroutine that then Publishes to
-	// the backplane (onAppliedUpdate runs right after the fan-out), so
-	// receiving it means the edit reached the hub while B is still inside its
-	// load. A reverted load-then-subscribe B would have no subscription yet
-	// and drop the edit here, so this makes the buffer path a revert guard.
-	a.readUntil(t, func(f *syncpkg.Frame) bool {
-		return f.Type == syncpkg.MessageSync && f.SyncSub == syncpkg.SyncUpdate
-	})
+	select {
+	case <-spyB.handled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("B's subscription never handled A's edit while B was loading")
+	}
 
 	// Release B's load; the buffered edit drains into B's doc.
-	close(gate.release)
+	releaseLoad()
 
 	// B's client must observe the edit, via its initial sync or a follow-up
 	// SyncUpdate depending on buffer-vs-live timing.

@@ -429,21 +429,26 @@ func TestServer_HocusAuth_DeniesAndCloses4401(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Read both PermissionDenied + Close frames, then expect a WS
-	// close error with 4401 status on the next Read.
-	for i := 0; i < 4; i++ { // drain up to 4 envelopes
-		_, raw, err := wsConn.Read(ctx)
-		if err != nil {
-			// Close arrived — verify status.
-			closeErr := websocket.CloseStatus(err)
-			if closeErr != syncpkg.CloseStatusUnauthorized {
-				t.Errorf("WS close status = %d, want %d", closeErr, syncpkg.CloseStatusUnauthorized)
-			}
-			return
-		}
-		_ = raw // could decode and inspect, but we only care about the close code
+	// The client must get AuthPermissionDenied, then the Close envelope,
+	// then the WS close with 4401, in that order and nothing between.
+	_, raw, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("first message after the bad token: %v, want AuthPermissionDenied", err)
 	}
-	t.Error("read loop never closed; expected 4401 close after deny")
+	if f, _, err := syncpkg.DecodeEnvelope(raw); err != nil || f.Type != syncpkg.MessageAuth || f.AuthSub != syncpkg.AuthPermissionDenied {
+		t.Fatalf("first message after the bad token = %+v (%v), want AuthPermissionDenied", f, err)
+	}
+	_, raw, err = wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("second message after the bad token: %v, want the Close envelope", err)
+	}
+	if f, _, err := syncpkg.DecodeEnvelope(raw); err != nil || f.Type != syncpkg.MessageClose {
+		t.Fatalf("second message after the bad token = %+v (%v), want the Close envelope", f, err)
+	}
+	_, _, err = wsConn.Read(ctx)
+	if code := websocket.CloseStatus(err); code != syncpkg.CloseStatusUnauthorized {
+		t.Fatalf("after the Close envelope: %v (status %d), want the WS close %d", err, code, syncpkg.CloseStatusUnauthorized)
+	}
 }
 
 func TestServer_HocusAuth_AcceptsAndProceeds(t *testing.T) {

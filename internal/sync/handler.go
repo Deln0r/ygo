@@ -11,9 +11,9 @@ import (
 )
 
 // Sender writes one outer-envelope frame back to a single
-// connection. The transport layer implements this — for WebSocket
-// it serializes via the conn's write mutex; for in-memory tests it
-// appends to a slice.
+// connection. The transport layer implements this — the WebSocket
+// server queues it for the connection's writer and returns once it is
+// written; for in-memory tests it appends to a slice.
 type Sender func(envelope []byte) error
 
 // Broadcaster fans one outer-envelope frame to every connection on

@@ -27,6 +27,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -128,7 +130,8 @@ type Options struct {
 	ReadOnly func(docName string, r *http.Request) bool
 
 	// OnChange, when set, is called after a document update is applied
-	// and broadcast, with the docName and the V1 update bytes that were
+	// and queued to every connection of the room (it does not wait for them
+	// to receive it), with the docName and the V1 update bytes that were
 	// applied. Use it for side effects on edits (search indexing,
 	// webhooks, audit, external persistence). It fires for every accepted
 	// document mutation whether or not a Store is configured, and NOT for
@@ -230,13 +233,51 @@ type Options struct {
 	// 128 MiB). Set to -1 for unlimited.
 	ReadLimit int64
 
-	// WriteTimeout bounds a single broadcast/fan-out write to one peer.
-	// Without it a slow or half-open consumer (full TCP send buffer, no
-	// FIN) blocks the write forever, freezing the originating read loop
-	// and the global awareness sweep for every other document. On
-	// timeout the offending peer is closed and dropped. Zero selects a
-	// safe default (10s).
+	// WriteTimeout bounds one write to one peer, done by that connection's
+	// own writer goroutine: a peer that has stopped reading (full TCP send
+	// buffer, half-open) is closed once a write to it has waited this long,
+	// and nobody else waits meanwhile. It also bounds how long a message may
+	// wait in a connection's send queue before the writer takes it: one that
+	// has waited longer means the client has fallen behind its room, and the
+	// connection is closed with websocket.StatusTryAgainLater (1013, reason
+	// "send queue stalled") so the client reconnects and resyncs. Zero
+	// selects a safe default (10s).
 	WriteTimeout time.Duration
+
+	// MaxSendQueue bounds the messages queued to one connection on behalf of
+	// its room (updates, presence and stateless broadcasts from other
+	// connections, sweep and disconnect tombstones, backplane re-broadcasts)
+	// that its writer has not yet taken. Every connection has its own queue
+	// and writer goroutine, so a slow or stuck client never delays the
+	// others; one whose queue already holds this many messages when another
+	// arrives has fallen behind and is closed: with
+	// websocket.StatusTryAgainLater (1013, reason "send queue full") once the
+	// message being written to it completes, or, if it does not read at all,
+	// by that write's WriteTimeout, which drops the connection without a close
+	// code. Its queued messages are dropped: a reconnecting client resyncs the document
+	// and presence through the ordinary handshake, but stateless messages it
+	// missed are not resent. The connection's own replies (the initial sync,
+	// SyncStep2, auth and ping replies) are not counted: its read loop waits
+	// for each to be written, so it has at most one queued. Zero selects a
+	// safe default (4096); a negative value disables the bound. Stats reports
+	// the queued messages per document and SlowClientsClosed.
+	MaxSendQueue int
+
+	// MaxSendQueueBytes bounds, like MaxSendQueue, the bytes of the messages
+	// queued to one connection on behalf of its room and not yet taken by
+	// its writer. It is a backlog threshold checked before each message is
+	// queued, not a message size limit: one message is never refused for its
+	// size, but a connection whose queue already holds this many bytes when
+	// another message arrives is closed as for MaxSendQueue, so a
+	// large message followed by another before the writer takes the first
+	// can trip it. Size it above the bursts a room may send, including
+	// messages relayed over the Backplane. Zero selects 16 MiB, or four times
+	// ReadLimit when that is larger; a negative value disables the bound. Per
+	// connection the queue holds at most this plus one message beyond it,
+	// besides the message being written and one reply: these are
+	// per-connection limits, not a server memory bound (size the server with
+	// MaxConns and MaxConnsPerDoc).
+	MaxSendQueueBytes int64
 
 	// MaxConnsPerDoc bounds the number of simultaneous WebSocket
 	// connections to a single document, capping the goroutines and
@@ -358,17 +399,25 @@ type Options struct {
 	//
 	// BACKPRESSURE. Publish delivers to each peer instance in order and
 	// never drops an update (dropping a delta would diverge a peer). A peer
-	// whose local fan-out stalls (a slow or half-open client, bounded by
-	// WriteTimeout) therefore applies backpressure to the publishing
-	// client's edit throughput until it drains; this is bounded and
-	// self-healing (the stalled client is closed on WriteTimeout) but couples
-	// edit latency across instances under a wedged consumer.
+	// instance re-broadcasts a foreign update by queuing it to its local
+	// connections, which never waits for their sockets, so a slow or stuck
+	// client on one instance does not hold back the publishing client's
+	// edits on another; that client is closed when it falls behind its own
+	// queue (see MaxSendQueue and WriteTimeout). A backplane whose delivery
+	// itself stalls still applies backpressure to the publishing client.
 	Backplane backplane.Backplane
 }
 
-// defaultWriteTimeout bounds a per-peer broadcast write when
-// Options.WriteTimeout is unset.
+// defaultWriteTimeout bounds a per-peer write, and how long a message may
+// wait in a send queue, when Options.WriteTimeout is unset.
 const defaultWriteTimeout = 10 * time.Second
+
+// Default send-queue bounds, applied to the zero value of
+// Options.MaxSendQueue and Options.MaxSendQueueBytes.
+const (
+	defaultMaxSendQueue      = 4096
+	defaultMaxSendQueueBytes = 16 << 20
+)
 
 // Server is the http.Handler implementation. Construct with New
 // and mount via Handler(). Safe for concurrent use.
@@ -388,6 +437,14 @@ type Server struct {
 	// check and cannot overshoot) and dropped in releaseConn; an atomic so
 	// the decrement, which runs outside docsMu, is safe.
 	totalConns atomic.Int64
+
+	// slowClientsClosed counts connections chosen for closing because they
+	// fell behind their send queue (Stats.SlowClientsClosed).
+	slowClientsClosed atomic.Int64
+
+	// closeLimit bounds every close the server starts
+	// (defaultCloseHandshakeLimit; tests shorten it).
+	closeLimit time.Duration
 
 	// Auto-versioning state (see versioning.go). versionDirty holds
 	// the docNames updated since the last sweep; the stop/done pair
@@ -476,8 +533,9 @@ func New(opts Options) *Server {
 	}
 	opts.MaxForeignAwarenessClients = resolveForeignAwarenessCap(opts.MaxAwarenessClients, opts.MaxForeignAwarenessClients)
 	s := &Server{
-		opts: opts,
-		docs: map[string]*docState{},
+		opts:       opts,
+		docs:       map[string]*docState{},
+		closeLimit: defaultCloseHandshakeLimit,
 	}
 	s.startVersioning()
 	s.startAwarenessSweep()
@@ -511,6 +569,13 @@ type Stats struct {
 	// Connections is the sum of their Connections. Ranging over it lets an
 	// adopter surface hot rooms without its own accounting.
 	Docs []DocStat
+	// SlowClientsClosed counts the connections the server chose to close
+	// for falling behind their room since it started: a send queue at
+	// Options.MaxSendQueue or MaxSendQueueBytes, or a queued message older
+	// than Options.WriteTimeout. Each is counted once, when chosen; one that
+	// does not read at all may end through its write deadline instead of
+	// the 1013 close.
+	SlowClientsClosed int64
 }
 
 // DocStat is the per-document line of a Stats snapshot.
@@ -519,6 +584,11 @@ type DocStat struct {
 	Name string
 	// Connections is the number of live WebSocket connections on it.
 	Connections int
+	// QueuedMessages and QueuedBytes sum what is queued on the document's
+	// connections and not yet taken by their writers, replies included. A
+	// value that stays high points at a client that cannot keep up.
+	QueuedMessages int
+	QueuedBytes    int64
 }
 
 // Stats returns a point-in-time snapshot of resident documents and live
@@ -532,16 +602,26 @@ type DocStat struct {
 func (s *Server) Stats() Stats {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
-	st := Stats{Documents: len(s.docs), Docs: make([]DocStat, 0, len(s.docs))}
+	st := Stats{
+		Documents:         len(s.docs),
+		Docs:              make([]DocStat, 0, len(s.docs)),
+		SlowClientsClosed: s.slowClientsClosed.Load(),
+	}
 	for name, ds := range s.docs {
+		line := DocStat{Name: name}
 		ds.connsMu.RLock()
-		n := len(ds.conns)
+		line.Connections = len(ds.conns)
+		for c := range ds.conns {
+			n, b := c.queue.backlog() // the queue lock is a leaf under connsMu
+			line.QueuedMessages += n
+			line.QueuedBytes += b
+		}
 		ds.connsMu.RUnlock()
-		st.Connections += n
+		st.Connections += line.Connections
 		if !ds.idleSince.IsZero() {
 			st.IdleDocuments++
 		}
-		st.Docs = append(st.Docs, DocStat{Name: name, Connections: n})
+		st.Docs = append(st.Docs, line)
 	}
 	sort.Slice(st.Docs, func(i, j int) bool { return st.Docs[i].Name < st.Docs[j].Name })
 	return st
@@ -575,11 +655,13 @@ func (s *Server) Flush(ctx context.Context, docName string) error {
 	return s.opts.Store.Flush(ctx, docName)
 }
 
-// Close evicts every in-memory document, calling Flush on the
-// configured Store, and closes the configured Backplane connection.
-// Pending in-flight WS reads will fail with context cancellation;
-// callers should drain via an http.Server Shutdown rather than Close
-// in production.
+// Close flushes every resident document through the configured Store,
+// evicts the idle ones (a document with live connections stays until its
+// last connection leaves), and closes the configured Backplane connection.
+// It does not close connections that are still open: they keep working
+// until their clients leave, and http.Server.Shutdown does not close
+// them either, because WebSocket connections are hijacked from the HTTP
+// server. A process that exits after Close ends them.
 //
 // Returns the first error encountered while flushing or closing the
 // backplane, but continues past errors so partial failure leaves no
@@ -652,6 +734,40 @@ func (s *Server) maxConnsPerDoc() int {
 	}
 }
 
+// maxSendQueue resolves the per-connection fan-out message bound: zero
+// selects the default, a negative option disables it (-1).
+func (s *Server) maxSendQueue() int {
+	switch {
+	case s.opts.MaxSendQueue == 0:
+		return defaultMaxSendQueue
+	case s.opts.MaxSendQueue < 0:
+		return -1
+	default:
+		return s.opts.MaxSendQueue
+	}
+}
+
+// maxSendQueueBytes resolves the per-connection fan-out byte threshold: zero
+// selects 16 MiB, or four times a larger positive ReadLimit, so raising
+// ReadLimit raises it too; a negative option disables it (-1).
+func (s *Server) maxSendQueueBytes() int64 {
+	switch {
+	case s.opts.MaxSendQueueBytes == 0:
+		b := int64(defaultMaxSendQueueBytes)
+		if rl := s.opts.ReadLimit; rl > b/4 {
+			if rl > math.MaxInt64/4 {
+				return math.MaxInt64
+			}
+			b = 4 * rl
+		}
+		return b
+	case s.opts.MaxSendQueueBytes < 0:
+		return -1
+	default:
+		return s.opts.MaxSendQueueBytes
+	}
+}
+
 // maxConns resolves the global connection cap from options: zero or
 // negative means unlimited (returned as -1), mirroring MaxDocs, because a
 // server-wide connection count scales with deployment size. A positive
@@ -680,12 +796,19 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+	// Keep the hijacked transport, so every close the server starts can be
+	// bounded (see defaultCloseHandshakeLimit).
+	aw, rec := recordHijack(w)
+	wsConn, err := websocket.Accept(aw, r, &websocket.AcceptOptions{
 		OriginPatterns: s.opts.OriginPatterns,
 	})
 	if err != nil {
 		// websocket.Accept already wrote a response.
 		return
+	}
+	var raw net.Conn
+	if rec != nil {
+		raw = rec.conn
 	}
 	if s.opts.ReadLimit != 0 {
 		wsConn.SetReadLimit(s.opts.ReadLimit)
@@ -697,16 +820,16 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			// Server is at its document cap. Signal transient capacity so
 			// a client can back off and retry, distinct from the per-doc
 			// connection cap's policy-violation close.
-			_ = wsConn.Close(websocket.StatusTryAgainLater, "server document limit reached")
+			closeWithin(wsConn, raw, s.closeLimit, websocket.StatusTryAgainLater, "server document limit reached")
 			return
 		}
 		if errors.Is(err, errServerConnsFull) {
 			// Server is at its global connection cap. Transient capacity,
 			// same close code as the document cap; the reason distinguishes.
-			_ = wsConn.Close(websocket.StatusTryAgainLater, "server connection limit reached")
+			closeWithin(wsConn, raw, s.closeLimit, websocket.StatusTryAgainLater, "server connection limit reached")
 			return
 		}
-		_ = wsConn.Close(websocket.StatusInternalError,
+		closeWithin(wsConn, raw, s.closeLimit, websocket.StatusInternalError,
 			closeReason(fmt.Sprintf("load doc: %v", err)))
 		return
 	}
@@ -716,14 +839,19 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		// always >= 1 (or negative = unlimited), so a rejection means
 		// the room already holds a live connection and its docState is
 		// never orphaned on this path.
-		_ = wsConn.Close(websocket.StatusPolicyViolation, "document connection limit reached")
+		closeWithin(wsConn, raw, s.closeLimit, websocket.StatusPolicyViolation, "document connection limit reached")
 		return
 	}
+	c.raw = raw
+	// The connection is in its room from here on, so broadcasts may already
+	// queue to it; its writer drains them. releaseConn stops and joins it.
+	c.startWriter()
 	// Tear down on exit no matter what, including a panic inside the
 	// adopter's OnConnect: register the cleanup defer BEFORE calling
 	// OnConnect so releaseConn always runs and the room slot can never
 	// leak. OnDisconnect fires only for a connection OnConnect accepted
-	// (or any admitted connection when OnConnect is nil).
+	// (or any admitted connection when OnConnect is nil), after the
+	// connection's writer has exited and its socket is closed.
 	accepted := s.opts.OnConnect == nil
 	defer func() {
 		s.releaseConn(r.Context(), state, c)
@@ -737,7 +865,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		// panic) tears the connection back down via the defer above
 		// without firing OnDisconnect.
 		if err := s.opts.OnConnect(c.idForLog, docName, r); err != nil {
-			_ = wsConn.Close(websocket.StatusPolicyViolation, "connection rejected")
+			c.closeFromServer(websocket.StatusPolicyViolation, "connection rejected")
 			return
 		}
 		accepted = true
@@ -991,12 +1119,22 @@ func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Co
 // the sync handler's Disconnect (which tombstones controlled
 // awareness clients), and — when the connection set hits zero —
 // evicts the docState from the registry, optionally flushing to
-// Store.
+// Store. Last, outside every lock, it waits for the connection's writer
+// and closes its socket, so every released connection ends with its
+// transport closed.
 func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	state.connsMu.Lock()
 	delete(state.conns, c)
 	remaining := len(state.conns)
 	state.connsMu.Unlock()
+
+	// Stop the queue now: its backlog is dropped and a waiting reply fails.
+	// A cause chosen earlier (an overflow the writer is about to close with
+	// 1013, say) is kept; its owner still closes.
+	if c.queue != nil {
+		c.queue.terminate(causeReleased)
+	}
+	defer c.finishTransport()
 
 	// Drop the global connection count. releaseConn runs exactly once per
 	// admitted connection (serveWS defers it only past a successful
@@ -1120,13 +1258,15 @@ func (s *docState) snapshotConns() []*conn {
 }
 
 // conn is the per-WebSocket connection wrapper that owns the
-// sync.Conn state machine and the websocket.Conn write mutex.
+// sync.Conn state machine and the connection's send queue, which its
+// writer goroutine drains (see sendQueue).
 type conn struct {
 	server   *Server
 	state    *docState
 	ws       *websocket.Conn
+	raw      net.Conn // the hijacked transport under ws; nil when unknown
 	handler  *syncpkg.Conn
-	writeMu  sync.Mutex
+	queue    *sendQueue
 	idForLog string
 }
 
@@ -1141,10 +1281,11 @@ func (s *Server) newConn(state *docState, ws *websocket.Conn) *conn {
 		server:   s,
 		state:    state,
 		ws:       ws,
+		queue:    newSendQueue(s.maxSendQueue(), s.maxSendQueueBytes(), s.writeTimeout()),
 		idForLog: id,
 	}
 	h := syncpkg.New(state.doc, state.awareness, id)
-	h.Send = c.send
+	h.Send = c.reply
 	h.Broadcast = c.broadcast
 	h.DocName = state.name
 	h.OnAuthenticate = s.opts.OnAuthenticate
@@ -1153,43 +1294,147 @@ func (s *Server) newConn(state *docState, ws *websocket.Conn) *conn {
 	return c
 }
 
-// send writes one envelope to the underlying WS under a bounded
-// deadline. The writeMu serializes concurrent writes (a broadcast on a
-// peer's goroutine can race with a Send on this conn's read goroutine).
-//
-// A slow or half-open peer would otherwise block the write forever and
-// back-pressure the whole fan-out (and the global sweep). On timeout we
-// close the peer so its read loop unblocks and releaseConn evicts it,
-// and subsequent broadcasts skip it.
-func (c *conn) send(envelope []byte) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), c.writeTimeout())
-	defer cancel()
-	if err := c.ws.Write(ctx, websocket.MessageBinary, envelope); err != nil {
-		_ = c.ws.Close(websocket.StatusPolicyViolation, "write timeout")
+// reply is the sync handler's Send: it queues an envelope from the
+// connection's own goroutine (the initial sync, and the replies HandleFrame
+// makes) and returns once the writer has written it, or with the error that
+// stopped the connection. The read loop therefore reads no further frame
+// until its reply is out, as when it wrote the reply itself, and a client
+// that floods requests without reading stalls only its own read loop.
+func (c *conn) reply(envelope []byte) error {
+	if c.queue.done == nil {
+		return errConnClosing // no writer (a connection built in a white-box test)
+	}
+	result, err := c.queue.pushReply(envelope)
+	if err != nil {
 		return err
 	}
-	return nil
+	return <-result
+}
+
+// enqueue queues fan-out to this connection and returns at once. When the
+// connection has fallen behind its bound, the append stops its queue
+// instead and the writer closes it with 1013; the overflow is counted once.
+func (c *conn) enqueue(envelope []byte) {
+	if c.queue.pushFanout(envelope) && c.server != nil {
+		c.server.slowClientsClosed.Add(1)
+	}
+}
+
+// startWriter starts the goroutine that drains the connection's queue. Call
+// it once, from the connection's serve goroutine, which later joins it in
+// releaseConn.
+func (c *conn) startWriter() {
+	c.queue.done = make(chan struct{})
+	go c.writeLoop()
+}
+
+// writeLoop writes the queued envelopes in order, each under WriteTimeout,
+// until the queue stops. It then closes the socket when the terminal cause
+// is its own to close (see closeCause); other causes are closed by whoever
+// set them, or by releaseConn.
+func (c *conn) writeLoop() {
+	defer close(c.queue.done)
+	timeout := c.writeTimeout()
+	for {
+		it, cause := c.queue.take()
+		if cause != causeNone {
+			c.closeForCause(cause)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		err := c.ws.Write(ctx, websocket.MessageBinary, it.env)
+		cancel()
+		if err != nil {
+			// The cause goes in before the reply's caller learns of the
+			// error, so the read loop it wakes cannot choose its own close.
+			c.queue.terminate(causeWriteFailed) // kept if another cause came first
+		}
+		if it.result != nil {
+			it.result <- err // one slot, never full
+		}
+		if err != nil {
+			c.closeForCause(c.queue.terminalCause())
+			return
+		}
+	}
+}
+
+// closeForCause sends the close the writer owns for cause. A write deadline
+// has usually closed the transport already, so a client that does not read
+// sees an abnormal close rather than the code.
+func (c *conn) closeForCause(cause closeCause) {
+	switch cause {
+	case causeQueueFull:
+		c.closeWS(websocket.StatusTryAgainLater, "send queue full")
+	case causeQueueStalled:
+		if c.server != nil {
+			c.server.slowClientsClosed.Add(1) // only the writer sets this cause, and it exits after
+		}
+		c.closeWS(websocket.StatusTryAgainLater, "send queue stalled")
+	case causeWriteFailed:
+		c.closeWS(websocket.StatusPolicyViolation, "write timeout")
+	}
+}
+
+// closeWS closes the socket with code and reason, cutting the transport if
+// the close handshake takes longer than the server's limit.
+func (c *conn) closeWS(code websocket.StatusCode, reason string) {
+	limit := defaultCloseHandshakeLimit
+	if c.server != nil {
+		limit = c.server.closeLimit
+	}
+	closeWithin(c.ws, c.raw, limit, code, reason)
+}
+
+// closeFromServer closes the connection with code and reason, unless its
+// queue has already chosen a terminal cause: then that cause's owner closes
+// and this call only stops. It drops what is still queued; every reply the
+// caller sent has been written already, because replies wait.
+func (c *conn) closeFromServer(code websocket.StatusCode, reason string) {
+	if c.queue.terminate(causeServerClose) {
+		c.closeWS(code, reason)
+	}
+}
+
+// finishTransport waits for the writer to exit, then closes the socket
+// without a handshake when no one has closed it yet (an OnConnect panic, or
+// a read error coder/websocket does not close on). Called by releaseConn,
+// outside every lock.
+func (c *conn) finishTransport() {
+	if c.queue != nil && c.queue.done != nil {
+		<-c.queue.done
+	}
+	if c.ws != nil {
+		_ = c.ws.CloseNow()
+	}
 }
 
 // writeTimeout resolves the per-write deadline from the server options,
 // falling back to defaultWriteTimeout.
 func (c *conn) writeTimeout() time.Duration {
-	if c.server != nil && c.server.opts.WriteTimeout > 0 {
-		return c.server.opts.WriteTimeout
+	if c.server != nil {
+		return c.server.writeTimeout()
+	}
+	return defaultWriteTimeout
+}
+
+// writeTimeout resolves Options.WriteTimeout, falling back to
+// defaultWriteTimeout.
+func (s *Server) writeTimeout() time.Duration {
+	if s.opts.WriteTimeout > 0 {
+		return s.opts.WriteTimeout
 	}
 	return defaultWriteTimeout
 }
 
 // broadcast fans an envelope to every connection on the same doc.
 // Self-included per port-note gotcha 6 — V1 updates are idempotent
-// so receivers tolerate the echo. Failures on individual peers are
-// logged-and-skipped; we do NOT propagate them back to the
-// originator.
+// so receivers tolerate the echo. It only queues: no peer's socket, the
+// originator's included, is waited for, and a peer that has fallen behind
+// is closed by its own writer.
 func (c *conn) broadcast(envelope []byte) {
 	for _, peer := range c.state.snapshotConns() {
-		_ = peer.send(envelope)
+		peer.enqueue(envelope)
 	}
 	// Persist and notify on applied document updates. We dispatch here
 	// rather than inside the sync handler so the persistence and
@@ -1221,7 +1466,7 @@ func (s *docState) broadcastAwarenessRemovals(ids []uint64) {
 func (s *docState) broadcastAwarenessWire(wire []byte) {
 	envelope := syncpkg.EncodeAwareness(wire)
 	for _, peer := range s.snapshotConns() {
-		_ = peer.send(envelope)
+		peer.enqueue(envelope)
 	}
 }
 
@@ -1279,7 +1524,7 @@ func (s *Server) applyBackplaneDoc(state *docState, update []byte) {
 	}
 	envelope := syncpkg.EncodeSyncUpdate(update)
 	for _, peer := range state.snapshotConns() {
-		_ = peer.send(envelope)
+		peer.enqueue(envelope)
 	}
 }
 
@@ -1313,7 +1558,7 @@ func (s *Server) applyBackplaneAwareness(state *docState, awUpdate []byte) {
 	}
 	envelope := syncpkg.EncodeAwareness(state.awareness.Encode(accepted))
 	for _, peer := range state.snapshotConns() {
-		_ = peer.send(envelope)
+		peer.enqueue(envelope)
 	}
 }
 
@@ -1455,25 +1700,27 @@ func (c *conn) readLoop(ctx context.Context) {
 		frame, _, err := syncpkg.DecodeEnvelope(raw)
 		if err != nil {
 			// Malformed frame — close with a protocol-error reason.
-			_ = c.ws.Close(websocket.StatusProtocolError,
+			c.closeFromServer(websocket.StatusProtocolError,
 				closeReason(fmt.Sprintf("decode envelope: %v", err)))
 			return
 		}
 		if err := c.handler.HandleFrame(frame); err != nil {
 			// Application-layer errors (apply failure, encode
 			// failure) close the connection — the doc state is
-			// preserved for the next reconnect.
-			_ = c.ws.Close(websocket.StatusInternalError,
+			// preserved for the next reconnect. A reply that failed
+			// because the queue stopped leaves the close to the
+			// queue's cause (closeFromServer does not override it).
+			c.closeFromServer(websocket.StatusInternalError,
 				closeReason(fmt.Sprintf("handle frame: %v", err)))
 			return
 		}
 		// Hocuspocus auth: the handler sets AuthFailed when it has
-		// sent AuthPermissionDenied + Close envelopes; the
-		// transport tears down with the reserved 4401 code so
-		// Hocuspocus clients see "unauthorized" rather than a
-		// generic disconnect.
+		// sent AuthPermissionDenied + Close envelopes (written by now:
+		// replies wait); the transport tears down with the reserved
+		// 4401 code so Hocuspocus clients see "unauthorized" rather
+		// than a generic disconnect.
 		if c.handler.AuthFailed {
-			_ = c.ws.Close(syncpkg.CloseStatusUnauthorized, "unauthorized")
+			c.closeFromServer(syncpkg.CloseStatusUnauthorized, "unauthorized")
 			return
 		}
 	}

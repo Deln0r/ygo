@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestAdmitConn_RegistersAtomically pins admitConn's core invariant: an
@@ -72,5 +74,32 @@ func TestAdmitConn_RejectsAtCap(t *testing.T) {
 	state.connsMu.RUnlock()
 	if n != 1 {
 		t.Fatalf("conn set after rejected admission = %d, want 1", n)
+	}
+}
+
+// releaseConn returns only after the connection's writer has exited, so
+// OnDisconnect, which serveWS calls after it, never runs beside a writer that
+// is still closing the socket.
+func TestReleaseConn_WaitsForWriter(t *testing.T) {
+	s := New(Options{})
+	defer func() { _ = s.Close(context.Background()) }()
+	c, state, ok, err := s.admitConn(context.Background(), "room", nil)
+	if !ok || err != nil {
+		t.Fatalf("admitConn: ok=%v err=%v", ok, err)
+	}
+	// Stand in for a writer that takes a while to finish its close.
+	c.queue.done = make(chan struct{})
+	var exited atomic.Bool
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		exited.Store(true)
+		close(c.queue.done)
+	}()
+	s.releaseConn(context.Background(), state, c)
+	if !exited.Load() {
+		t.Fatal("releaseConn returned before the connection's writer exited")
+	}
+	if got := c.queue.terminalCause(); got != causeReleased {
+		t.Fatalf("queue cause after release = %d, want causeReleased", got)
 	}
 }
