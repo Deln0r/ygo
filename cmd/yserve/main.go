@@ -63,6 +63,9 @@ func main() {
 	maxConnsPerDoc := flag.Int("max-conns-per-doc", 0, "cap simultaneous WebSocket connections per document (0 = 4096 default; -1 = unlimited)")
 	maxDocs := flag.Int("max-docs", 0, "cap distinct documents held in memory at once (0 = unlimited; guards against many fabricated docNames)")
 	maxConns := flag.Int("max-conns", 0, "cap total simultaneous WebSocket connections across all documents (0 = unlimited)")
+	writeTimeout := flag.Duration("write-timeout", 0, "close a client a write to it has waited this long, or whose queued message has (0 = 10s default)")
+	maxSendQueue := flag.Int("max-send-queue", 0, "close a client with this many room messages queued to it (0 = 4096 default; -1 = unlimited)")
+	maxSendQueueBytes := flag.Int64("max-send-queue-bytes", 0, "close a client with this many bytes of room messages queued to it (0 = 16 MiB or 4x read-limit; -1 = unlimited)")
 	flag.Parse()
 
 	var store persist.Store
@@ -95,6 +98,9 @@ func main() {
 		MaxConnsPerDoc:      *maxConnsPerDoc,
 		MaxDocs:             *maxDocs,
 		MaxConns:            *maxConns,
+		WriteTimeout:        *writeTimeout,
+		MaxSendQueue:        *maxSendQueue,
+		MaxSendQueueBytes:   *maxSendQueueBytes,
 	})
 
 	httpSrv := &http.Server{
