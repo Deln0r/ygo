@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.28.0] - 2026-10-20
 
 **Upgrade impact** - A client that falls behind its room is now closed, with
 WebSocket code 1013 (try again later) if it still reads, and resyncs when it
@@ -1840,6 +1840,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.28.0]: https://github.com/Deln0r/ygo/releases/tag/v1.28.0
 [1.27.0]: https://github.com/Deln0r/ygo/releases/tag/v1.27.0
 [1.26.0]: https://github.com/Deln0r/ygo/releases/tag/v1.26.0
 [1.25.0]: https://github.com/Deln0r/ygo/releases/tag/v1.25.0
