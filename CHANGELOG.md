@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.27.0] - 2026-10-20
 
 **Upgrade impact** - A string with invalid UTF-8 given to the API is stored
 with U+FFFD for each invalid byte: text, map keys and values, array values,
@@ -62,7 +62,9 @@ as; two such values with the same JSON compare equal.
 - Reverse fixtures for documents built from strings with invalid UTF-8 (text,
   a root name, a format key and value, embeds including `json.RawMessage`,
   map keys and values, array values, XML names), validated by yjs in V1 and
-  V2: 60 to 74, README totals 273 to 287.
+  V2: 60 to 74, README totals 273 to 287. The generator records the fixed
+  names and keys, so the fixtures come out the same under every Go release
+  (`encoding/json` writes an invalid byte differently in Go 1.26 and 1.27).
 
 ## [1.26.0] - 2026-10-19
 
@@ -1762,6 +1764,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.27.0]: https://github.com/Deln0r/ygo/releases/tag/v1.27.0
 [1.26.0]: https://github.com/Deln0r/ygo/releases/tag/v1.26.0
 [1.25.0]: https://github.com/Deln0r/ygo/releases/tag/v1.25.0
 [1.24.0]: https://github.com/Deln0r/ygo/releases/tag/v1.24.0

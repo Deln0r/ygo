@@ -37,4 +37,4 @@ package ygo
 // Version is the ygo release this source tree corresponds to. It is set as
 // part of the release ceremony, so a checkout of main between releases carries
 // the last released value.
-const Version = "1.26.0"
+const Version = "1.27.0"
