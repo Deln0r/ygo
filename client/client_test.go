@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Deln0r/ygo/client"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/encoding"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/server"
 )
@@ -187,5 +189,61 @@ func TestClient_SyncedCallback(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("OnSynced never fired")
+	}
+}
+
+// After a remote update, a local edit sends only this client's own change.
+// The remote content came from the server, which has it; it used to go back
+// with the next local edit, so in a room with several writers every message
+// also carried the others' changes since the sender's last send, and large
+// ones went past the server's ReadLimit.
+func TestClient_LocalEditCarriesOnlyOwnChanges(t *testing.T) {
+	var mu sync.Mutex
+	var updates [][]byte // every update a client sent, as the server applied it
+	srv := server.New(server.Options{
+		OriginPatterns: []string{"*"},
+		OnChange: func(_ string, update []byte) {
+			mu.Lock()
+			updates = append(updates, append([]byte(nil), update...))
+			mu.Unlock()
+		},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = srv.Close(context.Background())
+	})
+	// sentBy returns the first update the server applied that carries an
+	// item of client cid, or nil. OnChange runs after the update is queued
+	// to the room, so a peer can see an edit before its callback has run.
+	sentBy := func(cid uint64) []byte {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, u := range updates {
+			if dec, _, err := encoding.DecodeUpdate(u); err == nil && len(dec.Blocks[cid]) > 0 {
+				return u
+			}
+		}
+		return nil
+	}
+	url := "ws://" + strings.TrimPrefix(ts.URL, "http://")
+	a := dial(t, url, "room", 51)
+	b := dial(t, url, "room", 52)
+	waitFor(t, "a synced", a.Synced)
+	waitFor(t, "b synced", b.Synced)
+
+	am, bm := mapOf(a), mapOf(b) // before any transaction: Branch takes the doc lock
+	big := strings.Repeat("x", 20000)
+	txn := a.Doc().WriteTxn()
+	am.Set(txn, "big", big)
+	txn.Commit()
+	waitFor(t, "b sees big", func() bool { return getKey(b, "big") == big })
+
+	txn = b.Doc().WriteTxn()
+	bm.Set(txn, "small", "y")
+	txn.Commit()
+	waitFor(t, "the server applies B's edit", func() bool { return sentBy(52) != nil })
+	if n := len(sentBy(52)); n > 1000 {
+		t.Fatalf("B's one small edit went out as a %d-byte update: it carried A's change back", n)
 	}
 }

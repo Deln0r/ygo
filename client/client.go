@@ -436,9 +436,7 @@ func (c *Client) handleSync(frame *syncpkg.Frame) error {
 		if err := c.write(syncpkg.EncodeSyncStep2(diff)); err != nil {
 			return err
 		}
-		c.mu.Lock()
-		c.lastSent = localSV
-		c.mu.Unlock()
+		c.raiseLastSent(localSV)
 		return nil
 	case syncpkg.SyncStep2, syncpkg.SyncUpdate:
 		if len(frame.Payload) == 0 {
@@ -456,16 +454,77 @@ func (c *Client) handleSync(frame *syncpkg.Frame) error {
 }
 
 // apply integrates a remote update, tagging the transaction with this
-// client as Origin so the local-edit observer skips it.
+// client as Origin so the local-edit observer skips it. What the update
+// brought came from the server, so lastSent rises over it for every client
+// but this one: the next local edit's diff then carries this client's own
+// changes, not the server's own back to it. Only the update's gapless
+// continuation of lastSent counts (serverCoverage); content this client got
+// from elsewhere and the server may lack still goes out. lastSent rises
+// before the update enters the document: writePump reads lastSent inside
+// its read transaction, so a diff that sees the update sees the raise too.
 func (c *Client) apply(payload []byte) error {
 	upd, _, err := encoding.DecodeUpdate(payload)
 	if err != nil {
 		return fmt.Errorf("client: update decode: %w", err)
 	}
+	c.mu.Lock()
+	since := c.lastSent
+	c.mu.Unlock()
+	c.raiseLastSent(serverCoverage(upd, since, c.doc.ClientID()))
 	txn := c.doc.WriteTxn()
 	txn.Origin = c
 	defer txn.Commit()
 	return upd.Apply(txn)
+}
+
+// serverCoverage returns, for every client in u but self, the clock up to
+// which u continues from since[client] without a gap. The server that sent
+// u has every clock of that client below it, as it had every clock below
+// since. A skipped range, or a first block past since, ends the coverage.
+func serverCoverage(u *encoding.Update, since store.StateVector, self uint64) store.StateVector {
+	out := store.StateVector{}
+	for cid, blocks := range u.Blocks { // each client's blocks are clock-ascending
+		if cid == self {
+			continue
+		}
+		cur := since[cid]
+		for _, b := range blocks {
+			var clock, length uint64
+			switch b.Kind {
+			case encoding.WireBlockItem:
+				clock, length = b.Item.ID.Clock, b.Item.Len
+			case encoding.WireBlockGC:
+				clock, length = b.ID.Clock, b.Len
+			default: // a skip: the update leaves this range out
+				clock = cur + 1
+			}
+			if clock > cur {
+				break
+			}
+			if end := clock + length; end > cur {
+				cur = end
+			}
+		}
+		if cur > since[cid] {
+			out[cid] = cur
+		}
+	}
+	return out
+}
+
+// raiseLastSent raises lastSent to sv, entry by entry; an entry never
+// goes down. It installs a new map rather than changing the old one, so a
+// diff computed from an earlier lastSent outside c.mu is not raced.
+func (c *Client) raiseLastSent(sv store.StateVector) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	next := cloneSV(c.lastSent)
+	for cid, clock := range sv {
+		if clock > next[cid] {
+			next[cid] = clock
+		}
+	}
+	c.lastSent = next
 }
 
 // writePump flushes local doc and awareness changes to the server
@@ -476,19 +535,18 @@ func (c *Client) writePump(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-c.dirtyDoc:
+			// lastSent is read inside the transaction (see apply).
+			rtxn := c.doc.ReadTxn()
 			c.mu.Lock()
 			since := c.lastSent
 			c.mu.Unlock()
-			rtxn := c.doc.ReadTxn()
 			diff := encoding.EncodeDiff(c.doc, rtxn, since)
 			localSV := cloneSV(rtxn.Store().GetStateVector())
 			rtxn.Close()
 			if err := c.write(syncpkg.EncodeSyncUpdate(diff)); err != nil {
 				return err
 			}
-			c.mu.Lock()
-			c.lastSent = localSV
-			c.mu.Unlock()
+			c.raiseLastSent(localSV)
 		case <-c.dirtyAwareness:
 			c.sendAwareness()
 		}
