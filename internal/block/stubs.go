@@ -110,6 +110,14 @@ type Branch struct {
 	// Start as yjs does for a type with formatting.
 	HasFormatting bool
 
+	// FormattedText is set when a format item integrates into this
+	// branch while it is a Text or XmlText. It is yjs's _hasFormatting
+	// as the YText object holds it, which is what the format cleanup
+	// after a remote transaction asks: an untyped root collects format
+	// items without it, and yjs builds a fresh YText, flag false, when
+	// such a root is first read as text.
+	FormattedText bool
+
 	// Observers / DeepObservers hold the shared-type change-event
 	// callbacks registered on this branch (yjs _eObservers / _dEH).
 	// Stored untyped (the concrete event is built in the types layer,

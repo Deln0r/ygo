@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -246,4 +247,65 @@ func TestClient_LocalEditCarriesOnlyOwnChanges(t *testing.T) {
 	if n := len(sentBy(52)); n > 1000 {
 		t.Fatalf("B's one small edit went out as a %d-byte update: it carried A's change back", n)
 	}
+}
+
+// A client runs the format cleanup after a remote update and forwards it
+// like any local edit, as a yjs client does: B bolds offline what A bolds
+// online; when B connects, both clean up the duplicate opening marker (the
+// lower client's, 271828182:0) and the server receives that deletion.
+func TestClient_ForwardsFormatCleanup(t *testing.T) {
+	const cleanup = "0001d689cf8101010001" // yjs 13.6.33: delete 271828182:0
+	var mu sync.Mutex
+	var applied []string
+	srv := server.New(server.Options{
+		OriginPatterns: []string{"*"},
+		OnChange: func(_ string, update []byte) {
+			mu.Lock()
+			applied = append(applied, hex.EncodeToString(update))
+			mu.Unlock()
+		},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = srv.Close(context.Background())
+	})
+	url := "ws://" + strings.TrimPrefix(ts.URL, "http://")
+	a := dial(t, url, "room", 3141592653)
+	waitFor(t, "a synced", a.Synced)
+	at := types.NewText(a.Doc().Branch("t"))
+	txn := a.Doc().WriteTxn()
+	_ = at.Insert(txn, 0, "xy")
+	txn.Commit()
+
+	bdoc := doc.NewDocWithOptions(doc.Options{ClientID: 271828182})
+	bt := types.NewText(bdoc.Branch("t"))
+	if err := encoding.ApplyUpdate(bdoc, encoding.EncodeStateAsUpdate(a.Doc())); err != nil {
+		t.Fatal(err)
+	}
+	txn = bdoc.WriteTxn()
+	_ = bt.Format(txn, 0, 2, types.Attrs{"bold": true})
+	txn.Commit()
+	txn = a.Doc().WriteTxn()
+	_ = at.Format(txn, 0, 2, types.Attrs{"bold": true})
+	txn.Commit()
+
+	b, err := client.New(client.Options{URL: url, DocName: "room", Doc: bdoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	waitFor(t, "the server gets the cleanup", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, u := range applied {
+			if u == cleanup {
+				return true
+			}
+		}
+		return false
+	})
 }

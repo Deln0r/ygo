@@ -105,11 +105,12 @@ func dispatchEvents(t *doc.TransactionMut) {
 		if keys := t.ChangedKeys(br); len(keys) > 0 {
 			ev = buildMapEvent(t, br, keys)
 		} else if t.PositionalChanged(br) {
-			// Positional change: Text (tagged TypeRefText by NewText) vs
-			// Array (the default). Root branches otherwise share TypeRef
+			// Positional change: Text (tagged TypeRefText by NewText) or
+			// XmlText, whose Observe takes a TextEvent too, vs Array (the
+			// default). Root branches otherwise share TypeRef
 			// zero, so we cannot rely on it for arrays; the Text tag is the
 			// one reliable discriminator.
-			if br.TypeRef == block.TypeRefText {
+			if br.TypeRef == block.TypeRefText || br.TypeRef == block.TypeRefXmlText {
 				ev = &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br)}
 			} else {
 				ev = &ArrayEvent{Target: &Array{branch: br}, Delta: buildPositionalDelta(t, br)}

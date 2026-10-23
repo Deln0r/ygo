@@ -245,6 +245,9 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 		// yjs ContentFormat.integrate: the type has formatting from now
 		// on (_hasFormatting, and _searchMarker = null).
 		parent.HasFormatting = true
+		if parent.TypeRef == TypeRefText || parent.TypeRef == TypeRefXmlText {
+			parent.FormattedText = true
+		}
 	case KindMove, KindDoc:
 		// Defer per tech-debt.md (Move integration, subdoc
 		// registration).

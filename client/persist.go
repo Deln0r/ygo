@@ -47,6 +47,7 @@ func (c *Client) loadLocal(ctx context.Context) {
 	if len(updates) > 0 {
 		txn := c.doc.WriteTxn()
 		txn.Origin = c
+		txn.Local = false // replayed from the local store, as a yjs provider applies it
 		for _, raw := range updates {
 			upd, _, derr := encoding.DecodeStoredUpdate(raw)
 			if derr != nil {

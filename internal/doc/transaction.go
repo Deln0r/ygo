@@ -72,6 +72,14 @@ type TransactionMut struct {
 	// from updates applied via ApplyUpdate.
 	Origin any
 
+	// Local reports whether the transaction makes changes here rather
+	// than applying an update made elsewhere, as yjs transaction.local:
+	// true for WriteTxn, false for the transactions that ApplyUpdate,
+	// its V2 and origin forms, and the stored-update loaders open. It is
+	// independent of Origin. A non-local transaction that changes
+	// formatted text is followed by a format cleanup (see Commit).
+	Local bool
+
 	// deletedIDs records the head ID of every item tombstoned during this
 	// transaction via Delete. Subdocument tracking reads it; GC, the
 	// observers' deletes() predicate and the wire delete set go by
@@ -134,8 +142,16 @@ type TransactionMut struct {
 // "this will hang forever" comment).
 func (d *Doc) WriteTxn() *TransactionMut {
 	d.mu.Lock()
+	return d.newLockedTxn()
+}
+
+// newLockedTxn opens a local transaction while the caller holds the
+// write lock: WriteTxn, and the format cleanup Commit runs inside a
+// remote transaction's lock.
+func (d *Doc) newLockedTxn() *TransactionMut {
 	t := &TransactionMut{
 		doc:         d,
+		Local:       true,
 		beforeState: d.store.GetStateVector(),
 	}
 	// Work queued while no transaction ran (QueueUnderLock), such as an
@@ -166,10 +182,34 @@ func (d *Doc) WriteTxn() *TransactionMut {
 //     merge into a kept neighbour and keep its content.
 //  7. Update handlers (OnUpdate, OnUpdateV2), on the final layout.
 //  8. Subdocument handlers (OnSubdocs), as yjs emits 'subdocs' last.
+//
+// A transaction that is not Local and changed a Text or XmlText with
+// formatting is followed, as in yjs (cleanupYTextAfterTransaction), by a
+// cleanup: a local transaction with Origin nil that deletes format
+// markers the remote content made redundant. It is opened and does its
+// deletions between steps 4 and 5, where yjs runs it, while deleted
+// items still hold their content; its own lifecycle (steps 1-8, its
+// update after this transaction's) runs after step 8. Both run under
+// this one lock hold, so no other writer comes between them.
 func (t *TransactionMut) Commit() {
 	if t.closed {
 		return
 	}
+	cleanup := t.commitLocked()
+	if cleanup != nil {
+		// Work an update or subdoc handler queued (an UndoManager Clear,
+		// say) is done before the cleanup's observers, as yjs's
+		// synchronous Clear would have done it.
+		t.doc.runQueued(cleanup)
+		cleanup.commitLocked() // local: never asks for another cleanup
+	}
+	t.doc.mu.Unlock()
+}
+
+// commitLocked runs the lifecycle of Commit with the write lock held and
+// does not release it. It returns the format cleanup transaction it
+// opened, if any, whose own lifecycle the caller runs.
+func (t *TransactionMut) commitLocked() (cleanup *TransactionMut) {
 	t.closed = true
 	// Snapshot the post-mutation state vector before any handlers fire
 	// so observers see a stable afterState. Together with beforeState
@@ -202,6 +242,14 @@ func (t *TransactionMut) Commit() {
 	// UndoManager releasing what a step cleared from a handler kept, so
 	// this GC already sees it.
 	t.doc.runQueued(t)
+	// The format cleanup after a remote transaction, before GC and the
+	// merges change what was deleted and where (see Commit).
+	if !t.Local && FormatCleanupHook != nil {
+		if run := FormatCleanupHook(t); run != nil {
+			cleanup = t.doc.newLockedTxn()
+			run(cleanup)
+		}
+	}
 	// Garbage-collect deleted content (free payloads, merge deleted
 	// runs), skipping items marked keep by an observer.
 	t.gcDeleted()
@@ -215,7 +263,7 @@ func (t *TransactionMut) Commit() {
 	// and the struct merge: the bytes describe the final layout.
 	t.doc.fireUpdateHandlers(t)
 	t.doc.fireSubdocsHandlers(t)
-	t.doc.mu.Unlock()
+	return cleanup
 }
 
 // trackSubdocs records the subdocument lifecycle changes this
@@ -829,6 +877,13 @@ type changedSet struct {
 // the doc -> types direction without an import cycle (types imports
 // doc, not the reverse). nil in tests that never register an observer.
 var TypeEventHook func(t *TransactionMut)
+
+// FormatCleanupHook, when set, is asked during Commit of a transaction
+// that is not Local, after its after-transaction handlers, whether yjs
+// would clean up formatting after it, and returns the function that does
+// it in the cleanup transaction Commit then opens, or nil. The types
+// package installs it.
+var FormatCleanupHook func(remote *TransactionMut) func(cleanup *TransactionMut)
 
 // GetOrCreateBranch returns the root branch with the given name from
 // the doc's root-branch registry. Used by block.Repair to resolve

@@ -107,6 +107,7 @@ func LoadDoc(ctx context.Context, s Store, docName string, opts doc.Options) (*d
 		return d, nil
 	}
 	txn := d.WriteTxn()
+	txn.Local = false // stored updates, applied as yjs providers apply them
 	defer txn.Commit()
 	for i, raw := range updates {
 		upd, _, err := encoding.DecodeStoredUpdate(raw)

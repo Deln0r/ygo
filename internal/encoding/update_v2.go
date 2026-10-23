@@ -574,6 +574,7 @@ func ApplyUpdateV2WithOrigin(d *doc.Doc, raw []byte, origin any) error {
 	}
 	txn := d.WriteTxn()
 	txn.Origin = origin
+	txn.Local = false // an update made elsewhere, as yjs applyUpdateV2
 	defer txn.Commit()
 	return upd.Apply(txn)
 }

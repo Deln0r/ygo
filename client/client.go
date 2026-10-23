@@ -473,6 +473,7 @@ func (c *Client) apply(payload []byte) error {
 	c.raiseLastSent(serverCoverage(upd, since, c.doc.ClientID()))
 	txn := c.doc.WriteTxn()
 	txn.Origin = c
+	txn.Local = false // the server's update, as a yjs provider applies it
 	defer txn.Commit()
 	return upd.Apply(txn)
 }

@@ -2,6 +2,7 @@ package undo
 
 import (
 	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 
@@ -236,5 +237,68 @@ func TestUndo_LinearizableWithConcurrentCommit(t *testing.T) {
 	}
 	if um.Undo() {
 		t.Fatal("a third Undo found something")
+	}
+}
+
+// TestClear_FromUpdateHandlerBeforeFormatCleanup: a Clear from the update
+// handler of a remote transaction that asks for a format cleanup releases
+// what the dropped step kept before the cleanup's observers run. yjs clear
+// releases at once, inside the remote's update emit, before the cleanup's
+// lifecycle. The cleanup is then captured as a step of its own.
+func TestClear_FromUpdateHandlerBeforeFormatCleanup(t *testing.T) {
+	a := doc.NewDocWithOptions(doc.Options{ClientID: 3141592653})
+	b := doc.NewDocWithOptions(doc.Options{ClientID: 271828182})
+	ta, tb := types.NewText(a.Branch("t")), types.NewText(b.Branch("t"))
+	txn := a.WriteTxn()
+	txn.Origin = "setup"
+	ta.Insert(txn, 0, "xyz")
+	txn.Commit()
+	if err := encoding.ApplyUpdate(b, encoding.EncodeStateAsUpdate(a)); err != nil {
+		t.Fatal(err)
+	}
+	um := NewUndoManager(a, []*block.Branch{ta.Branch()})
+	txn = a.WriteTxn()
+	ta.Delete(txn, 2, 1)
+	txn.Commit()
+	var z *block.Item
+	for it := ta.Branch().Start; it != nil; it = it.Right {
+		if it.IsDeleted() {
+			z = it
+		}
+	}
+	if z == nil || !z.IsKeep() {
+		t.Fatal("the tracked delete of z kept nothing")
+	}
+	txn = a.WriteTxn()
+	txn.Origin = "setup"
+	ta.Format(txn, 0, 2, types.Attrs{"bold": true})
+	txn.Commit()
+	txn = b.WriteTxn()
+	tb.Format(txn, 0, 2, types.Attrs{"bold": true})
+	txn.Commit()
+
+	var keptAtEvent []bool
+	ta.Observe(func(*types.TextEvent) { keptAtEvent = append(keptAtEvent, z.IsKeep()) })
+	updates := 0
+	a.OnUpdate(func(_ []byte, origin any) {
+		updates++
+		if origin == "remote" {
+			um.Clear()
+		}
+	})
+	if err := encoding.ApplyUpdateWithOrigin(a, encoding.EncodeStateAsUpdate(b), "remote"); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(keptAtEvent) != "[true false]" {
+		t.Fatalf("z kept at the remote and the cleanup event: %v, want [true false]", keptAtEvent)
+	}
+	if updates != 2 {
+		t.Fatalf("%d updates, want the remote one and the cleanup", updates)
+	}
+	um.mu.Lock()
+	steps := len(um.undoStack)
+	um.mu.Unlock()
+	if steps != 1 {
+		t.Fatalf("%d steps after the Clear, want the cleanup's", steps)
 	}
 }

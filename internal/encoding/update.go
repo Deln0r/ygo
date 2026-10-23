@@ -566,6 +566,7 @@ func getOrCreatePending(txn *doc.TransactionMut) *Pending {
 //	upd, _, err := DecodeUpdate(raw)
 //	if err != nil { return err }
 //	txn := d.WriteTxn()
+//	txn.Local = false
 //	defer txn.Commit()
 //	return upd.Apply(txn)
 //
@@ -586,6 +587,7 @@ func ApplyUpdateWithOrigin(d *doc.Doc, raw []byte, origin any) error {
 	}
 	txn := d.WriteTxn()
 	txn.Origin = origin
+	txn.Local = false // an update made elsewhere, as yjs applyUpdate
 	defer txn.Commit()
 	return upd.Apply(txn)
 }
@@ -598,6 +600,7 @@ func ApplyStoredUpdate(d *doc.Doc, raw []byte) error {
 		return fmt.Errorf("ApplyUpdate decode: %w", err)
 	}
 	txn := d.WriteTxn()
+	txn.Local = false
 	defer txn.Commit()
 	return upd.Apply(txn)
 }
