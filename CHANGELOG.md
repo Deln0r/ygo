@@ -14,6 +14,75 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact** - After applying an update that changed formatted text, a
+Text or XmlText may run a second, local transaction with origin nil that
+deletes the format markers the remote content made redundant, as yjs does
+(`cleanupYTextAfterTransaction`). Update handlers get one more update right
+after the remote one, observers one more event and after-transaction
+handlers one more call (also when the cleanup deletes nothing), and an
+UndoManager tracking nil, the default, captures the change: within
+`CaptureTimeout` it merges into the last step, and it clears the redo stack.
+A text read only as an untyped root (a server's document, the temporary
+documents of `MergeUpdates` and `DiffUpdate`) runs no cleanup, as in yjs.
+XmlText observers now see the XmlText's text changes.
+
+### Fixed
+
+- **Concurrent formatting left duplicate markers that yjs removes.** When two
+  peers formatted the same text, yjs deletes the redundant marker in a
+  cleanup transaction after applying the other's update and sends that
+  deletion on; ygo kept both markers, so its documents, and every update and
+  diff it wrote afterwards, differed from yjs's. The cleanup now runs as in
+  yjs: after the remote transaction's observers and after-transaction
+  handlers, before its garbage collection (a deleted marker's content decides
+  which cleanup a text gets), in the same lock hold, its update right after
+  the remote one. Like yjs's, the full cleanup reaches only the markers
+  before a text's first content; around other deleted content the
+  contextless cleanup drops duplicate keys.
+- **An XmlText's observer missed its text changes.** The event of a text
+  change in an XmlText was built as an array event, which `Observe` on an
+  XmlText (a `TextEvent` callback) dropped.
+
+### Added
+
+- `TransactionMut.Local`, yjs `transaction.local`: true for `WriteTxn`, false
+  for the transactions that apply updates made elsewhere (`ApplyUpdate`,
+  `ApplyUpdateV2` and their origin forms, the stored-update loaders, the
+  client's server applies and local-store replay). It is independent of
+  `Origin`.
+
+### Documented
+
+- A root that receives formatted text before anything reads it as text, and
+  is then typed and appended to, can get its next insert where yjs would
+  not: yjs's fresh YText inserts at a search marker, with only the
+  attributes of the markers it passes from there, so text typed plain,
+  formatted bold and then appended to is plain in yjs and bold in ygo. The
+  divergence predates this release; it is pinned
+  (`insert-into-root-typed-after-formatting`) and described in
+  docs/tech-debt.md. Typing roots before applying updates avoids it.
+- When one update holds a block that depends on a block of another client
+  in it, ygo integrates the update's blocks in another order than yjs (an
+  older divergence, docs/tech-debt.md), and the cleanup walks the
+  deletions in that order. It can then miss a duplicate marker that yjs's
+  cleanup drops; pinned as `cleanup-deletions-from-dependent-blocks`.
+
+### Infrastructure
+
+- 16 update-event scenarios for the cleanup, generated from yjs 13.6.33, and
+  the `concurrent-formatting` pin removed: three peers, different keys, an
+  inner gap the full cleanup does not reach, the contextless path, a
+  deleted marker that calls for the full cleanup, both client orders of a
+  mixed delete, deletions walked in the order the transaction made them,
+  two texts, an untyped root (one that runs no cleanup, and one the cleanup
+  of a typed text reaches), a root typed after the formatting arrived, an
+  XmlText, undo with and without grouping, and a cleanup that clears the
+  redo stack; 105 scenarios, 3 pinned. The fixture harness types a root the
+  first time an op, a state check or an UndoManager reads it, as the
+  generator's yjs documents do, and runs the text ops on an XmlText too.
+
 ## [1.28.0] - 2026-10-20
 
 **Upgrade impact** - A client that falls behind its room is now closed, with
