@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/Deln0r/ygo/internal/encoding"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
 	"github.com/Deln0r/ygo/internal/types"
@@ -67,7 +69,8 @@ func TestServer_ReadLimit_AllowsLargeDoc(t *testing.T) {
 
 // TestServer_ReadLimit_DefaultDropsOversizeFrame: at the default limit
 // (ReadLimit unset), a frame larger than 32 KiB makes the server close
-// the sending connection — the failure mode the option exists to avoid.
+// the sending connection with 1009 — the failure mode the option exists
+// to avoid.
 func TestServer_ReadLimit_DefaultDropsOversizeFrame(t *testing.T) {
 	wsURL, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}})
 
@@ -75,14 +78,16 @@ func TestServer_ReadLimit_DefaultDropsOversizeFrame(t *testing.T) {
 	defer a.close()
 	a.read(t) // initial SyncStep1
 
+	// The server sends its close frame and cuts the connection without
+	// draining the oversize payload, so this write can fail while the
+	// frame is still going out. The read below gets the close either way.
 	update, _ := largeUpdate(t, a, "blob")
-	a.write(t, syncpkg.EncodeSyncUpdate(update))
+	_ = a.conn.Write(a.ctx, websocket.MessageBinary, syncpkg.EncodeSyncUpdate(update))
 
-	// The server cannot read the oversize frame and closes the conn, so
-	// the next read here returns an error rather than blocking forever.
 	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Second)
 	defer cancel()
-	if _, _, err := a.conn.Read(ctx); err == nil {
-		t.Fatal("expected the server to close the connection on an oversize frame at the default limit")
+	_, _, err := a.conn.Read(ctx)
+	if got := websocket.CloseStatus(err); got != websocket.StatusMessageTooBig {
+		t.Fatalf("read after an oversize frame: %v (close status %d), want 1009", err, got)
 	}
 }

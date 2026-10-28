@@ -27,6 +27,15 @@ file.
   after 300 ms on 1.61.0, both with the context's error. The nested NATS and
   Matrix modules move with the core's `golang.org/x/sys`.
 
+### Infrastructure
+
+- `TestServer_ReadLimit_DefaultDropsOversizeFrame` failed about 1 run in 70:
+  since 1.28.0 the server cuts a connection without draining an oversize
+  frame, so the client's write of it can fail. The client still reads the
+  1009 close (300 of 300 probe runs, also when the write failed); the test
+  now allows the write to fail and checks for 1009, where it accepted any
+  read error.
+
 ## [1.29.0] - 2026-10-23
 
 **Upgrade impact** - After applying an update that changed formatted text, a
