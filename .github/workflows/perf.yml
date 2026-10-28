@@ -1,0 +1,99 @@
+name: perf
+
+# A smoke test, not a benchmark: it builds .github/perfsmoke against the
+# commit under test and the one before it and fails when the new one is
+# clearly slower on any of five workloads (one-transaction typing, a
+# transaction per edit, replaying those updates, state encode and apply,
+# four writers' updates replayed out of order). BENCHMARKS.md stays the
+# record of absolute numbers.
+#
+# The threshold, 1.30, is the fastest round of head over the fastest round
+# of base. The calibrate input runs five head-against-itself comparisons
+# on separate runners instead, to show how far the ratio strays on noise
+# alone. A slowdown that is wanted is accepted by a line reading exactly
+# "perf-smoke: accept" in any commit message of the compared range, which
+# turns the failure into a warning.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      calibrate:
+        description: "Compare the head with itself, to measure the noise"
+        type: boolean
+        default: false
+
+jobs:
+  smoke:
+    name: perf smoke (head vs base)
+    if: ${{ !inputs.calibrate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: pick base and head
+        id: range
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          head=$(git rev-parse HEAD)
+          if [ "$EVENT" = pull_request ]; then
+            head=$PR_HEAD
+            base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            # A new branch: there is no previous tip, so the parent.
+            base=$(git rev-parse "$head^")
+          else
+            # After a force push the old tip is in no fetched ref: fetch it
+            # by its SHA, and fail rather than compare with something else.
+            git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch --no-tags --quiet origin "$BEFORE" || true
+            if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              echo "::error::perf smoke: the previous tip $BEFORE is not available to compare with"
+              exit 1
+            fi
+            base=$BEFORE
+          fi
+          waived=0
+          if [ "$base" != "$head" ] && git log --format=%B "$base..$head" | grep -qiE '^perf-smoke: accept[[:space:]]*$'; then
+            waived=1
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "waived=$waived" >> "$GITHUB_OUTPUT"
+      - name: smoke
+        env:
+          PERF_WAIVED: ${{ steps.range.outputs.waived }}
+        run: .github/perfsmoke/run.sh "${{ steps.range.outputs.base }}" "${{ steps.range.outputs.head }}" 7
+
+  calibrate:
+    name: perf smoke calibration (head vs head, trial ${{ matrix.trial }})
+    if: ${{ inputs.calibrate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: head against itself
+        env:
+          PERF_THRESHOLD: "99"
+        run: .github/perfsmoke/run.sh HEAD HEAD 7
