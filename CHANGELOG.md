@@ -14,6 +14,19 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Changed
+
+- `modernc.org/sqlite` moves from 1.60.1 to 1.61.0 (SQLite 3.54.1; libc
+  v1.77.1 to v1.79.0, the version sqlite's own go.mod pins, as upstream
+  requires of downstream modules). The change that matters for ygo's SQLite
+  store: a statement waiting for a lock under its `busy_timeout` (5 s) now
+  stops once its context is done. A `Flush` with a 300 ms context, against
+  a write lock another connection holds, returned after 5.2 s on 1.60.1 and
+  after 300 ms on 1.61.0, both with the context's error. The nested NATS and
+  Matrix modules move with the core's `golang.org/x/sys`.
+
 ## [1.29.0] - 2026-10-23
 
 **Upgrade impact** - After applying an update that changed formatted text, a
