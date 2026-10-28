@@ -10,7 +10,9 @@ name: perf
 # The threshold, 1.30, is the fastest round of head over the fastest round
 # of base. The calibrate input runs five head-against-itself comparisons
 # on separate runners instead, to show how far the ratio strays on noise
-# alone. A slowdown that is wanted is accepted by a line reading exactly
+# alone: on 28 Oct 2026 (run 40632033063) it stayed within 0.979-1.036 on
+# every workload, and the threshold is the larger of 1.30 and that worst
+# ratio plus 0.10. A slowdown that is wanted is accepted by a line reading exactly
 # "perf-smoke: accept" in any commit message of the compared range, which
 # turns the failure into a warning.
 
