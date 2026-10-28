@@ -16,6 +16,53 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact** - An update whose blocks wait on blocks of other clients
+in the same update now integrates in yjs's order. Where it differs from
+before, so do the order an UndoManager restores a tracked update's
+deletions in, the order deleting a map walks its keys, the order of
+observer events, the order `OnSubdocs` lists added subdocuments in, and
+what the format cleanup deletes. Blocks that wait on another update are
+retried when the store passes the clock yjs records for them, not on every
+update, so one can wait one update longer than before. `MissingSV` now
+names, for each client the queue waits on, the clock the document has for
+it; it used to name the missing clock plus one, which left out the very
+block a peer's diff had to carry.
+
+### Fixed
+
+- **An update's blocks integrated in passes, not by dependency.** A block
+  that waited on another client's block of the same update was skipped and
+  taken in a later pass; yjs follows into that client at once and takes its
+  blocks one by one until the one waited on is in. The order of the
+  transaction's deletions, of the map keys it set first and of the types it
+  changed first could differ from yjs, and with them undo, map deletion,
+  observer order and the format cleanup (the two pins of this kind are
+  gone). Integration is now a port of yjs `integrateStructs`: references
+  are checked on the block as decoded, before its known prefix is cut, a
+  wholly known block whose reference is missing still holds back its
+  client, and a hole or a wait on an update that has not come holds back
+  every block on the stack.
+- **A queued block was retried whenever anything was queued.** yjs retries
+  its queue only when an update reaches a clock it recorded as missing;
+  ygo let a block in one update earlier when its dependency arrived below
+  that clock.
+- **`MissingSV` asked for the clock after the missing one.** A document
+  waiting on 1:0 asked for client 1 from clock 1, and a peer's diff against
+  that left 1:0 out, so the document stayed stuck. It also returned an
+  empty vector, documented as "nothing is queued", for a queue that held
+  only deletes.
+- **`MergeUpdates` dropped a queued block that reached past what the
+  document had.** A block queued as it came (waiting on another client)
+  can start below the store clock; merging now carries its unknown part,
+  where it dropped the whole block.
+- **`OnSubdocs` listed added subdocuments by client, highest first, not in
+  integration order.** A subdocument typed after one imported from a lower
+  client was listed first; yjs lists them as they integrate.
+- The queue of blocks waiting for their dependencies keeps one record per
+  clock range, as yjs's merged pending update does, and no Skip records.
+  Peers splitting one run at different points used to leave every split
+  queued.
+
 ### Changed
 
 - `modernc.org/sqlite` moves from 1.60.1 to 1.61.0 (SQLite 3.54.1; libc
@@ -29,6 +76,31 @@ file.
 
 ### Infrastructure
 
+- Seven update-event scenarios from yjs 13.6.33 for blocks that wait on
+  each other: a chain over three clients, the next block of the client
+  waited on, a wall then a retry, a retry that waits for the recorded clock,
+  a real block after a Skip, a wholly known block that still holds its
+  client back, a partly known block that waits on its reference as it came.
+  112 scenarios, 1 pinned. Every event now also records the types its
+  transaction changed, in order (yjs `transaction.changed`, ygo
+  `ChangedTypes`), and every scenario is replayed with its updates as V1,
+  as V2 and as both by turns. The generator marks relay documents, whose
+  roots nothing reads, and checks the shape of the updates a scenario
+  relies on.
+- A perf smoke job (`.github/workflows/perf.yml`): `.github/perfsmoke`
+  built against the commit and the one before it (for a PR, the merge
+  base), five workloads on 20,000 B4-shaped synthetic edits (one
+  transaction, a transaction per edit, replaying those updates, state
+  encode and apply, four writers' updates replayed out of order), each
+  checked against a plain-string model. Each workload runs in a process of
+  its own, base and head by turns over 7 rounds; the job fails when head's
+  fastest round is more than 1.30 times base's on any workload, and warns
+  above 1.15. A commit line reading `perf-smoke: accept` in the compared
+  range turns the failure into a warning. Checked before use: head against
+  itself stayed at 0.87 to 1.15 on a loaded laptop; a slowdown in each
+  workload (search markers off, a delay per commit, per apply, per encode,
+  a retry on every update) turned it red, and a Delete that does nothing
+  failed it on the text, not on time.
 - `TestServer_ReadLimit_DefaultDropsOversizeFrame` failed about 1 run in 70:
   since 1.28.0 the server cuts a connection without draining an oversize
   frame, so the client's write of it can fail. The client still reads the
