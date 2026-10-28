@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Deln0r/ygo"
+	"github.com/Deln0r/ygo/internal/block"
 )
 
 // update-event-fixtures.json is written by testdata/gen/gen-update-events.mjs:
@@ -38,8 +40,14 @@ type updateEventScenario struct {
 	RootKeys    []string             `json:"root_keys"`
 	Steps       []updateEventStep    `json:"steps"`
 	Events      []updateEvent        `json:"events"`
-	DiffsDoc    int                  `json:"diffs_doc"`
-	Diffs       []updateDiff         `json:"diffs"`
+	// Relays are documents that only forward updates: nothing reads
+	// their roots, so none is typed (no undo scope, no state).
+	Relays []int `json:"relays"`
+	// Changed asks for each event's changed types (updateEvent.Changed);
+	// on for every scenario but the pinned one, whose pin lists bytes only.
+	Changed  bool         `json:"changed"`
+	DiffsDoc int          `json:"diffs_doc"`
+	Diffs    []updateDiff `json:"diffs"`
 }
 
 type updateEventStep struct {
@@ -54,6 +62,9 @@ type updateEventStep struct {
 		SV     svJSON  `json:"sv"`
 		Replay *int    `json:"replay"`
 		Update string  `json:"update"`
+		// UpdateV2 is the same update in V2 (yjs
+		// convertUpdateFormatV1ToV2), for the V2 and mixed replays.
+		UpdateV2 string `json:"update_v2"`
 	} `json:"apply"`
 	Undo   *updateEventUndoRef `json:"undo"`
 	Redo   *updateEventUndoRef `json:"redo"`
@@ -107,6 +118,12 @@ type updateEvent struct {
 	Origin *string `json:"origin"`
 	V1     string  `json:"v1"`
 	V2     string  `json:"v2"`
+	// Changed lists the types the transaction changed, in the order it
+	// first changed them (yjs transaction.changed, ygo ChangedTypes), as
+	// paths: a root by name, a nested type by its parent's path and map key
+	// or array index, "<deleted>" once deleted. Only for scenarios with
+	// "changed".
+	Changed []string `json:"changed"`
 }
 
 func (e updateEvent) String() string {
@@ -114,7 +131,33 @@ func (e updateEvent) String() string {
 	if e.Origin != nil {
 		o = strconv.Quote(*e.Origin)
 	}
-	return fmt.Sprintf("step %d doc %d origin %s\n   v1 %s\n   v2 %s", e.Step, e.Doc, o, e.V1, e.V2)
+	out := fmt.Sprintf("step %d doc %d origin %s\n   v1 %s\n   v2 %s", e.Step, e.Doc, o, e.V1, e.V2)
+	if e.Changed != nil {
+		out += "\n   changed " + strings.Join(e.Changed, ", ")
+	}
+	return out
+}
+
+// branchPath is typePath of gen-update-events.mjs for a ygo branch.
+func branchPath(br *block.Branch) string {
+	it := br.Item
+	if it == nil {
+		return br.Name
+	}
+	if it.IsDeleted() {
+		return "<deleted>"
+	}
+	parent := it.Parent.Branch
+	if it.ParentSub != nil {
+		return branchPath(parent) + "/" + *it.ParentSub
+	}
+	var i uint64
+	for x := parent.Start; x != nil && x != it; x = x.Right {
+		if !x.IsDeleted() && x.IsCountable() {
+			i += x.Len
+		}
+	}
+	return fmt.Sprintf("%s/%d", branchPath(parent), i)
 }
 
 type updateDiff struct {
@@ -155,35 +198,6 @@ var knownUpdateEventDivergences = map[string]struct {
 	reason string
 	events []updateEvent
 }{
-	"cleanup-deletions-from-dependent-blocks": {
-		reason: "the update doc 0 gets holds w, typed after q of a lower client in the same update; yjs integrateStructs integrates w first, following its dependency into q, so q is the transaction's first deletion and the contextless cleanup around it drops the duplicate bold marker (an update deleting 141421356:2). Pending.integrateAll skips w and integrates the middle client first, whose deleted italic markers then come first and send the text to the full cleanup, which does not reach the inner gap: no cleanup update (docs/tech-debt.md, \"An update's blocks integrate in passes\")",
-		events: pinnedEvents(
-			"0|0|nil|0101cdcc83da0b00040101740378797a00|0000058d9987b4170000010407047478797a01030101000001010000",
-			"1|1|remote|0101cdcc83da0b00040101740378797a00|0000058d9987b4170000010407047478797a01030101000001010000",
-			"2|2|remote|0101cdcc83da0b00040101740378797a00|0000058d9987b4170000010407047478797a01030101000001010000",
-			"3|3|remote|0101cdcc83da0b00040101740378797a00|0000058d9987b4170000010407047478797a01030101000001010000",
-			"4|4|remote|0101cdcc83da0b00040101740378797a00|0000058d9987b4170000010407047478797a01030101000001010000",
-			"5|2|nil|0102acd6b74300c6cdcc83da0b01cdcc83da0b02066974616c6963047472756586cdcc83da0b02066974616c6963046e756c6c00|000200020bacacef8601cd9987b41701020300010403c600860f0c6974616c69636974616c69634600000000010200787e00",
-			"6|0|nil|0102cdcc83da0b03c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b01cdcc83da0b0204626f6c64046e756c6c00|0002000206cd9987b4170302000202030001c60b08626f6c64626f6c644400000000010203787e00",
-			"7|2|nil|0102acd6b74302c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6acd6b74300cdcc83da0b0204626f6c64046e756c6c00|0002000215acacef8601cd9987b41700acacef86018d9987b41702010002030001c60b08626f6c64626f6c644400000000010202787e00",
-			"8|1|remote|0102cdcc83da0b03c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b01cdcc83da0b0204626f6c64046e756c6c00|0002000206cd9987b4170302000202030001c60b08626f6c64626f6c644400000000010203787e00",
-			"9|3|remote|0102cdcc83da0b03c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b01cdcc83da0b0204626f6c64046e756c6c00|0002000206cd9987b4170302000202030001c60b08626f6c64626f6c644400000000010203787e00",
-			"10|0|remote|0104acd6b74300c6cdcc83da0b01cdcc83da0b02066974616c6963047472756586cdcc83da0b02066974616c6963046e756c6cc6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6acd6b74300cdcc83da0b0204626f6c64046e756c6c00|000300030115acacef8601cd9987b41703acacef86018d9987b41704030044000304420205c6008600c619146974616c69636974616c6963626f6c64626f6c6446004400000000010400787e787e00",
-			"11|4|remote|0202cdcc83da0b03c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b01cdcc83da0b0204626f6c64046e756c6c04acd6b74300c6cdcc83da0b01cdcc83da0b02066974616c6963047472756586cdcc83da0b02066974616c6963046e756c6cc6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6acd6b74300cdcc83da0b0204626f6c64046e756c6c00|00030003031bcd9987b41703acacef8601cd9987b41703acacef86018d9987b4170600020002440005030000420205c6028600c6231c626f6c64626f6c646974616c69636974616c6963626f6c64626f6c64440046004400000000020203787e0400787e787e00",
-			"12|3|nil|0101de85c31b00c4cdcc83da0b00cdcc83da0b03017100|00000a9e8b8637cd9987b417000100010601c40301710100000001010000",
-			"13|1|remote|0101de85c31b00c4cdcc83da0b00cdcc83da0b03017100|00000a9e8b8637cd9987b417000100010601c40301710100000001010000",
-			"14|1|nil|0101d689cf810100c4de85c31b00cdcc83da0b03017700|00000e96939e83029e8b86378d9987b4170100010601c40301770100000001010000",
-			"15|1|nil|0001d689cf8101010001|00000000000001000000000001d689cf8101010000",
-			"16|3|nil|0001de85c31b010001|00000000000001000000000001de85c31b010000",
-			"17|2|nil|0101acd6b7430404010164016400|000005acacef8601000001040502646441000101000001010400",
-			"18|2|nil|0001acd6b743010401|00000000000001000000000001acd6b743010400",
-			"19|2|nil|0001acd6b743010002|00000000000001000000000001acd6b743010001",
-			"20|4|remote|0201d689cf810100c1de85c31b00cdcc83da0b030101de85c31b00c4cdcc83da0b00cdcc83da0b03017101d689cf8101010001|00001896939e83029e8b86378d9987b4179e8b8637cd9987b4170002010002060003c100c40301710100000101020100010001d689cf8101010000",
-			"21|4|remote|0001de85c31b010001|00000000000001000000000001de85c31b010000",
-			"22|4|remote|0101acd6b74304010101640101acd6b7430200020401|000005acacef86010000010103016401010100010101010401acd6b7430200010200",
-			"23|0|remote|0301d689cf810100c1de85c31b00cdcc83da0b030101acd6b74304010101640101de85c31b00c1cdcc83da0b00cdcc83da0b030103d689cf8101010001acd6b7430200020401de85c31b010001|00001d96939e83029e8b86378d9987b417acacef86019e8b8637cd9987b4170002010002060005c1000100c1030164010101000241010301000104010003d689cf8101010000acd6b7430200010200de85c31b010000",
-		),
-	},
 	"insert-into-root-typed-after-formatting": {
 		reason: "yjs builds a fresh YText when an untyped root is first read as text, with search markers on, though the root already holds format markers (ContentFormat.integrate turns them off as it integrates); the next insert starts at a marker with no attributes in effect and steps over the closing bold:null, so \"!\" is plain. ygo's text keeps walking from the start, collects bold and inserts before the closing marker, so \"!\" is bold (docs/tech-debt.md, \"A root typed after formatted text arrived inserts as a formatted text\")",
 		events: pinnedEvents(
@@ -191,25 +205,6 @@ var knownUpdateEventDivergences = map[string]struct {
 			"1|1|remote|0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00|0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00",
 			"2|1|nil|0101d689cf810100c4cdcc83da0b01cdcc83da0b03012100|00000b96939e8302cd9987b417000102010601c40301210100000001010000",
 			"3|0|remote|0101d689cf81010084cdcc83da0b03012100|00000a96939e83028d9987b41701060001840301210100000001010000",
-		),
-	},
-	"undo-keys-from-dependent-blocks": {
-		reason: "yjs integrateStructs follows a block's missing dependency into the client of the same update that has it, integrating just that block first; Pending.integrateAll skips the block and takes it in the next pass, so a middle client's key is first set before the dependent one and undo restores m before z, where yjs restores z first. The map's content is the same (docs/tech-debt.md, \"An update's blocks integrate in passes\")",
-		events: pinnedEvents(
-			"0|0|setup|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
-			"1|1|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
-			"2|2|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
-			"3|3|remote|0101cdcc83da0b002701016d01700100|0000058d9987b4170000012705026d704100010101010001010000",
-			"4|3|nil|0101de85c31b002800cdcc83da0b00017a0177024c3100|0000099e8b86378d9987b417010000012803017a01010000010101010077024c3100",
-			"5|1|remote|0101de85c31b002800cdcc83da0b00017a0177024c3100|0000099e8b86378d9987b417010000012803017a01010000010101010077024c3100",
-			"6|1|nil|0101d689cf810100a8de85c31b00017702483101de85c31b010001|00000996939e83029e8b863701000001a80100000001010101007702483101de85c31b010000",
-			"7|3|nil|0101de85c31b012800cdcc83da0b0001610177024c3200|0000099e8b86378d9987b417010000012803016101010000010101010177024c3200",
-			"8|2|nil|0101acd6b743002800cdcc83da0b00016d0177024d3100|00000aacacef86018d9987b417010000012803016d01010000010101010077024d3100",
-			"9|1|remote|0101de85c31b012800cdcc83da0b0001610177024c3200|0000099e8b86378d9987b417010000012803016101010000010101010177024c3200",
-			"10|1|remote|0101acd6b743002800cdcc83da0b00016d0177024d3100|00000aacacef86018d9987b417010000012803016d01010000010101010077024d3100",
-			"12|0|remote|0301d689cf810100a8de85c31b00017702483101acd6b743002800cdcc83da0b00016d0177024d3102de85c31b002100cdcc83da0b00017a012800cdcc83da0b0001610177024c3201de85c31b010001|00001d96939e83029e8b8637acacef86018d9987b4179e8b8637cd9987b417000201020007a800280021002806036d7a61410101000002410203010077024831010077024d31020077024c3201de85c31b010000",
-			"13|0|nil|0004cdcc83da0b010001d689cf8101010001acd6b743010001de85c31b010101|00000000000001000000000004cdcc83da0b010000d689cf8101010000acd6b743010000de85c31b010100",
-			"14|0|<um:0>|0104cdcc83da0b01a7cdcc83da0b00012800cdcc83da0b01016d0177024d312800cdcc83da0b01017a01770248312800cdcc83da0b0101610177024c3200|000006cd9987b4170304000201000003a7002806036d7a6141010100010102410101040177024d317702483177024c3200",
 		),
 	},
 }
@@ -253,7 +248,7 @@ func TestUpdateEvents_Fixtures(t *testing.T) {
 	for _, sc := range f.Scenarios {
 		seen[sc.Name] = true
 		t.Run(sc.Name, func(t *testing.T) {
-			docs, events := replayUpdateEvents(t, sc)
+			docs, events := replayUpdateEvents(t, sc, "v1")
 			known, isKnown := knownUpdateEventDivergences[sc.Name]
 			switch {
 			case !isKnown:
@@ -287,6 +282,32 @@ func TestUpdateEvents_Fixtures(t *testing.T) {
 	for name := range knownUpdateEventDivergences {
 		if !seen[name] {
 			t.Errorf("knownUpdateEventDivergences names %q, which is not a scenario", name)
+		}
+	}
+}
+
+// TestUpdateEvents_FixturesV2 replays every scenario with its updates
+// applied as V2, and as V1 and V2 by turns: both decoders feed the same
+// integration, which must emit the same events.
+func TestUpdateEvents_FixturesV2(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "update-event-fixtures.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f updateEventFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	for _, format := range []string{"v2", "mixed"} {
+		for _, sc := range f.Scenarios {
+			t.Run(format+"/"+sc.Name, func(t *testing.T) {
+				_, events := replayUpdateEvents(t, sc, format)
+				want := sc.Events
+				if known, isKnown := knownUpdateEventDivergences[sc.Name]; isKnown {
+					want = known.events
+				}
+				compareUpdateEvents(t, events, want)
+			})
 		}
 	}
 }
@@ -380,7 +401,9 @@ func (ed *updateEventDoc) root(name string) any {
 	return r
 }
 
-func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []updateEvent) {
+// replayUpdateEvents replays sc, applying updates as V1, as V2, or
+// ("mixed") V1 and V2 by turns.
+func replayUpdateEvents(t *testing.T, sc updateEventScenario, format string) ([]*ygo.Doc, []updateEvent) {
 	t.Helper()
 	rootNames := map[string]bool{}
 	if sc.UndoScope != "" {
@@ -413,7 +436,8 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 				t.Fatalf("unknown root kind %q", kind)
 			}
 		}
-		if sc.UndoScope != "" {
+		relay := slices.Contains(sc.Relays, i)
+		if sc.UndoScope != "" && !relay {
 			// undo_group: one step for everything; otherwise one step per
 			// transaction.
 			timeout := time.Duration(-1)
@@ -443,8 +467,21 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			t.Fatalf("unexpected origin %T", o)
 			return nil
 		}
+		var lastChanged []string
+		if sc.Changed {
+			d.OnAfterTransaction(func(tr *ygo.TransactionMut) {
+				lastChanged = lastChanged[:0:0]
+				for _, br := range tr.ChangedTypes() {
+					lastChanged = append(lastChanged, branchPath(br))
+				}
+			})
+		}
 		d.OnUpdate(func(u []byte, origin any) {
-			events = append(events, updateEvent{Step: step, Doc: docIdx, Origin: originName(origin), V1: hex.EncodeToString(u)})
+			e := updateEvent{Step: step, Doc: docIdx, Origin: originName(origin), V1: hex.EncodeToString(u)}
+			if sc.Changed {
+				e.Changed = append([]string{}, lastChanged...)
+			}
+			events = append(events, e)
 		})
 		d.OnUpdateV2(func(u []byte, origin any) {
 			for k := len(events) - 1; k >= 0; k-- {
@@ -459,6 +496,7 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 		docs[i] = ed
 		plain[i] = d
 	}
+	applies := 0 // for "mixed": V1 and V2 by turns over the applies, not the steps
 	for k, st := range sc.Steps {
 		step = k
 		switch {
@@ -472,7 +510,7 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			// sent. A replay re-sends bytes an earlier step applied.
 			var own []byte
 			switch {
-			case a.Replay != nil:
+			case a.Replay != nil, a.What == "raw":
 				own = raw
 			case a.What == "state":
 				own = ygo.EncodeStateAsUpdate(plain[a.From])
@@ -495,7 +533,18 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 			if a.Origin != nil {
 				origin = *a.Origin
 			}
-			if err := ygo.ApplyUpdateWithOrigin(plain[a.To], raw, origin); err != nil {
+			applyV2 := format == "v2" || (format == "mixed" && applies%2 == 1)
+			applies++
+			if applyV2 {
+				v2, err := hex.DecodeString(a.UpdateV2)
+				if err != nil || len(v2) == 0 {
+					t.Fatalf("step %d: no V2 update in the fixture", k)
+				}
+				err = ygo.ApplyUpdateV2WithOrigin(plain[a.To], v2, origin)
+				if err != nil {
+					t.Fatalf("step %d: apply V2: %v", k, err)
+				}
+			} else if err := ygo.ApplyUpdateWithOrigin(plain[a.To], raw, origin); err != nil {
 				t.Fatalf("step %d: apply: %v", k, err)
 			}
 		case st.Undo != nil || st.Redo != nil:
@@ -561,6 +610,9 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario) ([]*ygo.Doc, []upd
 		if len(st.State) > 0 {
 			got := make([]any, len(docs))
 			for i, ed := range docs {
+				if slices.Contains(sc.Relays, i) {
+					continue
+				}
 				state := map[string]any{}
 				for _, r := range sc.RootKeys {
 					state[r] = renderUpdateEventState(ed.root(r))

@@ -354,3 +354,21 @@ func TestOnSubdocs_AddedInIntegrationOrder(t *testing.T) {
 		}
 	}
 }
+
+// A subdocument that waits on another client's block of the same update
+// is reported after that client's: H (20) imported GL from L (10) and
+// added GH after it, and yjs 13.6.33, applying H's whole state, adds GL
+// first, since H's block follows its dependency into L. Rebuilding the
+// list by client, highest first, gave GH,GL.
+func TestOnSubdocs_AddedAfterTheirDependency(t *testing.T) {
+	u, _ := hex.DecodeString("02011400890a000247487600010a000901016102474c760000")
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 30})
+	var got string
+	d.OnSubdocs(func(ev ygo.SubdocsEvent) { got = strings.Join(ev.Added, ",") })
+	if err := ygo.ApplyUpdate(d, u); err != nil {
+		t.Fatal(err)
+	}
+	if got != "GL,GH" {
+		t.Fatalf("Added %s, want GL,GH", got)
+	}
+}

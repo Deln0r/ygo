@@ -2,19 +2,14 @@ package encoding
 
 import (
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/store"
 )
-
-// itemFullyKnown reports whether every clock an item covers is already
-// in the store for its client (its clock range lies entirely below the
-// client's next-free clock). Such an item carries no new information.
-func itemFullyKnown(bs *store.BlockStore, it *block.Item) bool {
-	return it.ID.Clock+it.Len <= bs.GetClock(it.ID.Client)
-}
 
 // sliceWireItemRight trims a decoded wire Item to keep only the clocks
 // at or after offset, discarding the [0, offset) prefix the receiver
@@ -55,11 +50,13 @@ func sliceWireItemRight(it *block.Item, offset uint64) error {
 // (`Option<DeleteSet>`). We collapse both into a single Pending
 // struct attached to the Doc via the opaque `pendingState any` slot.
 //
-// Lifecycle: Update.Apply integrates the incoming update's blocks and
-// delete set, then the queued delete set, then, when something was
-// queued, the queued blocks with the update's leftovers (the order of
-// yjs readUpdateV2). Items that integrate leave the queue; the leftover
-// stays for the next ApplyUpdate call.
+// Lifecycle (yjs readUpdateV2): Update.Apply integrates the incoming
+// update's blocks by dependency stack (integrateStack), queues what is
+// left, applies the update's delete set and then the queued one, and,
+// when the store has passed a clock in Missing, integrates the queued
+// blocks once more and applies the queued delete set again. Items that
+// integrate leave the queue; the leftover stays for the next ApplyUpdate
+// call.
 //
 // Concurrency: Pending is mutated only under the doc's write lock
 // (acquired by the surrounding TransactionMut). No internal mutex.
@@ -75,6 +72,13 @@ type Pending struct {
 	// re-scans these ranges; those whose target now exists get
 	// applied.
 	DeleteSet *IdSet
+
+	// Missing is yjs's pendingStructs.missing: for each client the
+	// queued blocks wait on, the clock past which the store has to get
+	// before a retry can integrate anything (integrateStack). It decides
+	// whether the queue is retried; MissingSV, what to ask a peer for, is
+	// computed separately.
+	Missing map[uint64]uint64
 }
 
 // NewPending returns an empty buffer.
@@ -82,6 +86,7 @@ func NewPending() *Pending {
 	return &Pending{
 		Blocks:    map[uint64][]Block{},
 		DeleteSet: NewIdSet(),
+		Missing:   map[uint64]uint64{},
 	}
 }
 
@@ -119,27 +124,20 @@ func (p *Pending) BlockCount() int {
 	return n
 }
 
-// MissingSV returns the state vector describing what the local
-// store is missing to satisfy every queued item's dependencies.
-// Sync-protocol callers use this to request the gap from the peer
-// ("send me everything since (client, clock) for each entry").
+// MissingSV returns the state vector to ask a peer with: for every
+// client the queue waits on, the clock the local store has for it, so
+// a peer's EncodeDiff against the vector sends everything from there on.
+// The clients are those of a queued block with a hole before it in its
+// own sequence, those a queued block refers to (Origin, RightOrigin,
+// Parent-by-ID) without the store having the target, and those with a
+// queued delete range.
 //
-// For each pending item we walk Origin and RightOrigin; for each
-// reference that points outside the current BlockStore, we record
-// (clientID, clock+1) — the receiver wants every clock starting at
-// that target, and the SV convention is "the smallest clock NOT
-// yet seen". Parent-by-ID references contribute the same way.
-//
-// A block queued because of a hole in its OWN client sequence
-// contributes that client's currently-known clock, which is the
-// smallest one not yet seen for it. Without this, a document stuck
-// purely on such a hole reported an empty vector and could not name
-// what it needed — the first item in a root type has no Origin,
-// RightOrigin or Parent-by-ID to walk.
-//
-// Entries merge by taking the larger clock, so when one client has
-// several unmet needs the vector names the highest of them: it is a
-// request that may have to be repeated, not a complete manifest.
+// It names what the store has, not the clock of the missing target: a
+// vector naming the target's clock + 1, as this did before, tells the
+// peer the target itself is known, and the diff leaves it out. A
+// first-in-a-root item has no reference to walk, so its own hole is the
+// only way to name it; a queue holding only deletes still needs the
+// clients they delete from.
 //
 // Returns an empty map when nothing is missing.
 func (p *Pending) MissingSV(bs *store.BlockStore) store.StateVector {
@@ -147,39 +145,18 @@ func (p *Pending) MissingSV(bs *store.BlockStore) store.StateVector {
 	if p == nil {
 		return out
 	}
+	need := func(client uint64) {
+		out[client] = bs.GetClock(client)
+	}
 	track := func(ref block.ID) {
-		if bs.Contains(ref) {
-			return
-		}
-		want := ref.Clock + 1
-		if cur, ok := out[ref.Client]; !ok || want > cur {
-			out[ref.Client] = want
+		if !bs.Contains(ref) {
+			need(ref.Client)
 		}
 	}
 	for client, list := range p.Blocks {
 		for _, b := range list {
-			// A hole in the block's own client sequence is a dependency as
-			// real as an Origin reference, and for a first-in-a-root item it
-			// is the ONLY one - all three references below are nil or
-			// non-ID there. Leaving it out made MissingSV report an empty
-			// vector on a document that was demonstrably stuck, so the
-			// documented recovery path (ask a peer for what is missing)
-			// could not name the thing it needed.
-			// Block.ID is only populated for GC and Skip blocks; an item
-			// carries its own. Reading the wrong one here made this whole
-			// branch silently dead - it compared 0 against the known clock
-			// and never fired.
-			start := b.ID
-			if b.Kind == WireBlockItem && b.Item != nil {
-				start = b.Item.ID
-			}
-			if known := bs.GetClock(client); start.Clock > known {
-				// The smallest clock not yet seen for this client, which is
-				// exactly what the store already has: everything from there
-				// up to the queued block is what we are waiting for.
-				if cur, ok := out[client]; !ok || known > cur {
-					out[client] = known
-				}
+			if blockStartClock(b) > bs.GetClock(client) {
+				need(client)
 			}
 			if b.Kind != WireBlockItem || b.Item == nil {
 				continue
@@ -196,12 +173,16 @@ func (p *Pending) MissingSV(bs *store.BlockStore) store.StateVector {
 			}
 		}
 	}
+	if p.DeleteSet != nil {
+		p.DeleteSet.Iterate(func(client uint64, ranges []Range) {
+			if len(ranges) > 0 {
+				need(client)
+			}
+		})
+	}
 	return out
 }
 
-// addBlock appends b to the per-client queue, keeping the queue
-// sorted by clock ascending so causal-prefix integration sees the
-// earliest unsatisfied item first.
 // blockLen is how many clocks a queued block covers, whichever kind it is.
 func blockLen(b Block) uint64 {
 	if b.Kind == WireBlockItem {
@@ -213,28 +194,92 @@ func blockLen(b Block) uint64 {
 	return b.Len
 }
 
+// addBlock queues b for client (mergeBlocks with one block).
 func (p *Pending) addBlock(client uint64, b Block) {
-	list := p.Blocks[client]
-	clock := blockStartClock(b)
-	idx := sort.Search(len(list), func(i int) bool {
-		return blockStartClock(list[i]) >= clock
-	})
-	// Two blocks can start at the same clock and cover different amounts of
-	// it: peers split a client's run at different points, so one may hand us
-	// (10, len 5) where another hands us (10, len 2). Keeping whichever
-	// arrived first and discarding the other loses the difference outright -
-	// re-applying the same update must not double-queue, but a LONGER block
-	// at a known start clock is new content, not a duplicate.
-	if idx < len(list) && blockStartClock(list[idx]) == clock {
-		if blockLen(b) > blockLen(list[idx]) {
-			list[idx] = b
+	p.mergeBlocks(map[uint64][]Block{client: {b}})
+}
+
+// mergeBlocks adds blocks to the queue and normalizes each client it
+// touches the way yjs mergeUpdatesV2 merges one client's structs, since
+// yjs's queue is a merged update: by start clock, a longer block before a
+// shorter one at the same start; a block inside what the ones before it
+// cover is dropped; one that straddles their end is cut to its uncovered
+// part, its origin then the client's own previous clock, as yjs
+// sliceStruct leaves it. Without this, the same clocks queued in
+// different splits (peers split a run at different points) piled up:
+// each walled again and none ever left.
+//
+// Skip blocks are never queued: they carry nothing, the next block of
+// their client meets the same hole without them, and a queued Skip could
+// keep out a real block for the same clocks that arrives later.
+func (p *Pending) mergeBlocks(blocks map[uint64][]Block) {
+	for client, add := range blocks {
+		list := p.Blocks[client]
+		touched := false
+		for _, b := range add {
+			if b.Kind == WireBlockSkip || blockLen(b) == 0 || (b.Kind == WireBlockItem && b.Item == nil) {
+				continue
+			}
+			list = append(list, b)
+			touched = true
 		}
-		return
+		if !touched {
+			continue
+		}
+		sort.SliceStable(list, func(a, b int) bool {
+			sa, sb := blockStartClock(list[a]), blockStartClock(list[b])
+			if sa != sb {
+				return sa < sb
+			}
+			return blockLen(list[a]) > blockLen(list[b])
+		})
+		out := make([]Block, 0, len(list))
+		var covered uint64
+		for k, b := range list {
+			start, n := blockStartClock(b), blockLen(b)
+			if k > 0 && start+n <= covered {
+				continue
+			}
+			if k > 0 && start < covered {
+				off := covered - start
+				if b.Kind == WireBlockItem {
+					if err := sliceWireItemRight(b.Item, off); err != nil {
+						continue // unsplittable: the wider block before it covers the overlap
+					}
+					// The cut keeps a substring or subslice of what the
+					// block was decoded with. Queued, that would hold the
+					// whole decoded payload for its uncovered tail: runs of
+					// N characters starting one clock apart, each walled,
+					// kept N² bytes for clocks already known.
+					ownPayload(&b.Item.Content)
+				} else {
+					b.ID.Clock += off
+					b.Len -= off
+				}
+				start, n = covered, n-off
+			}
+			out = append(out, b)
+			covered = start + n
+		}
+		if len(out) == 0 {
+			delete(p.Blocks, client)
+		} else {
+			p.Blocks[client] = out
+		}
 	}
-	list = append(list, Block{})
-	copy(list[idx+1:], list[idx:])
-	list[idx] = b
-	p.Blocks[client] = list
+}
+
+// ownPayload gives c storage of its own, so a cut piece no longer keeps
+// the rest of the payload it was cut from reachable.
+func ownPayload(c *block.Content) {
+	switch c.Kind {
+	case block.KindString:
+		c.Str = strings.Clone(c.Str)
+	case block.KindAny:
+		c.Anys = slices.Clone(c.Anys)
+	case block.KindJSON:
+		c.JSONStrs = slices.Clone(c.JSONStrs)
+	}
 }
 
 func blockStartClock(b Block) uint64 {
@@ -249,44 +294,30 @@ func blockStartClock(b Block) uint64 {
 	return 0
 }
 
-// itemMissingDep reports whether any of an Item's wire-level
-// dependency references point to a clock the local store has not
-// seen yet. Used by every integration pass to decide if an item is
-// still stuck.
-func itemMissingDep(bs *store.BlockStore, it *block.Item) bool {
-	if it == nil {
-		return false
+// crossClientMissing is yjs Item.getMissing's first half: the client of
+// the first Origin, RightOrigin or Parent-by-ID of ANOTHER client whose
+// clock the store does not have yet. A reference to the block's own
+// client is not checked: integrateStack only gets here once the store
+// has every clock of that client below the block, as yjs relies on its
+// offset check. GC and Skip blocks depend on nothing.
+func crossClientMissing(bs *store.BlockStore, b Block) (uint64, bool) {
+	if b.Kind != WireBlockItem || b.Item == nil {
+		return 0, false
 	}
-	if it.Origin != nil && !bs.Contains(*it.Origin) {
-		return true
+	it := b.Item
+	own := it.ID.Client
+	if r := it.Origin; r != nil && r.Client != own && r.Clock >= bs.GetClock(r.Client) {
+		return r.Client, true
 	}
-	if it.RightOrigin != nil && !bs.Contains(*it.RightOrigin) {
-		return true
+	if r := it.RightOrigin; r != nil && r.Client != own && r.Clock >= bs.GetClock(r.Client) {
+		return r.Client, true
 	}
-	if it.Parent.Kind == block.ParentID && !bs.Contains(it.Parent.ID) {
-		return true
+	if it.Parent.Kind == block.ParentID {
+		if r := it.Parent.ID; r.Client != own && r.Clock >= bs.GetClock(r.Client) {
+			return r.Client, true
+		}
 	}
-	// A hole in the item's OWN client sequence is a missing dependency
-	// too, even when every explicit reference resolves. An item that
-	// starts above the clock we have for its client (a delta published
-	// against a state vector we never received, or simply an update
-	// delivered out of order) has an implicit dependency on the blocks
-	// filling that hole: yrs `Update::integrate` and yjs
-	// `integrateStructs` both hold such a struct back and record the
-	// gap in `missing`.
-	//
-	// Integrating it anyway pushes the store clock past the hole, and
-	// PushBlock's precondition (store.go: "item.ID.Clock ==
-	// s.GetClock(...)") is broken. The damage is silent and permanent:
-	// the blocks that would have filled the hole arrive later, read as
-	// clock-below-known, and are dropped as already-known. Measured
-	// against yjs 13.6.32 before the fix, one client editing two roots
-	// and publishing only the second delta lost the first root's text
-	// outright when the deltas arrived newest-first.
-	if it.ID.Clock > bs.GetClock(it.ID.Client) {
-		return true
-	}
-	return false
+	return 0, false
 }
 
 // collectedDep reports whether an item whose references are all in the
@@ -311,181 +342,217 @@ func collectedDep(txn *doc.TransactionMut, it *block.Item) bool {
 	return false
 }
 
-// foldUpdate merges every block and delete-set entry from u into p.
-// Items that the local store already has are silently dropped (no
-// need to retry them).
-func (p *Pending) foldUpdate(u *Update, bs *store.BlockStore) {
-	for client, list := range u.Blocks {
-		for _, b := range list {
-			switch b.Kind {
-			case WireBlockItem:
-				// Keep unless the item is fully known. A partially
-				// known item (squashed peer block overlapping the
-				// state-vector boundary) is queued and sliced at
-				// integration time, not dropped on a first-clock check.
-				if b.Item != nil && itemFullyKnown(bs, b.Item) {
-					continue
-				}
-				p.addBlock(client, b)
-			case WireBlockGC, WireBlockSkip:
-				// Keep unless fully known; a run whose start the store
-				// has is trimmed at integration time, like an item.
-				if b.ID.Clock+b.Len <= bs.GetClock(client) {
-					continue
-				}
-				p.addBlock(client, b)
-			}
-		}
+// foldDeleteSet queues u's delete set in p, in the order the update
+// wrote its clients, which applyDeletes keeps for an update's own
+// delete set.
+func (p *Pending) foldDeleteSet(u *Update) {
+	if u.DeleteSet == nil {
+		return
 	}
-	if u.DeleteSet != nil {
-		// In the order the update wrote its clients, which applyDeletes
-		// keeps for an update's own delete set.
-		for _, client := range u.DeleteSet.ClientsInOrder() {
-			for _, r := range u.DeleteSet.ClientRanges(client) {
-				p.DeleteSet.Insert(client, r.Start, r.Length)
-			}
-		}
-	}
-}
-
-// integrateAll runs block passes until one integrates nothing and returns
-// the number of blocks integrated. Passes take clients from the highest ID
-// down and a client's blocks in clock order, as yjs integrateStructs does,
-// because the order of a transaction's deletions decides the order an
-// UndoManager restores them in, and the order map keys are first set is
-// the order deleting their map walks them (Branch.MapOrder). yjs follows a
-// block's missing dependency into the client of the same update that has
-// it at once; a pass here skips the block and the next pass takes it, so
-// the order differs when an update holds a block that depends on another
-// of its clients' blocks (docs/tech-debt.md). A block with a still-missing
-// dep does not stop its client: a later clock may depend on another chain.
-func (p *Pending) integrateAll(txn *doc.TransactionMut) int {
-	total := 0
-	for {
-		n := p.integrateBlocks(txn)
-		total += n
-		if n == 0 {
-			return total
-		}
-	}
-}
-
-// absorb moves q's blocks and delete-set ranges into p.
-func (p *Pending) absorb(q *Pending) {
-	for client, list := range q.Blocks {
-		for _, b := range list {
-			p.addBlock(client, b)
-		}
-	}
-	q.DeleteSet.Iterate(func(client uint64, ranges []Range) {
-		for _, r := range ranges {
+	for _, client := range u.DeleteSet.ClientsInOrder() {
+		for _, r := range u.DeleteSet.ClientRanges(client) {
 			p.DeleteSet.Insert(client, r.Start, r.Length)
 		}
-	})
+	}
 }
 
-// integrateBlocks is one pass over the queued blocks, clients from the
-// highest ID down. Returns the number of blocks integrated.
-func (p *Pending) integrateBlocks(txn *doc.TransactionMut) int {
+// stackEntry is a block integrateStack had to put aside: refs[client][i].
+type stackEntry struct {
+	client uint64
+	i      int
+}
+
+// integrateStack is yjs integrateStructs over refs, each client's blocks
+// in clock order. It returns what could not be integrated, from the
+// first block of each walled client on, without Skips, and the missing
+// vector (Pending.Missing) for it.
+//
+// Clients go from the highest ID down. A block whose client has a hole
+// before it, or that waits on a block of a client this call has none
+// left of, walls: every block on the stack and the rest of their
+// clients wait for a later update. A block that waits on a client this
+// call still has blocks of is put on the stack, and that client's NEXT
+// block is taken, whatever it is, until the one waited on integrates;
+// then the stack unwinds. So the order of integration, and with it the
+// order of the transaction's deletions, of the map keys it sets first
+// and of the types it changes first, is yjs's: a pass that skips the
+// waiting block and comes back for it is not.
+//
+// The checks run in yjs's order, on the block as decoded: the hole
+// (offset < 0), then the missing reference, then, for a block the store
+// does not wholly have, whether what it hangs off was collected, then the
+// cut of the known prefix. A wholly known block is not integrated, but a
+// missing reference still walls its client, as in yjs.
+func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint64][]Block, map[uint64]uint64) {
 	bs := txn.Store()
-	progress := 0
-
-	clients := make([]uint64, 0, len(p.Blocks))
-	for c := range p.Blocks {
-		clients = append(clients, c)
+	rest := map[uint64][]Block{}
+	missing := map[uint64]uint64{}
+	total := 0
+	clients := make([]uint64, 0, len(refs))
+	for c, list := range refs {
+		if len(list) > 0 {
+			clients = append(clients, c)
+			total += len(list)
+		}
 	}
-	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
+	if len(clients) == 0 {
+		return rest, missing
+	}
+	sort.Slice(clients, func(i, j int) bool { return clients[i] < clients[j] })
+	next := map[uint64]int{}
+	walled := map[uint64]bool{}
+	var stack []stackEntry
 
-	for _, c := range clients {
-		list := p.Blocks[c]
-		remaining := list[:0]
-		for _, b := range list {
-			switch b.Kind {
-			case WireBlockGC:
-				known := bs.GetClock(c)
-				if b.ID.Clock+b.Len <= known {
-					continue // fully known
+	updateMissing := func(client, clock uint64) {
+		if m, ok := missing[client]; !ok || clock < m {
+			missing[client] = clock
+		}
+	}
+	nextTarget := func() (uint64, bool) {
+		for len(clients) > 0 {
+			c := clients[len(clients)-1]
+			if !walled[c] && next[c] < len(refs[c]) {
+				return c, true
+			}
+			clients = clients[:len(clients)-1]
+		}
+		return 0, false
+	}
+	wall := func() {
+		from := map[uint64]int{}
+		var order []uint64
+		for _, e := range stack {
+			if f, ok := from[e.client]; !ok || e.i < f {
+				if !ok {
+					order = append(order, e.client)
 				}
-				if b.ID.Clock < known {
-					// The store has the start of the run: keep the
-					// unknown tail, as yjs GC.integrate does with an
-					// offset. Dropping the whole run left this
-					// client's clock behind for good.
-					b.Len -= known - b.ID.Clock
-					b.ID.Clock = known
-				}
-				if b.ID.Clock > known {
-					// Gap ahead of what we have for this client;
-					// PushGC has PushBlock's monotonicity
-					// precondition, so queue rather than punch a
-					// hole. Same reasoning as itemMissingDep.
-					remaining = append(remaining, b)
-					continue
-				}
-				bs.PushGC(c, b.ID.Clock, b.ID.Clock+b.Len-1)
-				progress++
-			case WireBlockSkip:
-				// Skip blocks reserve clock space without semantics;
-				// we drop them once they reach the front of the queue
-				// (matches Apply's current handling).
-				progress++
-			case WireBlockItem:
-				it := b.Item
-				if it == nil {
-					continue
-				}
-				known := bs.GetClock(c)
-				if it.ID.Clock+it.Len <= known {
-					continue // fully known now
-				}
-				if it.ID.Clock < known {
-					// Partial overlap: drop the known prefix and keep
-					// the unknown right half. Origin now points just
-					// below `known`, a clock the store has, so the
-					// left dependency is satisfied.
-					if err := sliceWireItemRight(it, known-it.ID.Clock); err != nil {
-						// Non-splittable content at a partial boundary
-						// should not occur (single-element kinds have
-						// Len 1); drop rather than spin.
-						continue
-					}
-				}
-				if itemMissingDep(bs, it) {
-					remaining = append(remaining, b)
-					continue
-				}
-				if collectedDep(txn, it) {
-					// What the item hangs off was garbage-collected:
-					// it integrates as a GC run of its length, so the
-					// client's clock moves on (yjs Item.getMissing sets
-					// the parent to null, Item.integrate writes a GC).
-					// Left queued, it blocked every later block of its
-					// client forever.
-					bs.PushGC(c, it.ID.Clock, it.ID.Clock+it.Len-1)
-					progress++
-					continue
-				}
-				if err := block.Repair(it, txn); err != nil {
-					// Repair failed (typically ParentIDUnresolved
-					// when nested types not yet supported) — leave
-					// queued; future code may resolve it.
-					remaining = append(remaining, b)
-					continue
-				}
-				bs.PushBlock(it)
-				if dropped := it.Integrate(txn, 0); dropped {
-					txn.Delete(it)
-				}
-				progress++
+				from[e.client] = e.i
 			}
 		}
-		if len(remaining) == 0 {
-			delete(p.Blocks, c)
-		} else {
-			p.Blocks[c] = remaining
+		for _, c := range order {
+			if walled[c] {
+				continue
+			}
+			walled[c] = true
+			for _, b := range refs[c][from[c]:] {
+				if b.Kind != WireBlockSkip {
+					rest[c] = append(rest[c], b)
+				}
+			}
+		}
+		stack = stack[:0]
+	}
+
+	cur, ok := nextTarget()
+	if !ok {
+		return rest, missing
+	}
+	head := stackEntry{cur, next[cur]}
+	next[cur]++
+	// No valid update needs more steps: each block is taken once, and the
+	// stack, bounded by the number of clients, unwinds through each at most
+	// once more. Past the bound the remaining blocks stay queued.
+	limit := total*(len(refs)+2) + 16
+	for steps := 0; ; steps++ {
+		if steps > limit {
+			for c, list := range refs {
+				if walled[c] {
+					continue
+				}
+				for _, b := range list[min(next[c], len(list)):] {
+					if b.Kind != WireBlockSkip {
+						rest[c] = append(rest[c], b)
+					}
+				}
+				walled[c] = true
+			}
+			break
+		}
+		b := refs[head.client][head.i]
+		if b.Kind != WireBlockSkip {
+			state := bs.GetClock(head.client)
+			start := blockStartClock(b)
+			if start > state {
+				// A hole before it in its own client.
+				stack = append(stack, head)
+				updateMissing(head.client, start-1)
+				wall()
+			} else if m, has := crossClientMissing(bs, b); has {
+				stack = append(stack, head)
+				if !walled[m] && next[m] < len(refs[m]) {
+					head = stackEntry{m, next[m]}
+					next[m]++
+					continue
+				}
+				// It waits on an update that has not come yet.
+				updateMissing(m, bs.GetClock(m))
+				wall()
+			} else if start+blockLen(b) > state {
+				if !integrateBlock(txn, b, state-start) {
+					rest[head.client] = append(rest[head.client], b)
+				}
+			}
+		}
+		switch {
+		case len(stack) > 0:
+			head = stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+		case !walled[cur] && next[cur] < len(refs[cur]):
+			head = stackEntry{cur, next[cur]}
+			next[cur]++
+		default:
+			if cur, ok = nextTarget(); !ok {
+				return rest, missing
+			}
+			head = stackEntry{cur, next[cur]}
+			next[cur]++
 		}
 	}
-	return progress
+	return rest, missing
+}
+
+// integrateBlock integrates b, of which the store already has the first
+// offset clocks (yjs Item.integrate / GC.integrate with an offset). An
+// item hanging off something collected (decided on its references as
+// decoded, as yjs getMissing does before integrate cuts it) becomes a GC
+// run of its unknown part. Returns false when an item cannot be
+// repaired; it then stays queued.
+func integrateBlock(txn *doc.TransactionMut, b Block, offset uint64) bool {
+	bs := txn.Store()
+	switch b.Kind {
+	case WireBlockGC:
+		start := b.ID.Clock + offset
+		bs.PushGC(b.ID.Client, start, b.ID.Clock+b.Len-1)
+		return true
+	case WireBlockItem:
+		it := b.Item
+		collected := collectedDep(txn, it)
+		if offset > 0 {
+			if err := sliceWireItemRight(it, offset); err != nil {
+				// Non-splittable content at a partial boundary should not
+				// occur (single-element kinds have Len 1); drop rather than
+				// spin.
+				return true
+			}
+		}
+		if collected {
+			// What the item hangs off was garbage-collected: it
+			// integrates as a GC run of its length, so the client's clock
+			// moves on (yjs Item.getMissing sets the parent to null,
+			// Item.integrate writes a GC).
+			bs.PushGC(it.ID.Client, it.ID.Clock, it.ID.Clock+it.Len-1)
+			return true
+		}
+		if err := block.Repair(it, txn); err != nil {
+			return false
+		}
+		bs.PushBlock(it)
+		if dropped := it.Integrate(txn, 0); dropped {
+			txn.Delete(it)
+		}
+		return true
+	}
+	return true
 }
 
 // applyDeletes applies the delete set and keeps the ranges that still

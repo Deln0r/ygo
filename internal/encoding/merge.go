@@ -82,9 +82,25 @@ func buildMergePlan(bs *store.BlockStore, pending *Pending) ([]uint64, map[uint6
 			}
 			// Below the store clock the block is already represented by the
 			// integrated records above, or superseded by them. Emitting it as
-			// well would overlap the run and corrupt the receiver's list.
-			if rec.length == 0 || rec.clock < known {
+			// well would overlap the run and corrupt the receiver's list. A
+			// queued block can still reach past the store clock: one that
+			// waits on another client is queued as it came, not cut to what
+			// is new (yjs checks its references before the cut). Its unknown
+			// part is carried, cut on a COPY, since the record points into
+			// the live pending buffer.
+			if rec.length == 0 || rec.clock+rec.length <= known {
 				continue
+			}
+			if rec.clock < known {
+				off := known - rec.clock
+				if rec.kind == WireBlockItem {
+					cp := *rec.item
+					if err := sliceWireItemRight(&cp, off); err != nil {
+						continue
+					}
+					rec.item = &cp
+				}
+				rec.clock, rec.length = known, rec.length-off
 			}
 			byClient[client] = append(byClient[client], rec)
 		}

@@ -34,6 +34,8 @@ func (c *testCtx) AddChangedType(p *Branch, _ *string) {
 	c.changed = append(c.changed, p)
 }
 
+func (c *testCtx) AddedSubdoc(*Item) {}
+
 func (c *testCtx) GetOrCreateBranch(_ string) *Branch {
 	// Tests don't exercise root-name resolution; return nil to force
 	// callers to pre-resolve their ParentBranch.

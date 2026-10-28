@@ -77,8 +77,10 @@ func TestPending_TwoClientsOutOfOrder_RetryDrains(t *testing.T) {
 	}
 	missing := encoding.MissingSV(rtxn)
 	rtxn.Close()
-	if want, got := uint64(1), missing[1001]; got < want {
-		t.Errorf("MissingSV[1001] = %d, want >= %d", got, want)
+	// The request names A at the clock the target has for it, 0, so a
+	// diff against it starts at A's first block.
+	if got, ok := missing[1001]; !ok || got != 0 {
+		t.Errorf("MissingSV = %v, want 1001 at 0", missing)
 	}
 
 	// Array should not yet show B's item (it's queued).
@@ -187,12 +189,25 @@ func TestPending_StuckBlocksMissingSV(t *testing.T) {
 	applyExpectNoErr(t, target, bOnly)
 
 	rtxn = target.ReadTxn()
-	defer rtxn.Close()
 	if !encoding.HasPending(rtxn) {
+		rtxn.Close()
 		t.Fatal("expected stuck pending")
 	}
-	if got := encoding.MissingSV(rtxn)[3001]; got == 0 {
-		t.Error("MissingSV[3001] = 0, want positive value pointing at A's gap")
+	missing := encoding.MissingSV(rtxn)
+	rtxn.Close()
+	if got, ok := missing[3001]; !ok || got != 0 {
+		t.Fatalf("MissingSV = %v, want 3001 at 0, the clock the target has", missing)
+	}
+	// What the vector names is what A sends: a diff against it drains
+	// the queue. Naming 3001 at 1, past A's only block, left it stuck.
+	rtxn = a.ReadTxn()
+	fill := encoding.EncodeDiff(a, rtxn, missing)
+	rtxn.Close()
+	applyExpectNoErr(t, target, fill)
+	rtxn = target.ReadTxn()
+	defer rtxn.Close()
+	if encoding.HasPending(rtxn) {
+		t.Fatal("the diff MissingSV asked for did not drain the queue")
 	}
 }
 

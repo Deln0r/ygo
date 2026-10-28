@@ -521,20 +521,48 @@ func decodeID(buf []byte) (block.ID, []byte, error) {
 // pending-buffer retry loop yrs runs in `Store::try_integrate_pending`.
 func (u *Update) Apply(txn *doc.TransactionMut) error {
 	p := getOrCreatePending(txn)
-	// The order of yjs readUpdateV2: the update's own blocks first, then
-	// its delete set, then the delete set queued earlier, then, when
-	// something was queued, the queued blocks together with what the
-	// update left over, and the queued delete set once more. Integrating
-	// the queued blocks first (they may integrate now) changed which map
-	// keys are set first, and so what an undo restores.
+	bs := txn.Store()
+	// The order of yjs readUpdateV2: the update's own blocks first, by
+	// dependency stack; then, if blocks were queued before, whether the
+	// store has now passed a clock they wait on; the update's leftovers
+	// join the queue; the update's delete set, then the queued delete set;
+	// then, on a retry, the queued blocks once more and the queued delete
+	// set after them. Integrating the queued blocks first changed which
+	// map keys are set first, and so what an undo restores; retrying
+	// whenever something was queued integrated a block one update earlier
+	// than yjs when its dependency arrived below the recorded clock.
+	rest, missing := integrateStack(txn, u.Blocks)
+	retry := false
+	if len(p.Blocks) > 0 {
+		for client, clock := range p.Missing {
+			if clock < bs.GetClock(client) {
+				retry = true
+				break
+			}
+		}
+		for client, clock := range missing {
+			if m, ok := p.Missing[client]; !ok || clock < m {
+				p.Missing[client] = clock
+			}
+		}
+	} else {
+		p.Missing = missing
+	}
+	p.mergeBlocks(rest)
 	fresh := NewPending()
-	fresh.foldUpdate(u, txn.Store())
-	fresh.integrateAll(txn)
+	fresh.foldDeleteSet(u)
 	fresh.applyDeletes(txn, true)
 	p.applyDeletes(txn, false)
-	queued := len(p.Blocks) > 0
-	p.absorb(fresh)
-	if queued && p.integrateAll(txn) > 0 {
+	fresh.DeleteSet.Iterate(func(client uint64, ranges []Range) {
+		for _, r := range ranges {
+			p.DeleteSet.Insert(client, r.Start, r.Length)
+		}
+	})
+	if retry {
+		queued := p.Blocks
+		p.Blocks = map[uint64][]Block{}
+		rest, p.Missing = integrateStack(txn, queued)
+		p.mergeBlocks(rest)
 		p.applyDeletes(txn, false)
 	}
 	// Remote deletions moved indices the types' search markers knew.

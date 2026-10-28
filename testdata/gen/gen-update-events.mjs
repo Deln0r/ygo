@@ -56,6 +56,11 @@ const txn = (doc, origin, ...ops) => ({ doc, origin, ops });
 // against the current state vector of `to`; "since" applies the diff against
 // an explicit state vector `sv` ({client: clock}).
 const apply = (from, to, origin, what, sv) => ({ apply: { from, to, origin, what, ...(sv ? { sv } : {}) } });
+// applyRaw applies bytes built outside the scenario's documents (see the
+// builders below), for inputs no sequence of edits on these documents
+// produces: a known clock encoded live by a peer that never saw it
+// collected, say.
+const applyRaw = (to, origin, bytes) => ({ apply: { from: -1, to, origin, what: "raw", raw: bytes } });
 // replay applies again the exact bytes an earlier apply step sent.
 const replay = (step, to, origin) => ({ apply: { replay: step, to, origin } });
 const undo = (doc, um) => ({ undo: { doc, ...(um !== undefined ? { um } : {}) } });
@@ -69,6 +74,56 @@ const stop = (doc, um) => ({ stop: { doc, um } });
 const xmlElement = (path, index, name) => ({ op: "xmlElement", path, index, name });
 const xmlText = (path, index) => ({ op: "xmlText", path, index });
 const setAttr = (path, key, value) => ({ op: "setAttr", path, key, value });
+
+// Builders of raw inputs (applyRaw). They run on documents of their own,
+// with the scenario clients' IDs, so the bytes come from yjs itself.
+const H = CLIENTS[1];
+const MID = CLIENTS[2];
+const L = CLIENTS[3];
+const rawDoc = (client) => {
+  const d = new Y.Doc();
+  d.clientID = client;
+  return d;
+};
+const rawSV = (sv) => Y.encodeStateVector(new Map(Object.entries(sv).map(([c, k]) => [Number(c), k])));
+
+// L's three transactions after H's "h": "a" typed after it (L:0, waiting on
+// H), "bc" in another root (L:1..2), "d" in a third (L:3). withSkip merges
+// the first and the third, so it carries a Skip over L:1..2.
+const skipShadow = (() => {
+  const h = rawDoc(H);
+  const l = rawDoc(L);
+  h.getText("t").insert(0, "h");
+  const hu = Y.encodeStateAsUpdate(h);
+  Y.applyUpdate(l, hu);
+  const lu = [];
+  l.on("update", (u) => lu.push(u));
+  l.getText("t").insert(1, "a");
+  l.getText("y").insert(0, "bc");
+  l.getText("z").insert(0, "d");
+  return { withSkip: Y.mergeUpdates([lu[0], lu[2]]), middle: lu[1], h: hu };
+})();
+
+// H's x (H:0) inside a map L created (L:0), then L deletes the map, which a
+// third document collects, so it knows H:0 only as a GC run. gcH is that
+// document's H structs; staleH is H's own state, which never saw the
+// deletion: H:0 live, its parent L:0, and an independent "y" (H:1); lAll is
+// L's state.
+const fullyKnown = (() => {
+  const l = rawDoc(L);
+  const h = rawDoc(H);
+  const c = rawDoc(MID);
+  l.getMap("m").set("p", new Y.Map());
+  Y.applyUpdate(h, Y.encodeStateAsUpdate(l));
+  h.getMap("m").get("p").set("x", 1);
+  Y.applyUpdate(c, Y.encodeStateAsUpdate(h));
+  Y.applyUpdate(l, Y.encodeStateAsUpdate(h));
+  l.getMap("m").delete("p");
+  Y.applyUpdate(c, Y.encodeStateAsUpdate(l));
+  const gcH = Y.encodeStateAsUpdate(c, rawSV({ [L]: 1 }));
+  h.getText("t").insert(0, "y");
+  return { gcH, staleH: Y.encodeStateAsUpdate(h, rawSV({ [L]: 1 })), lAll: Y.encodeStateAsUpdate(l) };
+})();
 
 const T = "text:t";
 const A = "array:a";
@@ -638,6 +693,7 @@ const scenarios = [
   },
   {
     name: "insert-into-root-typed-after-formatting",
+    changed: false,
     description: "a document receives bold text while its root is untyped, then types it and appends: yjs's fresh YText has search markers on (format markers turn them off only as they integrate), so the insert starts at a marker with no attributes and steps over the closing bold:null; ygo keeps walking from the start, collects bold and inserts before it (pinned, docs/tech-debt.md)",
     docs: 2,
     steps: [
@@ -695,6 +751,119 @@ const scenarios = [
       apply(3, 4, "remote", "diff"),
       apply(2, 4, "remote", "diff"),
       apply(4, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "stack-chain-sets-keys-in-dependency-order",
+    description: "one relayed update holds a key set by three clients in turn: the highest client's write follows the middle one's, which follows the lowest's, and each also sets a key of its own. yjs integrates the chain first (L's k, M's k, H's k), then H's h, M's m and L's l, so deleting the map and undoing it restores k, h, m, l; integrating in passes set k, l, m, h",
+    docs: 5,
+    relays: [4],
+    managers: [{ doc: 0, scope: M }],
+    states: true,
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 2, "remote", "state"),
+      apply(0, 3, "remote", "state"),
+      apply(0, 4, "remote", "state"),
+      txn(3, null, set([M, "p"], "k", "L"), set([M, "p"], "l", "L")),
+      apply(3, 2, "remote", "diff"),
+      txn(2, null, set([M, "p"], "k", "M"), set([M, "p"], "m", "M")),
+      apply(2, 1, "remote", "diff"),
+      txn(1, null, set([M, "p"], "k", "H"), set([M, "p"], "h", "H")),
+      apply(3, 4, "remote", "diff"),
+      apply(2, 4, "remote", "diff"),
+      apply(1, 4, "remote", "diff"),
+      manage(0),
+      { apply: { from: 4, to: 0, origin: "remote", what: "diff", expect: [{ client: H, dep: MID }, { client: MID, dep: L }] } },
+      txn(0, null, mdel(M, "p")),
+      undo(0, 0),
+    ],
+  },
+  {
+    name: "stack-takes-the-next-block-of-the-client-waited-on",
+    description: "the highest client's key waits on the lowest client's fourth block, whose first three went into three other roots; yjs takes L's blocks one by one, the next each time, until the one waited on integrates: the types change in the order x, y, z, the map, h, then the middle client's root. Passes changed the middle client's root first",
+    docs: 5,
+    relays: [4],
+    steps: [
+      txn(0, "setup", setType(M, "p", "map")),
+      apply(0, 1, "remote", "state"),
+      apply(0, 3, "remote", "state"),
+      apply(0, 4, "remote", "state"),
+      txn(3, null, ins("text:x", 0, "a")),
+      txn(3, null, ins("text:y", 0, "b")),
+      txn(3, null, ins("text:z", 0, "c")),
+      txn(3, null, set([M, "p"], "k", "L")),
+      apply(3, 1, "remote", "diff"),
+      txn(1, null, set([M, "p"], "k", "H")),
+      txn(1, null, ins("text:h", 0, "h")),
+      txn(2, null, ins("text:m", 0, "m")),
+      apply(3, 4, "remote", "diff"),
+      apply(2, 4, "remote", "diff"),
+      apply(1, 4, "remote", "diff"),
+      { apply: { from: 4, to: 0, origin: "remote", what: "diff", expect: [{ client: H, dep: L }] } },
+    ],
+  },
+  {
+    name: "stack-wall-then-retry",
+    description: "doc 0 gets the highest client's two blocks without the lowest client's, which the first is typed after: both wait (the second has nothing to wait on but comes after the first), and when L's blocks arrive the retry integrates them in the same transaction",
+    docs: 4,
+    steps: [
+      txn(3, null, ins(T, 0, "ab")),
+      apply(3, 1, "remote", "diff"),
+      txn(1, null, ins(T, 2, "c")),
+      txn(1, null, ins("text:h", 0, "h")),
+      { apply: { from: 1, to: 0, origin: "remote", what: "since", sv: { [L]: 2 }, expect: [{ client: H, dep: L }] } },
+      apply(3, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "stack-retry-waits-for-the-recorded-clock",
+    description: "doc 0 gets H's X, typed after L's c (L:2), together with L's sixth block only (L:5): following X into L meets the hole before L:5, both wait, and yjs records L as missing from clock 4. L's first three blocks then arrive: L's clock is 3, not past 4, so yjs does not retry and X still waits, although what it was typed after is there now; retrying whenever something was queued integrated it here. L's next blocks pass clock 4, and the retry integrates X",
+    docs: 5,
+    relays: [2, 4],
+    states: true,
+    steps: [
+      txn(3, null, ins(T, 0, "abc")),
+      apply(3, 2, "remote", "diff"),
+      apply(3, 1, "remote", "diff"),
+      txn(1, null, ins(T, 3, "X")),
+      txn(3, null, ins("text:y", 0, "de")),
+      txn(3, null, ins("text:z", 0, "f")),
+      apply(3, 4, "remote", "diff"),
+      apply(1, 4, "remote", "diff"),
+      { apply: { from: 4, to: 0, origin: "remote", what: "since", sv: { [L]: 5 }, expect: [{ client: H, dep: L }, { client: L, from: 5 }] } },
+      apply(2, 0, "remote", "state"),
+      apply(4, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "pending-real-block-after-a-skip",
+    description: "a merged update carries L's first block (waiting on H) and fourth, with a Skip over the two between; then the real second and third blocks come, then H. The queue keeps no Skip, so the real blocks are not shadowed by it, and H's arrival lets all four of L's in",
+    docs: 1,
+    steps: [
+      applyRaw(0, "remote", skipShadow.withSkip),
+      applyRaw(0, "remote", skipShadow.middle),
+      applyRaw(0, "remote", skipShadow.h),
+    ],
+  },
+  {
+    name: "fully-known-block-still-walls",
+    description: "doc 0 knows H:0 only as a GC run, then gets H's own state, never collected: H:0 live with its parent in L, absent here, and an independent H:1. yjs checks a wholly known block's references too: H:0 waits on L and walls H, so H:1 waits as well, until L's state arrives and the retry lets it in",
+    docs: 1,
+    steps: [
+      applyRaw(0, "remote", fullyKnown.gcH),
+      applyRaw(0, "remote", fullyKnown.staleH),
+      applyRaw(0, "remote", fullyKnown.lAll),
+    ],
+  },
+  {
+    name: "partly-known-block-waits-on-its-original-reference",
+    description: "client 30 is known up to clock 1 as a GC run; then a live 30:0..1 arrives whose origin, client 20's, is absent. yjs checks the reference as the block came, before cutting the known 30:0, so the block waits and 30 stays at 1; cutting first would re-point the origin at 30:0 and let 30:1 in",
+    docs: 1,
+    steps: [
+      applyRaw(0, "remote", Buffer.from("01011e000001031e010001140100010a010001", "hex")),
+      applyRaw(0, "remote", Buffer.from("01011e0084140002616200", "hex")),
     ],
   },
   {
@@ -1532,6 +1701,44 @@ const applyOp = (doc, op) => {
 const hex = (u8) => Buffer.from(u8).toString("hex");
 const svBytes = (sv) => Y.encodeStateVector(new Map(Object.entries(sv).map(([c, k]) => [Number(c), k])));
 
+// typePath names a type for the changed lists: a root by its name, a
+// nested type by its parent's path and its map key or array index,
+// "<deleted>" once its item is deleted.
+const typePath = (doc, type) => {
+  if (type._item === null) {
+    for (const [name, t] of doc.share) if (t === type) return name;
+    throw new Error("root type not in doc.share");
+  }
+  if (type._item.deleted) return "<deleted>";
+  const parent = type._item.parent;
+  if (type._item.parentSub !== null) return `${typePath(doc, parent)}/${type._item.parentSub}`;
+  let i = 0;
+  for (let it = parent._start; it !== null && it !== type._item; it = it.right) {
+    if (!it.deleted && it.countable) i += it.length;
+  }
+  return `${typePath(doc, parent)}/${i}`;
+};
+
+// expectShape checks that an applied update holds what a scenario is built
+// on, so that a local edit that merges or cleans the structs the scenario
+// relies on fails the generator instead of quietly testing something else.
+// Each entry {client, dep} asks for a struct of client whose origin, right
+// origin or parent is a block of client dep; {client, from} for client's
+// structs to start at clock from.
+const expectShape = (name, k, u, expect) => {
+  const { structs } = Y.decodeUpdate(u);
+  for (const e of expect) {
+    const own = structs.filter((st) => st.id.client === e.client);
+    if (e.dep !== undefined) {
+      const ok = own.some((st) => [st.origin, st.rightOrigin, st.parent].some((r) => r && r.client === e.dep && typeof r.clock === "number"));
+      if (!ok) throw new Error(`${name} step ${k}: no struct of ${e.client} depends on ${e.dep}`);
+    }
+    if (e.from !== undefined && (own.length === 0 || own[0].id.clock !== e.from)) {
+      throw new Error(`${name} step ${k}: structs of ${e.client} start at ${own.length ? own[0].id.clock : "none"}, want ${e.from}`);
+    }
+  }
+};
+
 const out = scenarios.map((sc) => {
   const n = sc.docs || 1;
   const gc = sc.gc !== false;
@@ -1544,7 +1751,11 @@ const out = scenarios.map((sc) => {
   // undoGroup: one undo step for everything (a capture timeout no test
   // reaches); otherwise every transaction is its own step. The manager
   // tracks the null origin only, so a "setup" transaction is not undoable.
-  const ums = docs.map((d) => (sc.undoScope ? new Y.UndoManager(resolveType(d, sc.undoScope), { captureTimeout: sc.undoGroup ? 1e9 : 0 }) : null));
+  // relays: documents that only forward updates. Nothing reads their
+  // roots (no undo scope, no state snapshot), so none is typed and a relay
+  // never runs a format cleanup of its own.
+  const relays = new Set(sc.relays || []);
+  const ums = docs.map((d, i) => (sc.undoScope && !relays.has(i) ? new Y.UndoManager(resolveType(d, sc.undoScope), { captureTimeout: sc.undoGroup ? 1e9 : 0 }) : null));
   const managers = (sc.managers || []).map(() => null);
   const events = [];
   let step = -1;
@@ -1559,11 +1770,19 @@ const out = scenarios.map((sc) => {
   const managerAt = (u) => (u.um === undefined ? ums[u.doc] : managers[u.um]);
   const rootKeys = [...new Set(sc.steps.flatMap((s) => (s.ops || []).map((op) => (Array.isArray(op.path) ? op.path[0] : op.path))).concat(sc.undoScope ? [sc.undoScope] : []).concat((sc.managers || []).map((m) => (Array.isArray(m.scope) ? m.scope[0] : m.scope))))].sort();
   const snapshot = () => ({
-    state: docs.map((d) => Object.fromEntries(rootKeys.map((r) => [r, resolveType(d, r).toJSON()]))),
+    state: docs.map((d, i) => (relays.has(i) ? null : Object.fromEntries(rootKeys.map((r) => [r, resolveType(d, r).toJSON()])))),
     stacks: managers.map((m) => (m ? [m.canUndo(), m.canRedo()] : null)),
   });
+  // changed (on unless a scenario turns it off): the types each
+  // transaction changed, in yjs's order
+  // (transaction.changed, filled as the transaction first changes each), as
+  // paths. afterTransaction fires before the update event of the same
+  // transaction, so the list goes on the next update event of the document.
+  const changed = sc.changed !== false;
+  const lastChanged = docs.map(() => null);
   docs.forEach((d, i) => {
-    d.on("update", (u, origin) => events.push({ step, doc: i, origin: originName(origin, i), v1: hex(u) }));
+    if (changed) d.on("afterTransaction", (tr) => { lastChanged[i] = [...tr.changed.keys()].map((t) => typePath(d, t)); });
+    d.on("update", (u, origin) => events.push({ step, doc: i, origin: originName(origin, i), v1: hex(u), ...(changed ? { changed: lastChanged[i] } : {}) }));
     d.on("updateV2", (u, origin) => {
       const ev = events.findLast((e) => e.step === step && e.doc === i && e.v2 === undefined);
       if (!ev) throw new Error("updateV2 without a matching update");
@@ -1578,12 +1797,15 @@ const out = scenarios.map((sc) => {
       const { from, to, origin, what, sv } = s.apply;
       let u;
       if (s.apply.replay !== undefined) u = Buffer.from(steps[s.apply.replay].apply.update, "hex");
+      else if (what === "raw") u = s.apply.raw;
       else if (what === "state") u = Y.encodeStateAsUpdate(docs[from]);
       else if (what === "diff") u = Y.encodeStateAsUpdate(docs[from], Y.encodeStateVector(docs[to]));
       else if (what === "since") u = Y.encodeStateAsUpdate(docs[from], svBytes(sv));
       else throw new Error(`unknown apply ${what}`);
+      if (s.apply.expect) expectShape(sc.name, k, u, s.apply.expect);
       Y.applyUpdate(docs[to], u, origin);
-      steps.push({ apply: { ...s.apply, update: hex(u) } });
+      const { expect, raw, ...apply } = s.apply;
+      steps.push({ apply: { ...apply, update: hex(u), update_v2: hex(Y.convertUpdateFormatV1ToV2(u)) } });
     } else if (s.undo || s.redo) {
       const um = managerAt(s.undo || s.redo);
       const result = (s.undo ? um.undo() : um.redo()) !== null;
@@ -1636,6 +1858,8 @@ const out = scenarios.map((sc) => {
     clients: CLIENTS.slice(0, n),
     ...(sc.undoScope ? { undo_scope: sc.undoScope, undo_group: !!sc.undoGroup } : {}),
     ...(sc.managers ? { managers: sc.managers } : {}),
+    ...(sc.relays ? { relays: sc.relays } : {}),
+    changed,
     ...(sc.states ? { root_keys: [...new Set(sc.steps.flatMap((s) => (s.ops || []).map((op) => (Array.isArray(op.path) ? op.path[0] : op.path))).concat((sc.managers || []).map((m) => (Array.isArray(m.scope) ? m.scope[0] : m.scope))))].sort() } : {}),
     steps,
     events,

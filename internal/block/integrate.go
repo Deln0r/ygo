@@ -42,6 +42,11 @@ type IntegrateContext interface {
 	// creating it lazily if absent. Used by Repair to resolve
 	// ParentNamed references arriving from wire updates.
 	GetOrCreateBranch(name string) *Branch
+
+	// AddedSubdoc records a subdocument item as it integrates, so the
+	// transaction reports subdocuments in the order they integrated in
+	// (yjs ContentDoc.integrate adds to transaction.subdocsAdded).
+	AddedSubdoc(item *Item)
 }
 
 // Integrate inserts this Item into its parent branch, running the
@@ -248,9 +253,10 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 		if parent.TypeRef == TypeRefText || parent.TypeRef == TypeRefXmlText {
 			parent.FormattedText = true
 		}
-	case KindMove, KindDoc:
-		// Defer per tech-debt.md (Move integration, subdoc
-		// registration).
+	case KindDoc:
+		ctx.AddedSubdoc(i)
+	case KindMove:
+		// Deferred per tech-debt.md (Move integration).
 	case KindType:
 		// Nested-type init: wire the embedded Branch's back-
 		// reference to this Item so subsequent extractValue calls

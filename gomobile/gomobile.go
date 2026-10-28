@@ -249,9 +249,10 @@ func (d *Doc) HasPending() bool {
 	return encoding.HasPending(t)
 }
 
-// MissingSV returns the wire-encoded V1 state vector identifying
-// the clocks this doc needs to receive in order to drain its
-// pending buffer. Send to a peer as a re-fetch request.
+// MissingSV returns the wire-encoded V1 state vector to ask a peer
+// with for what this doc's pending buffer waits on: for each client a
+// queued block or delete needs, the clock the doc has for it. Send to a
+// peer as a re-fetch request; its diff against it carries the rest.
 //
 // An empty return ([]byte{0x00}, the encoded-empty-SV) means the
 // pending buffer is empty.

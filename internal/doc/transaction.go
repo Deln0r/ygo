@@ -125,6 +125,9 @@ type TransactionMut struct {
 	subdocsAdded   []string
 	subdocsRemoved []string
 	subdocsLoaded  []string
+	// subdocItems are the subdocument items integrated in this
+	// transaction, in integration order (AddedSubdoc).
+	subdocItems []*block.Item
 
 	// There is no mergeBlocks list: squashNewBlocks walks every client
 	// whose clock moved in this transaction, from its start state on,
@@ -275,68 +278,31 @@ func (t *TransactionMut) commitLocked() (cleanup *TransactionMut) {
 // the in-memory handle is reachable via Subdoc(guid).
 func (t *TransactionMut) trackSubdocs() {
 	bs := t.doc.store
-	// Clients with new clocks, from the highest ID down, the order an
-	// update integrates them in, so Added lists subdocuments in yjs's order
-	// rather than Go's random map order. Usually there is one.
-	var one [1]uint64
-	clients := one[:0]
-	for c, after := range t.afterState {
-		if after > t.beforeState[c] {
-			clients = append(clients, c)
+	// In the order the items integrated, as yjs fills subdocsAdded from
+	// ContentDoc.integrate. Rebuilding the list from the clients' new
+	// clocks, highest ID first, was right only while no block of an update
+	// waited on another client's: an imported subdocument then integrates
+	// before the one that follows it.
+	for _, it := range t.subdocItems {
+		guid := it.Content.DocGuid
+		// A ContentDoc added and tombstoned in the SAME transaction is a
+		// net no-op: yjs's ContentDoc.delete removes the doc from
+		// subdocsAdded (and never reaches subdocsRemoved) when it was
+		// added this txn. Surface it in neither Added nor Loaded, and
+		// drop the handle SetDoc eagerly registered so the registry does
+		// not retain a cancelled subdoc; the removed-scan below skips it
+		// symmetrically.
+		if it.IsDeleted() {
+			t.doc.RemoveSubdoc(guid)
+			continue
 		}
-	}
-	if len(clients) > 1 {
-		sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
-	}
-	for _, client := range clients {
-		after := t.afterState[client]
-		clock := t.beforeState[client]
-		for clock < after {
-			// Walk cell by cell, not clock by clock: a Skip block can
-			// cover a huge clock range in a single GC cell, and advancing
-			// one clock at a time over it (GetItem returns nil there) is
-			// O(range) — a malformed update with a multi-billion-clock
-			// Skip would hang here. GetBlock locates the covering cell so
-			// we jump past it in one step.
-			cell, ok := bs.GetBlock(block.ID{Client: client, Clock: clock})
-			if !ok {
-				break // no cell covers this clock; the contiguous run ended
-			}
-			it := cell.AsItem()
-			if it == nil {
-				if !advanceClock(&clock, cell.ClockEnd()) { // skip a GC / Skip cell whole
-					break
-				}
-				continue
-			}
-			if it.Content.Kind == block.KindDoc {
-				guid := it.Content.DocGuid
-				// A ContentDoc added and tombstoned in the SAME transaction
-				// is a net no-op: yjs's ContentDoc.delete removes the doc
-				// from subdocsAdded (and never reaches subdocsRemoved) when
-				// it was added this txn. Surface it in neither Added nor
-				// Loaded, and drop the handle SetDoc eagerly registered so
-				// the registry does not retain a cancelled subdoc; the
-				// removed-scan below skips it symmetrically.
-				if it.IsDeleted() {
-					t.doc.RemoveSubdoc(guid)
-					if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
-						break
-					}
-					continue
-				}
-				t.subdocsAdded = append(t.subdocsAdded, guid)
-				sub := t.doc.Subdoc(guid) // create + register the handle
-				if optBool(it.Content.DocOpts, "autoLoad") {
-					sub.Load()
-				}
-				if sub.ShouldLoad() {
-					t.subdocsLoaded = append(t.subdocsLoaded, guid)
-				}
-			}
-			if !advanceClock(&clock, it.ID.Clock+it.Len-1) {
-				break
-			}
+		t.subdocsAdded = append(t.subdocsAdded, guid)
+		sub := t.doc.Subdoc(guid) // create + register the handle
+		if optBool(it.Content.DocOpts, "autoLoad") {
+			sub.Load()
+		}
+		if sub.ShouldLoad() {
+			t.subdocsLoaded = append(t.subdocsLoaded, guid)
 		}
 	}
 	for _, id := range t.deletedIDs {
@@ -884,6 +850,12 @@ var TypeEventHook func(t *TransactionMut)
 // it in the cleanup transaction Commit then opens, or nil. The types
 // package installs it.
 var FormatCleanupHook func(remote *TransactionMut) func(cleanup *TransactionMut)
+
+// AddedSubdoc implements block.IntegrateContext: it records a
+// subdocument item as it integrates, for trackSubdocs.
+func (t *TransactionMut) AddedSubdoc(item *block.Item) {
+	t.subdocItems = append(t.subdocItems, item)
+}
 
 // GetOrCreateBranch returns the root branch with the given name from
 // the doc's root-branch registry. Used by block.Repair to resolve

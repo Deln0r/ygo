@@ -2,6 +2,7 @@ package ygo_test
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 
 	"github.com/Deln0r/ygo"
@@ -405,5 +406,29 @@ func TestMergeUpdates_PreservesPendingDeletes(t *testing.T) {
 	}
 	if got := rootText(t, d, "t"); got != want {
 		t.Fatalf("read %q after the insert arrived, want %q; the merge dropped the queued delete and the text came back", got, want)
+	}
+}
+
+// A queued block can start below what the store has: client 30's run is
+// known as a one-clock GC, then a live encoding of 30:0..1 arrives whose
+// origin, client 20's, is absent. It is queued as it came (its reference
+// is checked before the known prefix is cut, as yjs does), so merging has
+// to carry its unknown clock, 30:1, rather than drop the whole block for
+// starting below the store clock. yjs 13.6.33 mergeUpdates of the same two
+// updates reaches 30 at clock 2 too. The V2 merge builds the same plan
+// (buildMergePlan) and only emits it differently.
+func TestMergeUpdates_CarriesQueuedBlockPastStoreClock(t *testing.T) {
+	a, _ := hex.DecodeString("01011e000001031e010001140100010a010001")
+	b, _ := hex.DecodeString("01011e0084140002616200")
+	merged, err := ygo.MergeUpdates([][]byte{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err := ygo.EncodeStateVectorFromUpdate(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(sv); got != "011e02" {
+		t.Errorf("merged update's state vector %s, want 011e02 (client 30 up to clock 2)", got)
 	}
 }
