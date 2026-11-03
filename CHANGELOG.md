@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.31.0] - 2026-11-03
 
 **Upgrade impact**:
 
@@ -2080,6 +2080,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.31.0]: https://github.com/Deln0r/ygo/releases/tag/v1.31.0
 [1.30.0]: https://github.com/Deln0r/ygo/releases/tag/v1.30.0
 [1.29.0]: https://github.com/Deln0r/ygo/releases/tag/v1.29.0
 [1.28.0]: https://github.com/Deln0r/ygo/releases/tag/v1.28.0
