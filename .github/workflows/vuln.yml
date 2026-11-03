@@ -22,3 +22,12 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: run govulncheck
         run: govulncheck ./...
+      # The nested modules are modules of their own, so the run above does
+      # not see their dependencies (nats.go and nats-server, mautrix, and
+      # the golang.org/x modules they bring).
+      - name: run govulncheck on the NATS backplane module
+        working-directory: server/backplane/nats
+        run: govulncheck ./...
+      - name: run govulncheck on the Matrix transport module
+        working-directory: integration/matrix
+        run: govulncheck ./...

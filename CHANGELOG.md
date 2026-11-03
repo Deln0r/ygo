@@ -14,6 +14,15 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Infrastructure
+
+- The vulnerability check (`vuln.yml`) also runs in the two nested modules.
+  They are modules of their own, so the check in the core never saw their
+  dependencies, and both still required versions with published advisories
+  (see nats/0.2.1 and matrix/0.1.2).
+
 ## [1.30.0] - 2026-10-28
 
 **Upgrade impact** - An update whose blocks wait on blocks of other clients
@@ -1903,6 +1912,21 @@ The optional NATS backplane adapter is a separate Go module
 (`github.com/Deln0r/ygo/server/backplane/nats`) so the ygo core stays
 dependency-free. It is versioned independently of ygo itself.
 
+## [nats/0.2.1] - 2026-11-03
+
+Dependencies only; no change in the adapter.
+
+### Changed
+- Requires ygo v1.30.0, up from v1.14.0. A build that adds only this module
+  no longer starts from a core without the fixes since 1.14 (the per-
+  connection send queues of 1.28.0 among them, which this adapter's
+  re-broadcasts go through).
+- nats.go v1.52.0 to v1.55.0 and nats-server (tests) v2.14.3 to v2.15.2, and
+  with them golang.org/x/crypto v0.53.0 to v0.58.0 and klauspost/compress
+  v1.18.6 to v1.20.3. That clears GO-2026-5841, GO-2026-6303, GO-2026-6354
+  and GO-2026-6355 from the module graph; govulncheck found none of them
+  called from this module. GO-2026-5932 (x/crypto) has no tagged fix yet.
+
 ## [nats/0.2.0] - 2026-07-27
 
 JetStream adapter for reliable cross-instance delivery.
@@ -1950,6 +1974,23 @@ The Matrix transport is a separate Go module
 (`github.com/Deln0r/ygo/integration/matrix`) so that importing ygo does not
 pull mautrix and its transitive tree into a build that only wants the CRDT. It
 is versioned independently of ygo itself.
+
+## [matrix/0.1.2] - 2026-11-03
+
+Dependencies only; no change in the transport.
+
+### Changed
+- Requires ygo v1.30.0, up from v1.18.1. A build that adds only this module
+  no longer starts from a core without the fixes since 1.18.1 (strings that
+  are not valid UTF-8 refused on the wire in 1.26.0, among them, which
+  matters for a transport whose input is whatever a room member posts).
+- mautrix v0.30.0 to v0.32.0, and with it golang.org/x/net v0.58.0 to
+  v0.62.0 and golang.org/x/crypto v0.55.0 to v0.58.0. That clears
+  GO-2026-6354, GO-2026-6355, GO-2026-6603, GO-2026-6610, GO-2026-6611,
+  GO-2026-6612, GO-2026-6617, GO-2026-6860 and GO-2026-6866 from the module
+  graph; govulncheck found none of them called from this module.
+  GO-2026-5932 (x/crypto) has no tagged fix yet. The integration tests and
+  the convergence demo passed against a real Dendrite with the new mautrix.
 
 ## [matrix/0.1.1] - 2026-09-04
 
@@ -2040,7 +2081,9 @@ not tested (the compose stack runs a single homeserver).
 [1.0.0]: https://github.com/Deln0r/ygo/releases/tag/v1.0.0
 [0.10.0]: https://github.com/Deln0r/ygo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/Deln0r/ygo/releases/tag/v0.9.0
+[nats/0.2.1]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.2.1
 [nats/0.2.0]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.2.0
 [nats/0.1.0]: https://github.com/Deln0r/ygo/releases/tag/server/backplane/nats/v0.1.0
+[matrix/0.1.2]: https://github.com/Deln0r/ygo/releases/tag/integration/matrix/v0.1.2
 [matrix/0.1.1]: https://github.com/Deln0r/ygo/releases/tag/integration/matrix/v0.1.1
 [matrix/0.1.0]: https://github.com/Deln0r/ygo/releases/tag/integration/matrix/v0.1.0
