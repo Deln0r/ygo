@@ -369,3 +369,53 @@ func TestHandler_SendInitialSync_EmitsStep1AndAwareness(t *testing.T) {
 		t.Errorf("second frame type = %d, want MessageAwareness", second.Type)
 	}
 }
+
+// The awareness snapshots a connection sends, the initial one and the
+// QueryAwareness reply, list the clients in the order their states
+// appeared, the same bytes every time, and with only tombstones left the
+// reply has no entries.
+func TestHandler_AwarenessSnapshotsInStateOrder(t *testing.T) {
+	aw := awareness.New(5)
+	aw.SetLocalState([]byte(`{"n":5}`))
+	for _, id := range []uint64{9, 2, 7} {
+		peer := awareness.New(id)
+		peer.SetLocalState([]byte(`{"p":1}`))
+		if _, err := aw.Apply(peer.Encode(nil), "peer"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := aw.Encode([]uint64{5, 9, 2, 7})
+	for i := 0; i < 50; i++ {
+		conn, tr := newTestConn(t, doc.NewDoc(), aw, "c")
+		if err := conn.SendInitialSync(); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeQueryAwareness())); err != nil {
+			t.Fatal(err)
+		}
+		var snaps [][]byte
+		for _, b := range tr.Sent {
+			if f := decodeOrFail(t, b); f.Type == syncpkg.MessageAwareness {
+				snaps = append(snaps, f.Payload)
+			}
+		}
+		if len(snaps) != 2 || !bytes.Equal(snaps[0], want) || !bytes.Equal(snaps[1], want) {
+			t.Fatalf("run %d: snapshots %x, want twice %x", i, snaps, want)
+		}
+	}
+
+	only := awareness.New(1)
+	peer := awareness.New(9)
+	peer.SetLocalState([]byte(`{"p":1}`))
+	if _, err := only.Apply(peer.Encode(nil), "peer"); err != nil {
+		t.Fatal(err)
+	}
+	only.RemoveState(9)
+	conn, tr := newTestConn(t, doc.NewDoc(), only, "c")
+	if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeQueryAwareness())); err != nil {
+		t.Fatal(err)
+	}
+	if reply := decodeOrFail(t, tr.Sent[0]); !bytes.Equal(reply.Payload, []byte{0}) {
+		t.Fatalf("reply with only a tombstone: %x, want an update with no entries", reply.Payload)
+	}
+}

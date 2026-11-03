@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -120,10 +121,26 @@ type Awareness struct {
 	// SetMaxForeignClients.
 	maxForeignClients int
 
+	// live holds the clients with a state in the order their state
+	// appeared, as yjs's awareness.states Map keeps them: the local
+	// client when it first sets a state, others as their states arrive;
+	// a removed client leaves it and comes back at the end. dead holds
+	// the tombstones (removed clients whose clock is kept) in the order
+	// they became tombstones. Guarded by mu.
+	live []uint64
+	dead []uint64
+
 	subMu       sync.Mutex
 	nextSubID   atomic.Uint64
-	onUpdateSub map[uint64]Sub
-	onChangeSub map[uint64]Sub
+	onUpdateSub []subscription
+	onChangeSub []subscription
+}
+
+// subscription is one OnUpdate / OnChange registration; the slices keep
+// registration order, which lib0's Observable keeps for y-protocols.
+type subscription struct {
+	id uint64
+	fn Sub
 }
 
 // New returns an Awareness instance for the given local clientID
@@ -137,11 +154,9 @@ func New(clientID uint64) *Awareness {
 // values; pass time.Now in production.
 func NewWithClock(clientID uint64, now func() time.Time) *Awareness {
 	return &Awareness{
-		clientID:    clientID,
-		now:         now,
-		states:      map[uint64]*ClientState{},
-		onUpdateSub: map[uint64]Sub{},
-		onChangeSub: map[uint64]Sub{},
+		clientID: clientID,
+		now:      now,
+		states:   map[uint64]*ClientState{},
 	}
 }
 
@@ -229,7 +244,13 @@ func (a *Awareness) SetLocalState(jsonState []byte) {
 		prevData = prev.Data
 	}
 	now := a.now()
-	newClock := uint32(0)
+	// y-protocols starts every awareness at an implicit {} with clock 0,
+	// so its first explicit state goes out with clock 1, and a receiver
+	// that has not seen the client takes only a clock above 0. Starting
+	// here at 0 made the first state of a Go client invisible to
+	// JavaScript peers until the next one. There is no implicit state:
+	// a passive server room stays empty.
+	newClock := uint32(1)
 	if existed {
 		newClock = prev.Clock + 1
 	}
@@ -241,6 +262,9 @@ func (a *Awareness) SetLocalState(jsonState []byte) {
 		LastUpdated: now,
 		Data:        stateCopy,
 	}
+	if !existed || prevData == nil {
+		a.markLive(a.clientID)
+	}
 	a.mu.Unlock()
 
 	summary := Summary{}
@@ -250,12 +274,12 @@ func (a *Awareness) SetLocalState(jsonState []byte) {
 		summary.Updated = []uint64{a.clientID}
 	}
 
-	a.fireUpdate(summary, originLocal)
-
-	contentChanged := !existed || prevData == nil || !bytes.Equal(prevData, stateCopy)
+	// 'change' before 'update', as y-protocols emits them.
+	contentChanged := !existed || prevData == nil || !sameState(prevData, stateCopy)
 	if contentChanged {
 		a.fireChange(summary, originLocal)
 	}
+	a.fireUpdate(summary, originLocal)
 }
 
 // SetLocalStateJSON marshals v with encoding/json and forwards to
@@ -274,27 +298,30 @@ func (a *Awareness) SetLocalStateJSON(v any) error {
 	return nil
 }
 
-// RemoveLocalState marks the local client offline. The wire-format
-// representation is an entry with JSON "null"; the local entry is
-// kept (with Data = nil) so the clock survives subsequent revival
-// races.
-//
-// No-op when the local client never set a state.
+// RemoveLocalState marks the local client offline, as y-protocols
+// setLocalState(null) does: the clock bumps, the wire carries the entry
+// with JSON "null", and the local entry is kept (with Data = nil) so the
+// clock survives later revival races. OnChange and OnUpdate report the
+// local client removed, also when it was removed already or never set
+// a state: y-protocols starts every awareness at an implicit {} with
+// clock 0, so its first removal goes out at clock 1, which is what
+// clears a state a peer still holds for this client ID.
 func (a *Awareness) RemoveLocalState() {
 	a.mu.Lock()
 	prev, existed := a.states[a.clientID]
-	if !existed || prev.Data == nil {
-		a.mu.Unlock()
-		return
+	if existed {
+		prev.Clock++
+		prev.LastUpdated = a.now()
+		prev.Data = nil
+	} else {
+		a.states[a.clientID] = &ClientState{Clock: 1, LastUpdated: a.now()}
 	}
-	prev.Clock++
-	prev.LastUpdated = a.now()
-	prev.Data = nil
+	a.markDead(a.clientID)
 	a.mu.Unlock()
 
 	summary := Summary{Removed: []uint64{a.clientID}}
-	a.fireUpdate(summary, originLocal)
 	a.fireChange(summary, originLocal)
+	a.fireUpdate(summary, originLocal)
 }
 
 // States returns a snapshot of all currently-online client states
@@ -316,6 +343,29 @@ func (a *Awareness) States() map[uint64][]byte {
 		out[id] = c
 	}
 	return out
+}
+
+// ClientIDs returns the clients that have a state, in the order their
+// states appeared (yjs awareness.getStates() order): a removed client
+// is not in it, and one that comes back is at the end.
+func (a *Awareness) ClientIDs() []uint64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return append([]uint64(nil), a.live...)
+}
+
+// EncodeLive encodes every client that has a state, in ClientIDs order,
+// as y-protocols callers encode "everyone" with
+// encodeAwarenessUpdate(awareness, [...getStates().keys()]). With no such
+// client the update has no entries; Encode(nil) would send the
+// tombstones instead.
+func (a *Awareness) EncodeLive() []byte {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	// The IDs and their states under one lock: taking the IDs, unlocking
+	// and encoding them later could send a client removed in between, or
+	// an order that never existed.
+	return a.encodeLocked(a.live)
 }
 
 // Meta returns the per-client metadata. The third return is false
@@ -346,14 +396,19 @@ func (a *Awareness) RemoveState(clientID uint64) {
 		a.mu.Unlock()
 		return
 	}
-	prev.Clock++
+	// The clock stays: y-protocols removeAwarenessStates raises only the
+	// local client's. The removal goes out at the client's last clock,
+	// which receivers holding its state accept, and the client's next
+	// state, one clock up, is taken again. Raising it here made the
+	// client's next state look stale and dropped it.
 	prev.LastUpdated = a.now()
 	prev.Data = nil
+	a.markDead(clientID)
 	a.mu.Unlock()
 
 	summary := Summary{Removed: []uint64{clientID}}
-	a.fireUpdate(summary, originLocal)
 	a.fireChange(summary, originLocal)
+	a.fireUpdate(summary, originLocal)
 }
 
 // SweepOutdated removes every non-local client whose LastUpdated
@@ -375,21 +430,24 @@ func (a *Awareness) SweepOutdated(threshold time.Duration) []uint64 {
 			continue
 		}
 		if s.LastUpdated.Before(cutoff) {
-			s.Clock++
+			// The clock stays, as in RemoveState.
 			s.LastUpdated = a.now()
 			s.Data = nil
 			removed = append(removed, id)
 		}
+	}
+	sortAscending(removed)
+	for _, id := range removed {
+		a.markDead(id)
 	}
 	a.mu.Unlock()
 
 	if len(removed) == 0 {
 		return nil
 	}
-	sortAscending(removed)
 	summary := Summary{Removed: removed}
-	a.fireUpdate(summary, originTimeout)
 	a.fireChange(summary, originTimeout)
+	a.fireUpdate(summary, originTimeout)
 	return removed
 }
 
@@ -421,6 +479,7 @@ func (a *Awareness) PurgeTombstones(threshold time.Duration) int {
 		}
 		if s.LastUpdated.Before(cutoff) {
 			delete(a.states, id)
+			a.forget(id)
 			purged++
 		}
 	}
@@ -440,14 +499,21 @@ func (a *Awareness) Encode(clientIDs []uint64) []byte {
 
 	var ids []uint64
 	if len(clientIDs) == 0 {
-		ids = make([]uint64, 0, len(a.states))
-		for id := range a.states {
-			ids = append(ids, id)
-		}
+		// Live clients in the order their states appeared, then the
+		// tombstones in the order they were removed: the first half is
+		// yjs's getStates() order, the second is this package's own.
+		ids = make([]uint64, 0, len(a.live)+len(a.dead))
+		ids = append(append(ids, a.live...), a.dead...)
 	} else {
 		ids = clientIDs
 	}
 
+	return a.encodeLocked(ids)
+}
+
+// encodeLocked encodes the clients ids in that order, skipping unknown
+// ones. Caller holds mu.
+func (a *Awareness) encodeLocked(ids []uint64) []byte {
 	entries := make([]wireEntry, 0, len(ids))
 	for _, id := range ids {
 		s, ok := a.states[id]
@@ -518,6 +584,11 @@ func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, err
 	}
 
 	a.mu.Lock()
+	// The classes y-protocols applyAwarenessUpdate reports: added for a
+	// client never seen; removed for a null from a client seen before,
+	// also one already removed; updated for a state from a client seen
+	// before, a revival included, and changed (the 'change' event's
+	// updated) for those whose state differs.
 	var added, updated, removed, changed []uint64
 	for _, e := range entries {
 		incomingIsNull := bytes.Equal(e.JSON, []byte(NullStateJSON))
@@ -549,8 +620,9 @@ func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, err
 		if e.ClientID == a.clientID && incomingIsNull && !prevIsNull {
 			prev.Clock = e.Clock + 1
 			prev.LastUpdated = a.now()
-			updated = append(updated, e.ClientID)
-			// no change event — our content didn't change
+			// Reported removed, as y-protocols does, though the state is
+			// kept: the next heartbeat carries it at the new clock.
+			removed = append(removed, e.ClientID)
 			continue
 		}
 
@@ -586,25 +658,27 @@ func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, err
 		}
 
 		if incomingIsNull {
-			if !prevIsNull {
-				prev.Data = nil
+			prev.Data = nil
+			if existed {
 				removed = append(removed, e.ClientID)
-				changed = append(changed, e.ClientID)
 			}
-			// nil → nil: nothing to record (already filtered by accept check)
+			// A tombstone, seen before or not.
+			a.markDead(e.ClientID)
 			continue
 		}
 
 		dataCopy := make([]byte, len(e.JSON))
 		copy(dataCopy, e.JSON)
 		prev.Data = dataCopy
-
 		if prevIsNull {
+			a.markLive(e.ClientID)
+		}
+
+		if !existed {
 			added = append(added, e.ClientID)
-			changed = append(changed, e.ClientID)
 		} else {
 			updated = append(updated, e.ClientID)
-			if !bytes.Equal(prevData, e.JSON) {
+			if prevIsNull || !sameState(prevData, e.JSON) {
 				changed = append(changed, e.ClientID)
 			}
 		}
@@ -616,8 +690,7 @@ func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, err
 		Updated: updated,
 		Removed: removed,
 	}
-	a.fireUpdate(summary, origin)
-
+	// 'change' before 'update', as y-protocols emits them.
 	if len(added) > 0 || len(removed) > 0 || len(changed) > 0 {
 		changeSummary := Summary{
 			Added:   added,
@@ -626,6 +699,7 @@ func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, err
 		}
 		a.fireChange(changeSummary, origin)
 	}
+	a.fireUpdate(summary, origin)
 
 	return summary, nil
 }
@@ -637,30 +711,14 @@ func (a *Awareness) apply(update []byte, origin any, foreign bool) (Summary, err
 // Use OnUpdate for traffic accounting or debug logging. For UI
 // redraws prefer OnChange — heartbeats are noise.
 func (a *Awareness) OnUpdate(f Sub) (unsub func()) {
-	id := a.nextSubID.Add(1)
-	a.subMu.Lock()
-	a.onUpdateSub[id] = f
-	a.subMu.Unlock()
-	return func() {
-		a.subMu.Lock()
-		delete(a.onUpdateSub, id)
-		a.subMu.Unlock()
-	}
+	return a.subscribe(&a.onUpdateSub, f)
 }
 
 // OnChange registers a callback fired only when the JSON state
 // content actually differs from the previous value, or on
 // add/remove. Returns an unsubscribe closure.
 func (a *Awareness) OnChange(f Sub) (unsub func()) {
-	id := a.nextSubID.Add(1)
-	a.subMu.Lock()
-	a.onChangeSub[id] = f
-	a.subMu.Unlock()
-	return func() {
-		a.subMu.Lock()
-		delete(a.onChangeSub, id)
-		a.subMu.Unlock()
-	}
+	return a.subscribe(&a.onChangeSub, f)
 }
 
 const (
@@ -668,34 +726,104 @@ const (
 	originTimeout = "timeout"
 )
 
-func (a *Awareness) fireUpdate(s Summary, origin any) {
-	if s.IsEmpty() {
-		return
-	}
+// subscribe adds f to list in registration order and returns its
+// removal.
+func (a *Awareness) subscribe(list *[]subscription, f Sub) (unsub func()) {
+	id := a.nextSubID.Add(1)
 	a.subMu.Lock()
-	subs := make([]Sub, 0, len(a.onUpdateSub))
-	for _, fn := range a.onUpdateSub {
-		subs = append(subs, fn)
-	}
+	*list = append(*list, subscription{id: id, fn: f})
 	a.subMu.Unlock()
-	for _, fn := range subs {
-		fn(s, origin)
+	return func() {
+		a.subMu.Lock()
+		defer a.subMu.Unlock()
+		for i, s := range *list {
+			if s.id == id {
+				*list = append((*list)[:i:i], (*list)[i+1:]...)
+				return
+			}
+		}
 	}
 }
 
+func (a *Awareness) fireUpdate(s Summary, origin any) {
+	a.fire(&a.onUpdateSub, s, origin)
+}
+
 func (a *Awareness) fireChange(s Summary, origin any) {
+	a.fire(&a.onChangeSub, s, origin)
+}
+
+// fire calls a copy of list taken now, in registration order, as lib0's
+// Observable.emit copies its listeners before calling them.
+func (a *Awareness) fire(list *[]subscription, s Summary, origin any) {
 	if s.IsEmpty() {
 		return
 	}
 	a.subMu.Lock()
-	subs := make([]Sub, 0, len(a.onChangeSub))
-	for _, fn := range a.onChangeSub {
-		subs = append(subs, fn)
-	}
+	subs := append([]subscription(nil), (*list)...)
 	a.subMu.Unlock()
-	for _, fn := range subs {
-		fn(s, origin)
+	for _, sub := range subs {
+		sub.fn(s, origin)
 	}
+}
+
+// markLive records that clientID has a state now (yjs states.set): it
+// leaves the tombstones and, if it was not live, joins the end of the
+// live order. Caller holds mu.
+func (a *Awareness) markLive(clientID uint64) {
+	a.dead = removeID(a.dead, clientID)
+	if !containsID(a.live, clientID) {
+		a.live = append(a.live, clientID)
+	}
+}
+
+// markDead records that clientID is a tombstone now (yjs
+// states.delete, its meta kept). Caller holds mu.
+func (a *Awareness) markDead(clientID uint64) {
+	a.live = removeID(a.live, clientID)
+	if !containsID(a.dead, clientID) {
+		a.dead = append(a.dead, clientID)
+	}
+}
+
+// forget drops clientID from both orders (PurgeTombstones). Caller holds
+// mu.
+func (a *Awareness) forget(clientID uint64) {
+	a.live = removeID(a.live, clientID)
+	a.dead = removeID(a.dead, clientID)
+}
+
+// sameState reports whether two state payloads hold the same JSON value,
+// as y-protocols decides with lib0 equalityDeep on the parsed states: key
+// order and number spelling (1, 1.0) do not count. Payloads that do not
+// parse compare as bytes.
+func sameState(a, b []byte) bool {
+	if bytes.Equal(a, b) {
+		return true
+	}
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	return reflect.DeepEqual(va, vb)
+}
+
+func containsID(ids []uint64, id uint64) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+func removeID(ids []uint64, id uint64) []uint64 {
+	for i, x := range ids {
+		if x == id {
+			return append(ids[:i:i], ids[i+1:]...)
+		}
+	}
+	return ids
 }
 
 // sortAscending is a tiny insertion-sort for the small slices

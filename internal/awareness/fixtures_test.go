@@ -210,6 +210,12 @@ func TestFixtures_EncodeMatchesJSStructurally(t *testing.T) {
 					t.Errorf("client %d JSON mismatch:\n ours   %+v\n theirs %+v",
 						e.ClientID, ourJSON, theirJSON)
 				}
+				// The clock too: a first state at clock 0 was dropped by
+				// every y-protocols receiver, and this comparison, which
+				// said it checked the clock, did not.
+				if gotOur.Clock != e.Clock {
+					t.Errorf("client %d clock: ours %d, theirs %d", e.ClientID, gotOur.Clock, e.Clock)
+				}
 			}
 		})
 	}

@@ -146,12 +146,13 @@ func (c *Conn) SendInitialSync() error {
 	if err := c.Send(EncodeSyncStep1(sv)); err != nil {
 		return fmt.Errorf("send initial SyncStep1: %w", err)
 	}
-	if states := c.Awareness.States(); len(states) > 0 {
-		ids := make([]uint64, 0, len(states))
-		for id := range states {
-			ids = append(ids, id)
-		}
-		if err := c.Send(EncodeAwareness(c.Awareness.Encode(ids))); err != nil {
+	// Every client with a state, in the order the states appeared, as a
+	// y-protocols server sends its snapshot (ranging over the States map
+	// changed the bytes from one connection to the next); nothing when
+	// there is none. The first byte of an awareness update is its entry
+	// count as a varuint, zero only when it has no entries.
+	if snap := c.Awareness.EncodeLive(); len(snap) > 0 && snap[0] != 0 {
+		if err := c.Send(EncodeAwareness(snap)); err != nil {
 			return fmt.Errorf("send initial awareness snapshot: %w", err)
 		}
 	}
@@ -318,13 +319,10 @@ func (c *Conn) handleAwareness(frame *Frame) error {
 }
 
 func (c *Conn) handleQueryAwareness() error {
-	// Reply with the full current snapshot — every known client.
-	states := c.Awareness.States()
-	ids := make([]uint64, 0, len(states))
-	for id := range states {
-		ids = append(ids, id)
-	}
-	return c.Send(EncodeAwareness(c.Awareness.Encode(ids)))
+	// Reply with the full current snapshot: every client with a state,
+	// in the order the states appeared. With none, an update with no
+	// entries (an empty ID list would make Encode send the tombstones).
+	return c.Send(EncodeAwareness(c.Awareness.EncodeLive()))
 }
 
 // ControlledClients returns a snapshot of the awareness clientIDs

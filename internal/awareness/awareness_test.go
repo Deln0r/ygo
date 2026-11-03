@@ -24,22 +24,25 @@ func TestNew_ClientID(t *testing.T) {
 	}
 }
 
-func TestSetLocalState_ClockStartsAtZeroBumpsOnEachCall(t *testing.T) {
+// The first state goes out with clock 1, as y-protocols' does after its
+// implicit {} at 0: a receiver that has not seen the client takes only
+// a clock above 0. Every later set bumps it, an equal one too.
+func TestSetLocalState_ClockStartsAtOneBumpsOnEachCall(t *testing.T) {
 	a := New(1)
 	a.SetLocalState([]byte(`{"cursor":1}`))
 	c, _, ok := a.Meta(1)
-	if !ok || c != 0 {
-		t.Errorf("after first set: clock=%d ok=%v, want 0 true", c, ok)
+	if !ok || c != 1 {
+		t.Errorf("after first set: clock=%d ok=%v, want 1 true", c, ok)
 	}
 	a.SetLocalState([]byte(`{"cursor":2}`))
 	c, _, _ = a.Meta(1)
-	if c != 1 {
-		t.Errorf("after second set: clock=%d, want 1", c)
+	if c != 2 {
+		t.Errorf("after second set: clock=%d, want 2", c)
 	}
 	a.SetLocalState([]byte(`{"cursor":2}`)) // same value — heartbeat
 	c, _, _ = a.Meta(1)
-	if c != 2 {
-		t.Errorf("after no-op heartbeat set: clock=%d, want 2 (clock must bump even on equal state)", c)
+	if c != 3 {
+		t.Errorf("after no-op heartbeat set: clock=%d, want 3 (clock must bump even on equal state)", c)
 	}
 }
 
@@ -71,7 +74,7 @@ func TestSetLocalState_NilArgRemoves(t *testing.T) {
 func TestRemoveLocalState_KeepsClockBumpsAndFiresEvent(t *testing.T) {
 	a := New(1)
 	a.SetLocalState([]byte(`{"x":1}`))
-	a.SetLocalState([]byte(`{"x":2}`)) // clock = 1
+	a.SetLocalState([]byte(`{"x":2}`)) // clock = 2
 
 	var removed []uint64
 	a.OnUpdate(func(s Summary, _ any) { removed = append(removed, s.Removed...) })
@@ -84,21 +87,35 @@ func TestRemoveLocalState_KeepsClockBumpsAndFiresEvent(t *testing.T) {
 	if !ok {
 		t.Fatal("Meta missing after remove — entry must be retained for clock survival")
 	}
-	if c != 2 {
-		t.Errorf("clock after remove = %d, want 2 (clock must bump)", c)
+	if c != 3 {
+		t.Errorf("clock after remove = %d, want 3 (clock must bump)", c)
 	}
 	if len(removed) != 1 || removed[0] != 1 {
 		t.Errorf("OnUpdate Removed = %v, want [1]", removed)
 	}
 }
 
-func TestRemoveLocalState_NoOpWhenNotSet(t *testing.T) {
+// Removing the local state before any was set is y-protocols'
+// setLocalState(null) after its implicit {}: a tombstone at clock 1,
+// reported removed, which clears a state a peer still holds for this
+// client ID; the next state goes out at clock 2.
+func TestRemoveLocalState_BeforeAnySet(t *testing.T) {
 	a := New(1)
-	var fired bool
-	a.OnUpdate(func(_ Summary, _ any) { fired = true })
-	a.RemoveLocalState() // no-op
-	if fired {
-		t.Error("OnUpdate fired on no-op remove")
+	var removed []uint64
+	a.OnUpdate(func(s Summary, _ any) { removed = append(removed, s.Removed...) })
+	a.RemoveLocalState()
+	if c, _, ok := a.Meta(1); !ok || c != 1 {
+		t.Fatalf("clock after the first removal %d (ok %v), want 1", c, ok)
+	}
+	if len(removed) != 1 || removed[0] != 1 {
+		t.Fatalf("OnUpdate Removed = %v, want [1]", removed)
+	}
+	if got := a.Encode(nil); string(got) != "\x01\x01\x01\x04null" {
+		t.Fatalf("Encode(nil) = %x, want the tombstone of 1 at clock 1", got)
+	}
+	a.SetLocalState([]byte(`{}`))
+	if c, _, _ := a.Meta(1); c != 2 {
+		t.Fatalf("clock of the next state %d, want 2", c)
 	}
 }
 
