@@ -328,6 +328,23 @@
 - **Partially resolved by:** `internal/encoding/any_codec.go` now covers all common lib0 Any variants — `[]byte` (binary, tag 116), `[]any` (array, tag 117), `map[string]any` (object, tag 118 with deterministic alphabetical key order so wire bytes stay reproducible across runs), `float32` (tag 124), and BigInt decode (tag 122 → `int64` via 8-byte BE, matching `writeBigInt64`). Per-variant round-trip tests in `any_codec_test.go`. B3.2 benchmark un-blocked and running.
 - **Remaining:** native BigInt encoding from Go (would need an explicit `BigInt` wrapper type so we can distinguish from `int64`; defer until an adopter actually needs to send BigInts from Go). `Any` is still a `type Any = any` alias rather than a tagged union — replacing with a proper union would be a public API change worth its own commit when the surrounding ergonomics make sense.
 
+### `undefined` and -0 in Any values
+
+- **Where:** `internal/encoding/any_codec.go` (`DecodeAny` / `EncodeAny`), `internal/anyval`, every renderer of Any values to JSON (types, gomobile).
+- **What:** two values lib0 keeps through a round trip, ygo does not.
+  - lib0 tag 127, `undefined`, decodes to nil and is written back as null (126). yjs stores it from `Map.set(k, undefined)` and inside Any arrays and objects, and re-encodes it byte for byte. A JS peer reading a document after ygo compacted or relayed it gets `null` where the writer stored `undefined` (`v === undefined` changes; `map.has(k)` does not).
+  - lib0 writes -0 as a varint with the sign bit (`7d40`), and decodes and re-encodes it so. ygo decodes through an `int64` and loses the sign: `Object.is(v, -0)` and `1/v` change for a JS reader, and the bytes change.
+  - Probed against lib0 0.2.119 and yjs 13.6.33 on 3 November 2026 (`docs eb-1/ygo/tools/probe-r6.mjs`).
+- **What a fix has to cover:**
+  - A sentinel (`ygo.Undefined`) that the decoders return and the encoders write, V1 and V2.
+  - yjs's `toJSON` keeps an undefined-valued key; `JSON.stringify` then drops it from objects and writes null in arrays. A `MarshalJSON` on the sentinel cannot drop its key, so the JSON renderers need their own handling.
+  - V2 embeds and format attributes go through `anyval.IsTree` and `jsonValueForAny`, which take a lossy JSON path for values they do not know.
+  - gomobile renders values and old values to JSON.
+  - The reverse fixtures capture expected values as JSON, so a writer that emits null would pass a check built on them; the expectation needs its own tag.
+  - Objects with more than one key cannot round-trip byte for byte anyway, since ygo sorts keys (README).
+  - For -0, a representation that survives decode and encode without changing the documented rule that a whole-number float64 stays a float64.
+- **When to address:** a release of its own, with a plan reviewed before code (deferred from R6, November 2026).
+
 ### Forward-dependency stubs are empty types
 
 - **Where:** `internal/block/stubs.go` (`Branch`, `Move`).
@@ -401,12 +418,31 @@
 - **Was:** awareness had only hand-built byte fixtures plus pure-Go round-trip tests; no proof against y-protocols' `encodeAwarenessUpdate` output.
 - **Resolved by:** `testdata/gen/gen-awareness.mjs` captures 6 scenarios (name+color, cursor position, two clients, empty state, unicode, set-then-removed); `internal/awareness/fixtures_test.go` decodes each via Apply, verifies state map matches JS via structural JSON equality, plus reverse-direction encode test for single-client scenarios. Wired into CI's fixtures job; runs on every push. Also flagged a JS-impl quirk: `encodeAwarenessUpdate` iterates the caller-supplied client list which is normally `getStates().keys()` (excludes removed), so capturing removal entries requires explicitly passing `meta.keys()` instead.
 
-### Apply returns updated for self-eviction defense bump
+### Apply reports self-eviction as removed (resolved in 1.31.0)
 
-- **Where:** `internal/awareness/awareness.go` `Apply` self-eviction branch.
-- **What:** when a remote tries to evict the local client and the local clock is bumped instead, we record the local clientID in `Summary.Updated`. yrs records a similar entry in its `AwarenessUpdateSummary::updated` (`awareness.rs:418`); JS records it as part of the regular update flow. The Updated reporting is semantically slightly incorrect — nothing about the local state actually changed except the clock — but matches the reference behaviour.
-- **Impact today:** observers see a no-op Update event with the local clientID. Cosmetic only.
-- **When to address:** if observers do something behavioural with Updated entries (e.g. re-render UI for the local cursor). Until then, consistency with reference impl wins.
+- **Was:** when a remote tried to evict the local client and the local clock was bumped instead, `Apply` reported the local client in `Summary.Updated` and fired no `OnChange`; the entry said this matched the reference, which it did not.
+- **Resolved by:** the event classes y-protocols applyAwarenessUpdate reports, for every entry. Self-eviction is reported removed through both `OnChange` and `OnUpdate`, and the local state stays and goes out with the next heartbeat at the bumped clock. The other classes:
+  - a client never seen is added;
+  - a client seen before is updated, a revival included, and in `OnChange` only when its state differs;
+  - a null from a client seen before is removed, also when it was removed already.
+
+  `OnChange`'s `Updated` used to carry the added and removed clients too.
+
+### Awareness clocks, order and events now follow y-protocols (resolved in 1.31.0)
+
+- **Was:**
+  - The first local state went out with clock 0. A y-protocols receiver that has not seen a client takes only a clock above 0 (its default), so a Go client stayed invisible to JavaScript peers until its next state.
+  - `RemoveState` and `SweepOutdated` raised a remote client's clock, so the client's next state, one clock up, looked stale and was dropped.
+  - `update` fired before `change`; listeners and "everyone" encodings followed Go map order, so the bytes of a snapshot changed from run to run.
+- **Resolved by:**
+  - The first state goes out at clock 1, as y-protocols' does after its implicit `{}` at 0, without creating a `{}` participant: a passive server room stays empty.
+  - Removing a remote client keeps its clock, and the removal goes out at that clock, which receivers holding the state accept.
+  - `change` fires before `update`; listeners run in registration order.
+  - Clients keep the order their states appeared (`ClientIDs`, `EncodeLive`). `Encode(nil)` lists them in it, then the tombstones in removal order (the tombstone half is this package's own policy).
+  - The fixture test that said it compared clocks now does.
+- **Still different:**
+  - ygo takes an unseen client's state at clock 0, which y-protocols ignores. Kept so that ygo clients from before 1.31.0, which send their first state at clock 0, are not hidden from a newer server for a heartbeat.
+  - ygo has no implicit `{}` state, so a client's first `SetLocalState` is reported added where y-protocols reports its first `setLocalState` updated (its `{}` was there).
 
 ### Resolved: server-driven timeout sweep + presence DoS hardening
 
@@ -454,6 +490,12 @@
 - **Next step (October 2026):** `modernc.org/sqlite` 1.60 requires Go 1.26, and 1.25 left upstream support when 1.27 shipped, so the floor moved to `go 1.26` with sqlite 1.60.1 (libc v1.77.1, pinned to the version sqlite's own go.mod names) in the nested modules too; the CI matrix is `1.26` and `stable`. Adopters on Go 1.25 stay on ygo v1.22.x.
 
 ## Doc / Transaction layer
+
+### A root typed in the transaction that integrated content into it while untyped
+
+- **Where:** `TransactionMut.GetOrCreateBranch` and the `*In` accessors (`ygo.TextIn` and the others), `dispatchEvents`, the UndoManager's capture gate.
+- **What:** yjs replaces an untyped root's placeholder object when `getText` first types it, and the transaction's changed entry keeps the placeholder, so a change made while the root was untyped reaches no observer of the typed root and no UndoManager scoped to it in that transaction. ygo types the same branch, so in that transaction such a change would reach both. It needs content integrated into the untyped root and the root typed in one transaction. Through the public API that cannot happen: an update applies in a transaction of its own, which cannot be opened inside another, and a root gets local content only through a typed wrapper. A root that got content in an earlier transaction and is typed later behaves as in yjs.
+- **When to address:** if an internal caller ever applies an `Update` and types its root in one transaction.
 
 ### TransactionMut.Commit lifecycle (resolved)
 

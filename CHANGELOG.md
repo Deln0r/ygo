@@ -16,8 +16,44 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact**:
+
+- **Awareness.**
+  - The first local state goes out with clock 1, not 0, so JavaScript peers see a Go client from its first state on.
+  - Removing a remote client (`RemoveState`, `SweepOutdated`) keeps its clock, and the removal goes out at it.
+  - `OnChange` listeners run before `OnUpdate` listeners, and each kind in registration order.
+  - `Encode(nil)` lists clients in the order their states appeared, then tombstones.
+  - The classes `OnChange` and `OnUpdate` report are y-protocols':
+    - `OnChange`'s `Updated` no longer carries added and removed clients;
+    - a client that comes back after a removal is updated, not added;
+    - self-eviction is reported removed, through both events.
+  - `RemoveLocalState` before any state, or when already removed, sends a tombstone one clock up and reports the local client removed, as y-protocols' `setLocalState(null)` does; it used to do nothing.
+- **Observers.** An observer added during a delivery is called in that delivery, and one removed during it is still called, as in yjs. Before, the first was skipped and the second dropped. `Branch.Observers` and `DeepObservers` now only mirror the lists; setting them does nothing.
+- **Root constructors.** `NewMap`, `NewText` and the others find and type the root under the document lock; inside an open transaction use the new `*In` forms.
+
+### Fixed
+
+- **A Go client's first awareness state was invisible to JavaScript peers.** It went out with clock 0, and y-protocols takes a client it has not seen only at a clock above 0, so presence appeared with the second state, a heartbeat later.
+- **A remote client the server removed could not come back with its next state.** The removal raised the client's clock, so the client's next state, one clock up, was refused. y-protocols raises only the local client's clock on removal.
+- **Root constructors raced transactions on other goroutines.** `NewText(d, name)` and the others typed the root after `Doc.Branch` had released the lock, and reading a nested type (`Map.Get`, `Array.Get`) wrote its type again, so readers holding `ReadTxn` at the same time raced each other. Both were reported by `-race`. Typing now happens under the lock, and a read only wraps.
+- **Registering an observer raced a commit on another goroutine.** The lists now have a lock of their own, never held while an observer runs.
+- **Observers added or removed during a delivery.** Deliveries now follow yjs EventHandler for shallow and deep observers. The delivery walks the list it started with, an addition joins it until the first removal, and a removal, also of an observer already gone, leaves the walk on the old list.
+- **`OnUpdateV2` handlers were read before the `OnUpdate` delivery.** An update handler that swapped the V2 handler reached the old one. Each list is now read right before its own delivery, as yjs does.
+- **Awareness snapshots changed from one connection to the next.** The initial sync and the QueryAwareness reply listed clients in Go map order; they now follow the order the states appeared. With only tombstones left, the QueryAwareness reply sent them; it now has no entries, as a y-protocols snapshot of live states.
+- **Concurrent `ObserveChanges` calls on one gomobile handle could leave a listener nobody could remove.** The replace step is serialized per handle.
+- **Awareness events reported the wrong classes.** `OnChange` put added and removed clients into `Updated` as well. A client coming back after a removal was reported added, where y-protocols reports it updated. Self-eviction (a remote removing the local client while it is online) was reported updated and fired no `OnChange`; y-protocols reports it removed through both. All now follow y-protocols, checked entry by entry against its output for the same bytes.
+- **An awareness state with the same JSON value fired `OnChange`.** States were compared as bytes, so another key order or `1.0` for `1` counted as a change. y-protocols compares the parsed states, and so does ygo now.
+- **A live awareness snapshot could carry a tombstone.** The snapshot took the client IDs under the lock and encoded them after taking it again, so a client removed in between went out as null. 17 of 20 stress runs caught it. The IDs and states are now read under one lock.
+
+### Added
+
+- `MapIn`, `ArrayIn`, `TextIn`, `XmlFragmentIn`, `XmlElementIn` and `XmlTextIn`. They take an open transaction and return the root types `NewMap` and the others return, as yjs `getMap` works inside `transact` (yrs `get_or_insert_map` on a transaction).
+- `Awareness.ClientIDs()`: the clients with a state, in the order their states appeared. `Awareness.EncodeLive()`: those clients encoded, an update with no entries when there are none.
+- `Branch.AddObserver`, `AddDeepObserver`, `CallObservers`, `CallDeepObservers`, `ObserverCount`, `DeepObserverCount` and `HasDeepObservers`: the block-level registration and delivery the typed `Observe` methods use. The counts are the safe way to read the lists. The `Observers` and `DeepObservers` fields are written under the listener lock but not read under it, so reading them while another goroutine registers an observer is a data race.
+
 ### Infrastructure
 
+- The awareness fixture test compares clocks as well. It said it did and compared only IDs and JSON.
 - The vulnerability check (`vuln.yml`) also runs in the two nested modules.
   They are modules of their own, so the check in the core never saw their
   dependencies, and both still required versions with published advisories
