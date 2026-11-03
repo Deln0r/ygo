@@ -3,9 +3,9 @@ package gomobile
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/Deln0r/ygo/internal/types"
-	"github.com/Deln0r/ygo/internal/utf16"
 )
 
 // Array is the bindable shared Array (ordered sequence) CRDT. Elements
@@ -13,13 +13,14 @@ import (
 type Array struct {
 	d         *Doc
 	inner     *types.Array
+	observeMu sync.Mutex // serializes ObserveChanges' replace step
 	unobserve func()
 }
 
 // Array returns the shared array registered under name, creating the
 // root type on first access.
 func (d *Doc) Array(name string) *Array {
-	return &Array{d: d, inner: types.NewArray(d.inner.Branch(utf16.ValidString(name)))}
+	return &Array{d: d, inner: rootArray(d, name)}
 }
 
 // Length returns the number of elements.

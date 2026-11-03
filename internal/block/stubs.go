@@ -118,15 +118,26 @@ type Branch struct {
 	// such a root is first read as text.
 	FormattedText bool
 
-	// Observers / DeepObservers hold the shared-type change-event
-	// callbacks registered on this branch (yjs _eObservers / _dEH).
-	// Stored untyped (the concrete event is built in the types layer,
-	// which cannot be imported here without a cycle) and passed as
-	// `any`; the types-layer wrappers register adapters that type-
-	// assert. nil until the first observer registers. DeepObservers
-	// receive the bubbled event path as a []any of nested events.
+	// Observers / DeepObservers mirror the shared-type change-event
+	// callbacks registered on this branch (yjs _eH / _dEH): the
+	// observers in registration order, a removed one gone. Registration
+	// goes through AddObserver / AddDeepObserver and delivery through
+	// CallObservers / CallDeepObservers, which keep the lists themselves
+	// (observers, deepObservers) under their own lock and by yjs
+	// EventHandler's rules; setting these fields changes nothing. The
+	// mirrors are written under that lock but not read under it: reading
+	// them while another goroutine registers or removes an observer on
+	// this branch is a data race. ObserverCount, DeepObserverCount and
+	// HasDeepObservers read the lists safely. Stored untyped (the concrete event is built in the types
+	// layer, which cannot be imported here without a cycle) and passed
+	// as `any`; the types-layer wrappers register adapters that type-
+	// assert. DeepObservers receive the bubbled event path as a []any of
+	// nested events.
 	Observers     []func(any)
 	DeepObservers []func([]any)
+
+	observers     listeners[func(any)]
+	deepObservers listeners[func([]any)]
 }
 
 // MapKeys returns the keys of Map in yjs's _map order: the order each

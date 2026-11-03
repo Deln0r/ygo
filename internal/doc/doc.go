@@ -260,15 +260,22 @@ func (d *Doc) fireUpdateHandlers(t *TransactionMut) {
 	if UpdateEncoder == nil {
 		return
 	}
-	d.handlersMu.Lock()
-	v1 := append([]*registeredUpdate(nil), d.updateHandlers...)
-	v2 := append([]*registeredUpdate(nil), d.updateV2Handlers...)
-	d.handlersMu.Unlock()
-	for i, handlers := range [][]*registeredUpdate{v1, v2} {
+	// Each list is copied right before its own delivery, as yjs emits
+	// 'update' and only then looks up the 'updateV2' listeners: an
+	// update handler that swaps the V2 handler reaches the new one in
+	// this commit.
+	for _, v2 := range []bool{false, true} {
+		d.handlersMu.Lock()
+		list := d.updateHandlers
+		if v2 {
+			list = d.updateV2Handlers
+		}
+		handlers := append([]*registeredUpdate(nil), list...)
+		d.handlersMu.Unlock()
 		if len(handlers) == 0 {
 			continue
 		}
-		update := UpdateEncoder(t, i == 1)
+		update := UpdateEncoder(t, v2)
 		if update == nil {
 			return // the transaction changed nothing, in either version
 		}
@@ -513,6 +520,23 @@ func (d *Doc) Branch(name string) *block.Branch {
 	b := &block.Branch{Name: name, Map: map[string]*block.Item{}}
 	d.rootBranches[name] = b
 	return b
+}
+
+// WithRoot calls fn with the root branch name, created if absent,
+// while it holds the document's write lock, so whatever fn sets on the
+// branch (its type, say) does not race a transaction on another
+// goroutine. Like Branch, it must not be called inside an open
+// transaction on this document; TransactionMut.GetOrCreateBranch is the
+// form for that.
+func (d *Doc) WithRoot(name string, fn func(*block.Branch)) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	b, ok := d.rootBranches[name]
+	if !ok {
+		b = &block.Branch{Name: name, Map: map[string]*block.Item{}}
+		d.rootBranches[name] = b
+	}
+	fn(b)
 }
 
 // newClientID returns a random non-zero uint64 in [1, MaxClientID].

@@ -416,13 +416,15 @@ func extractValueAt(c block.Content, offset uint64) any {
 		if offset != 0 || c.Branch == nil {
 			return nil
 		}
+		// Wrap, do not type: the type ref came with the item, and a read
+		// may run alongside other reads, so it must not write the branch.
 		switch c.Branch.TypeRef {
 		case block.TypeRefMap:
-			return NewMap(c.Branch)
+			return &Map{branch: c.Branch}
 		case block.TypeRefArray:
-			return NewArray(c.Branch)
+			return &Array{branch: c.Branch}
 		case block.TypeRefText:
-			return NewText(c.Branch)
+			return &Text{branch: c.Branch}
 		}
 	}
 	return nil

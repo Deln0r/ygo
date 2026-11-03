@@ -107,24 +107,33 @@ const (
 // (Map OR Array OR Text OR XML). Mixing types on the same root
 // branch produces undefined behaviour.
 //
-// Call these before opening a transaction, not inside one. They take
-// the document lock, which an open WriteTxn on the same document
-// already holds, so a call inside the transaction blocks forever.
-// yjs allows getMap inside transact; this port does not yet.
+// These take the document's write lock to find and type the root, so
+// another goroutine's transaction never sees a root half typed. Inside
+// an open transaction on the same document they would block forever:
+// use MapIn, ArrayIn, TextIn and the other *In forms there, as yjs
+// allows getMap inside transact.
 func NewMap(d *Doc, name string) *Map {
-	return types.NewMap(d.Branch(utf16.ValidString(name)))
+	var m *Map
+	d.WithRoot(utf16.ValidString(name), func(b *Branch) { m = types.NewMap(b) })
+	return m
 }
 
 func NewArray(d *Doc, name string) *Array {
-	return types.NewArray(d.Branch(utf16.ValidString(name)))
+	var a *Array
+	d.WithRoot(utf16.ValidString(name), func(b *Branch) { a = types.NewArray(b) })
+	return a
 }
 
 func NewText(d *Doc, name string) *Text {
-	return types.NewText(d.Branch(utf16.ValidString(name)))
+	var t *Text
+	d.WithRoot(utf16.ValidString(name), func(b *Branch) { t = types.NewText(b) })
+	return t
 }
 
 func NewXmlFragment(d *Doc, name string) *XmlFragment {
-	return types.NewXmlFragment(d.Branch(utf16.ValidString(name)))
+	var f *XmlFragment
+	d.WithRoot(utf16.ValidString(name), func(b *Branch) { f = types.NewXmlFragment(b) })
+	return f
 }
 
 // NewXmlElement wraps a branch as an XmlElement. Typically used
@@ -133,11 +142,45 @@ func NewXmlFragment(d *Doc, name string) *XmlFragment {
 // XmlFragment.InsertXmlElement / XmlElement.InsertXmlElement which
 // set TypeRef and Name automatically.
 func NewXmlElement(d *Doc, name string) *XmlElement {
-	return types.NewXmlElement(d.Branch(utf16.ValidString(name)))
+	var e *XmlElement
+	d.WithRoot(utf16.ValidString(name), func(b *Branch) { e = types.NewXmlElement(b) })
+	return e
 }
 
 func NewXmlText(d *Doc, name string) *XmlText {
-	return types.NewXmlText(d.Branch(utf16.ValidString(name)))
+	var x *XmlText
+	d.WithRoot(utf16.ValidString(name), func(b *Branch) { x = types.NewXmlText(b) })
+	return x
+}
+
+// MapIn, ArrayIn, TextIn, XmlFragmentIn, XmlElementIn and XmlTextIn are
+// NewMap and the others for use inside an open transaction: they find
+// or create the root through txn, under the lock txn already holds, as
+// yjs getMap does inside transact (yrs get_or_insert_map on a
+// transaction). The type they return is the same as the document forms
+// return for the same name.
+func MapIn(txn *TransactionMut, name string) *Map {
+	return types.NewMap(txn.GetOrCreateBranch(utf16.ValidString(name)))
+}
+
+func ArrayIn(txn *TransactionMut, name string) *Array {
+	return types.NewArray(txn.GetOrCreateBranch(utf16.ValidString(name)))
+}
+
+func TextIn(txn *TransactionMut, name string) *Text {
+	return types.NewText(txn.GetOrCreateBranch(utf16.ValidString(name)))
+}
+
+func XmlFragmentIn(txn *TransactionMut, name string) *XmlFragment {
+	return types.NewXmlFragment(txn.GetOrCreateBranch(utf16.ValidString(name)))
+}
+
+func XmlElementIn(txn *TransactionMut, name string) *XmlElement {
+	return types.NewXmlElement(txn.GetOrCreateBranch(utf16.ValidString(name)))
+}
+
+func XmlTextIn(txn *TransactionMut, name string) *XmlText {
+	return types.NewXmlText(txn.GetOrCreateBranch(utf16.ValidString(name)))
 }
 
 // UndoManager records local mutations under a scope of shared types

@@ -62,15 +62,7 @@ func (m *Map) Observe(fn func(*MapEvent)) func() {
 			fn(e)
 		}
 	}
-	m.branch.Observers = append(m.branch.Observers, adapter)
-	idx := len(m.branch.Observers) - 1
-	return func() {
-		// Detach by clearing the slot; keep indices stable so a later
-		// unsubscribe does not target the wrong observer.
-		if idx < len(m.branch.Observers) {
-			m.branch.Observers[idx] = nil
-		}
-	}
+	return m.branch.AddObserver(adapter)
 }
 
 // ObserveDeep registers fn to run after any transaction that changes
@@ -125,11 +117,7 @@ func dispatchEvents(t *doc.TransactionMut) {
 			}
 			under[anc] = append(under[anc], ev)
 		}
-		for _, o := range br.Observers {
-			if o != nil {
-				o(ev)
-			}
-		}
+		br.CallObservers(ev)
 	}
 
 	// Deep observers run after every shallow one, each once, with the
@@ -170,23 +158,13 @@ func dispatchEvents(t *doc.TransactionMut) {
 		for i, p := range batch {
 			events[i] = p.ev
 		}
-		for _, o := range anc.DeepObservers {
-			if o != nil {
-				o(events)
-			}
-		}
+		anc.CallDeepObservers(events)
 	}
 }
 
-// hasDeepObserver reports whether br has a live deep observer. An
-// unsubscribed observer leaves a nil slot behind.
+// hasDeepObserver reports whether br has a deep observer now.
 func hasDeepObserver(br *block.Branch) bool {
-	for _, o := range br.DeepObservers {
-		if o != nil {
-			return true
-		}
-	}
-	return false
+	return br.HasDeepObservers()
 }
 
 // eventBranch returns the branch an event is about.
@@ -384,13 +362,7 @@ func (a *Array) Observe(fn func(*ArrayEvent)) func() {
 			fn(e)
 		}
 	}
-	a.branch.Observers = append(a.branch.Observers, adapter)
-	idx := len(a.branch.Observers) - 1
-	return func() {
-		if idx < len(a.branch.Observers) {
-			a.branch.Observers[idx] = nil
-		}
-	}
+	return a.branch.AddObserver(adapter)
 }
 
 // op kinds for the delta builder.
@@ -483,25 +455,13 @@ func (t *Text) Observe(fn func(*TextEvent)) func() {
 			fn(e)
 		}
 	}
-	t.branch.Observers = append(t.branch.Observers, adapter)
-	idx := len(t.branch.Observers) - 1
-	return func() {
-		if idx < len(t.branch.Observers) {
-			t.branch.Observers[idx] = nil
-		}
-	}
+	return t.branch.AddObserver(adapter)
 }
 
 // observeDeep registers a deep observer on a branch and returns an
 // unsubscribe. Shared by Map.ObserveDeep / Array.ObserveDeep.
 func observeDeep(br *block.Branch, fn func([]any)) func() {
-	br.DeepObservers = append(br.DeepObservers, fn)
-	idx := len(br.DeepObservers) - 1
-	return func() {
-		if idx < len(br.DeepObservers) {
-			br.DeepObservers[idx] = nil
-		}
-	}
+	return br.AddDeepObserver(fn)
 }
 
 // buildTextDelta is a faithful port of yjs YTextEvent.delta: it walks

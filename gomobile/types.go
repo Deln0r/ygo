@@ -2,6 +2,7 @@ package gomobile
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/types"
@@ -17,13 +18,14 @@ import (
 type Text struct {
 	d         *Doc
 	inner     *types.Text
+	observeMu sync.Mutex // serializes ObserveChanges' replace step
 	unobserve func()
 }
 
 // Text returns the shared text registered under name, creating the
 // root type on first access.
 func (d *Doc) Text(name string) *Text {
-	return &Text{d: d, inner: types.NewText(d.inner.Branch(utf16.ValidString(name)))}
+	return &Text{d: d, inner: rootText(d, name)}
 }
 
 // InsertAt inserts s at the given UTF-16 index.
@@ -101,13 +103,14 @@ func (t *Text) ResolveCursor(encoded []byte) int {
 type Map struct {
 	d         *Doc
 	inner     *types.Map
+	observeMu sync.Mutex // serializes ObserveChanges' replace step
 	unobserve func()
 }
 
 // Map returns the shared map registered under name, creating the
 // root type on first access.
 func (d *Doc) Map(name string) *Map {
-	return &Map{d: d, inner: types.NewMap(d.inner.Branch(utf16.ValidString(name)))}
+	return &Map{d: d, inner: rootMap(d, name)}
 }
 
 // SetString sets key to a string value.
@@ -159,7 +162,7 @@ type UndoManager struct {
 // handle's origin (see WithOrigin); on the plain handle, those with no
 // origin, which includes updates applied with plain ApplyUpdate.
 func (d *Doc) NewTextUndoManager(name string) *UndoManager {
-	t := types.NewText(d.inner.Branch(utf16.ValidString(name)))
+	t := rootText(d, name)
 	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{t.Branch()}, d.undoOptions())}
 }
 
@@ -167,8 +170,35 @@ func (d *Doc) NewTextUndoManager(name string) *UndoManager {
 // registered under name, tracking this handle's origin as
 // NewTextUndoManager does.
 func (d *Doc) NewMapUndoManager(name string) *UndoManager {
-	m := types.NewMap(d.inner.Branch(utf16.ValidString(name)))
+	m := rootMap(d, name)
 	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{m.Branch()}, d.undoOptions())}
+}
+
+// rootText, rootMap, rootArray and rootXmlFragment find and type a root
+// under the document's write lock (Doc.WithRoot), so a transaction on
+// another goroutine never sees it half typed.
+func rootText(d *Doc, name string) *types.Text {
+	var t *types.Text
+	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { t = types.NewText(b) })
+	return t
+}
+
+func rootMap(d *Doc, name string) *types.Map {
+	var m *types.Map
+	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { m = types.NewMap(b) })
+	return m
+}
+
+func rootArray(d *Doc, name string) *types.Array {
+	var a *types.Array
+	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { a = types.NewArray(b) })
+	return a
+}
+
+func rootXmlFragment(d *Doc, name string) *types.XmlFragment {
+	var f *types.XmlFragment
+	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { f = types.NewXmlFragment(b) })
+	return f
 }
 
 // undoOptions tracks the handle's origin; the zero Options track nil.

@@ -43,6 +43,11 @@ type ArrayChangeListener interface {
 // update only what changed, instead of re-rendering the whole
 // document. Replaces any previously registered listener on this text.
 func (t *Text) ObserveChanges(l TextChangeListener) {
+	// One replace at a time: two concurrent calls could otherwise both
+	// register and keep only one removal, leaving a listener nobody can
+	// remove.
+	t.observeMu.Lock()
+	defer t.observeMu.Unlock()
 	if t.unobserve != nil {
 		t.unobserve()
 		t.unobserve = nil
@@ -59,6 +64,11 @@ func (t *Text) ObserveChanges(l TextChangeListener) {
 // transaction changing this map, delivering the changed keys.
 // Replaces any previously registered listener on this map.
 func (m *Map) ObserveChanges(l MapChangeListener) {
+	// One replace at a time: two concurrent calls could otherwise both
+	// register and keep only one removal, leaving a listener nobody can
+	// remove.
+	m.observeMu.Lock()
+	defer m.observeMu.Unlock()
 	if m.unobserve != nil {
 		m.unobserve()
 		m.unobserve = nil
@@ -75,6 +85,11 @@ func (m *Map) ObserveChanges(l MapChangeListener) {
 // transaction changing this array, delivering the change as a delta.
 // Replaces any previously registered listener on this array.
 func (a *Array) ObserveChanges(l ArrayChangeListener) {
+	// One replace at a time: two concurrent calls could otherwise both
+	// register and keep only one removal, leaving a listener nobody can
+	// remove.
+	a.observeMu.Lock()
+	defer a.observeMu.Unlock()
 	if a.unobserve != nil {
 		a.unobserve()
 		a.unobserve = nil
