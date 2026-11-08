@@ -3,8 +3,8 @@
 App-level mobile SDK for ygo via [`gomobile bind`](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile),
 the official Go cross-compilation toolchain for iOS and Android.
 
-The main `ygo` package exposes a fully idiomatic Go API (channels,
-`any`, callbacks, generics) that `gomobile bind` cannot generate
+The main `ygo` package exposes an idiomatic Go API (`any`,
+callbacks, generics) that `gomobile bind` cannot generate
 bindings for. This subpackage wraps those types with a bind-safe
 surface so an iOS / Android app can edit a document and render UI
 while sync runs in the background.
@@ -16,7 +16,7 @@ while sync runs in the background.
   origin-scoped `WithOrigin` handles),
   cursor anchors (`Text.EncodeCursor` / `ResolveCursor`), and a sync
   `Client` (`NewClient` / `Connect` / `Listener`) that connects to a
-  yserve / Hocuspocus / y-websocket server.
+  yserve or y-websocket server.
 - **Wire level** — bytes-in / bytes-out (`ApplyUpdate`,
   `ApplyUpdateWithOrigin`, `EncodeStateAsUpdate`, `EncodeDiff`,
   `ObserveUpdates`) for adopters bringing their own transport.
@@ -195,7 +195,7 @@ paint before the first change arrives. A peer that disconnects or calls
 Implement `PresenceListener` in Swift or Kotlin. Callbacks run on a
 background goroutine; dispatch to the main thread before touching UI.
 
-## Verified iOS xcframework build
+## iOS xcframework build
 
 ```bash
 # One-time setup
@@ -219,10 +219,15 @@ Produces a `.xcframework` containing:
 Drag the `.xcframework` into Xcode under "Frameworks, Libraries,
 and Embedded Content"; the auto-generated Swift bridging header
 exposes `GomobileDoc`, `GomobileAwareness` and helpers like
-`GomobileNewDoc`, `GomobileNewDocWithClientID`. Verified on
-Xcode 16+, Go 1.26, macOS 26 (Apple Silicon, May 2026).
+`GomobileNewDoc`, `GomobileNewDocWithClientID`. Last built on
+Xcode 26.5, Go 1.26.3, macOS 26 (Apple Silicon, 8 Nov 2026).
 
-## Verified Android AAR build
+## Android AAR build
+
+**Broken since v1.8.0.** The generated Java for `XmlFragment` and
+`XmlElement` defines `toString()` twice, so `javac` fails. v1.7.0 is the
+last version that builds an `.aar`. The steps and sizes below are from
+before the break.
 
 ```bash
 # One-time: install NDK + at least one SDK platform via sdkmanager.

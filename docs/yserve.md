@@ -1,20 +1,24 @@
 # yserve — self-hosted Yjs server in a single binary
 
-yserve is a self-hosted Yjs sync backend that replaces a
-[Hocuspocus](https://github.com/ueberdosis/hocuspocus) deployment with
-one static binary: same wire protocol, so your existing
-`@hocuspocus/provider` and `y-websocket` clients connect unchanged.
-SQLite persistence and periodic document versioning are built in.
+yserve is a self-hosted Yjs sync backend in one binary. It speaks the
+`y-websocket` protocol, so `y-websocket` clients connect to it unchanged
+(checked with y-websocket 2.1 and 3.1). SQLite persistence and periodic
+document versioning are built in.
+
+**`@hocuspocus/provider` does not work with yserve.** Hocuspocus starts
+every frame with the document name, which yserve does not parse. See
+[Limits](#limits) before deploying.
 
 **No Node. No Redis. No CGO.** Pure Go from the WebSocket accept loop
 down to the SQLite pages (via `modernc.org/sqlite`), which is why the
-Docker image is `FROM scratch` and the binary cross-compiles to any
-Go target.
+Docker image is `FROM scratch` and the binary cross-compiles to the
+targets `modernc.org/sqlite` supports (not wasm, AIX, DragonFly,
+illumos, Plan 9, Solaris and some BSD and Linux ports).
 
 ## Quick start
 
 ```bash
-go install github.com/Deln0r/ygo/cmd/yserve@latest
+CGO_ENABLED=0 go install github.com/Deln0r/ygo/cmd/yserve@latest   # fully static on Linux
 yserve -addr :8080 -store data.db
 ```
 
@@ -25,21 +29,31 @@ docker build -t yserve https://github.com/Deln0r/ygo.git
 docker run -p 8080:8080 -v yserve-data:/data yserve
 ```
 
-Point any Yjs client at it — nothing about the client changes:
+Point a `y-websocket` client at it:
 
 ```js
 import * as Y from 'yjs'
-import { HocuspocusProvider } from '@hocuspocus/provider'
+import { WebsocketProvider } from 'y-websocket'
 
-const provider = new HocuspocusProvider({
-  url: 'ws://localhost:8080',
-  name: 'my-document',
-  document: new Y.Doc(),
-})
+const doc = new Y.Doc()
+const provider = new WebsocketProvider('ws://localhost:8080', 'my-document', doc)
 ```
 
-`y-websocket`'s `WebsocketProvider` works the same way (documents are
-addressed by URL path, y-websocket convention).
+Documents are addressed by URL path, as in y-websocket.
+
+## Limits
+
+- **Hocuspocus.** `@hocuspocus/provider` (checked with 2.15, 3.4 and
+  4.8) cannot connect: its frames start with the document name.
+- **Message size.** A client message larger than `-read-limit` (32 KiB
+  by default) closes the connection with 1009, and the client
+  reconnects and resends in a loop. A big paste or the first sync of a
+  large document is enough. Set `-read-limit` above your largest
+  document.
+- **Room names with a slash.** The first path segment is dropped when
+  there are several, so the rooms `team-a/doc` and `team-b/doc` are one
+  document. Do not use `/` in room names. Embedders can set
+  `server.Options.DocNameFn`.
 
 ## Flags
 
@@ -77,39 +91,37 @@ docAt, _ := persist.LoadVersion(ctx, store, "my-document",  // inspect
 _ = store.RestoreVersion(ctx, "my-document", infos[0].ID)   // roll back
 ```
 
-For comparison: in the Hocuspocus ecosystem, document history is a
-paid Tiptap Cloud feature.
-
 ## Protocol coverage
 
-yserve speaks the full 8-message Hocuspocus envelope: Sync (Step1 /
-Step2 / Update), Awareness, QueryAwareness, Auth, Stateless,
-BroadcastStateless, Close, SyncStatus. Authentication plugs in via
-`server.Options.OnAuthenticate`; the stateless channel via
-`OnStateless` (see [embedding](#embedding-in-your-own-go-backend)).
+yserve speaks the `y-websocket` protocol: Sync (Step1 / Step2 / Update)
+and Awareness, plus QueryAwareness. It also implements Auth, Stateless,
+BroadcastStateless, Close and SyncStatus with Hocuspocus's message
+numbers, on the same frames and without Hocuspocus's document-name
+prefix, so no stock client sends them. `server.Options.OnAuthenticate`
+and `OnStateless` hook those messages. To authenticate a stock client,
+check the upgrade request in `OnConnect`
+(see [embedding](#embedding-in-your-own-go-backend)).
 
 The CRDT engine underneath is byte-for-byte wire-compatible with
-`yjs@13.6.33`, verified by the cross-language fixture suite in CI (the count lives in README.md, where a CI check keeps it honest)
+`yjs@13.6.33`, apart from a few Any values, verified by the cross-language fixture suite in CI (the count lives in README.md, where a CI check keeps it honest)
 (see the [main README](../README.md)).
 
 ## Migrating from y-sweet
 
 [y-sweet](https://github.com/jamsocket/y-sweet) self-hosters: note
 that y-sweet speaks its own protocol and token scheme, so the move is
-a client-side change from `@y-sweet/client` to `@hocuspocus/provider`
-or `y-websocket` (both standard Yjs ecosystem providers). Server-side,
+a client-side change from `@y-sweet/client` to `y-websocket`. Server-side,
 documents transfer as regular Yjs updates: export each doc's state
 (`Y.encodeStateAsUpdate` through any y-sweet client) and replay it
 into yserve, or write the update blobs straight into the SQLite store
 via the `persist` API.
 
-## Migrating from Hocuspocus
+## Coming from Hocuspocus
 
-Drop-in for the wire protocol: keep your providers, change the URL.
-Server-side extension hooks differ — Hocuspocus extensions are
-JavaScript; yserve's equivalents are Go callbacks (`OnAuthenticate`,
-`OnStateless`) plus the `persist.Store` interface for custom storage
-backends.
+Not a drop-in today: a Hocuspocus deployment has to move its clients to
+`y-websocket` first. Server-side extensions differ as well: Hocuspocus
+extensions are JavaScript, and yserve's equivalents are Go callbacks
+plus the `persist.Store` interface for custom storage backends.
 
 ## Embedding in your own Go backend
 
@@ -121,7 +133,7 @@ mounts as a standard `http.Handler`:
 srv := server.New(server.Options{
     Store:           store,             // any persist.Store
     OriginPatterns:  []string{"app.example.com"},
-    OnAuthenticate:  checkToken,        // Hocuspocus auth envelope
+    OnConnect:       checkRequest,      // reject at the upgrade
     VersionInterval: 10 * time.Minute,  // built-in history
     KeepVersions:    10,
 })
@@ -159,8 +171,9 @@ enforcement is the backstop, not the client's only guard.
 
 - **Single-writer storage.** SQLite serializes writes at the file
   lock; run one yserve per database file. Horizontal multi-node relay
-  is not built in (if you need cross-node fan-out today, put a
-  sticky-session load balancer in front and shard documents by path).
+  is not available in this binary: embed the `server` package with a
+  backplane, or put a sticky-session load balancer in front and shard
+  documents by path.
 - **Graceful shutdown.** SIGINT/SIGTERM flushes every open document's
   update log into a single compacted snapshot before exit.
 - **`ygo-server`** is the deprecated former name of this binary; it

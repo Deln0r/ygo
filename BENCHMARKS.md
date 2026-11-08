@@ -51,8 +51,7 @@ only (encode/parse paths unaffected by markers).
 
 The B4 result is the headline — 8× speedup on the canonical
 real-world workload. (Historical snapshot of the markers change
-in isolation; current main measures ~20.3 s on B4 because
-commit-time squash + GC later added per-commit work — see the
+in isolation; current main measures ~20.3 s on B4, see the
 B4 table and notes below.) Random-insert workloads improved 30-35%
 because the per-edit walk distance drops from O(N) to O(local
 delta from previous edit). Prepend-only workloads show small
@@ -63,7 +62,9 @@ acceptable trade-off given the B4 win.
 
 ## Baseline (Apple M3, Go 1.26.3, `-benchtime=3x`, post-search-marker build)
 
-All times in ms (1 ms = 1,000,000 ns); doc sizes in bytes.
+All times in ms (1 ms = 1,000,000 ns); doc sizes in bytes. B4 uses
+client ID 1, which keeps V1 small: see the same-machine comparison
+below for a random client ID.
 
 ### B1 — Single-client workloads (N = 6,000 ops)
 
@@ -148,76 +149,47 @@ All times in ms (1 ms = 1,000,000 ns); doc sizes in bytes.
 
 - **B4 op-throughput** is ~0.078 ms / edit (259,778 ops / 20.3 s).
   The history: ~0.32 ms / edit pre-search-markers, ~0.041 ms / edit
-  with markers, roughly doubled back when commit-time squash + GC
-  landed (every commit now runs a merge scan and a GC pass over the
-  transaction's blocks). That CPU buys the 8.8× smaller V1 document,
-  the right trade for sync traffic. Against yrs's published sub-10-s
-  B4 numbers this sits at roughly 2× — AT the DESIGN.md "within 2×
-  of yrs" boundary, not comfortably under it; the commit pipeline
-  has known optimization headroom (the squash scan re-walks the full
-  new-block range per commit).
+  with markers, about twice that since commit-time squash + GC
+  landed. A transaction per edit takes 22.9 s against 20.3 s for one
+  transaction, so commit-time work is not the main cost.
 
-## Comparison with yjs / ywasm (published numbers)
+## Same-machine comparison with yjs
 
-`dmonad/crdt-benchmarks` publishes results for `yjs` (the npm
-JS package, the canonical reference) and `ywasm` (yrs compiled
-to WASM, called from JS via wasm-bindgen). The published numbers
-were measured on **Intel® Core™ i5-8400 @ 2.80 GHz × 6 with
-Node 20.5.0**. Ours were measured on **Apple M3 with Go 1.26.3**.
-Hardware and runtime differ, so this is not an apples-to-apples
-benchmark — but it places ygo in the same order of magnitude
-on the canonical workload and identifies where the remaining
-gaps are.
+B4 on one Apple M3, measured on 8 Nov 2026: ygo v1.31.0 on Go 1.26.3,
+yjs 13.6.33 on Node 26.6. Same trace, client ID 1, all edits in one
+transaction, as `BenchmarkB4_RealWorldTrace` does. Fastest of the
+rounds for encode and parse.
 
-B4 (real-world LaTeX paper trace, 259,778 edits → 104,852-char
-document):
+| Metric        |           ygo |           yjs |
+|---------------|--------------:|--------------:|
+| Apply edits   |   20.3-21.4 s |     1.0-1.3 s |
+| Encode V1     |       0.81 ms |        2.4 ms |
+| Encode V2     |        7.5 ms |        1.7 ms |
+| Parse V1      |        4.6 ms |        5.6 ms |
+| Parse V2      |        4.8 ms |        4.6 ms |
+| Doc size V1   | 223,414 bytes | 223,414 bytes |
+| Doc size V2   | 159,921 bytes | 159,921 bytes |
 
-| Metric                | yjs (Node)  | ywasm (WASM) | ygo V1 | ygo V2 |
-|-----------------------|------------:|-------------:|-------:|-------:|
-| Apply edits (ms)      |       5,714 |       28,675 | 20,259 | 20,259 |
-| Encode (ms)           |          11 |            3 |    0.6 |   10.5 |
-| Parse (ms)            |          39 |           16 |    4.4 |    4.5 |
-| Doc size (bytes)      |     159,929 |      159,929 | **223,414** | **159,921** |
-| Memory used (MB)      |         3.2 |          0.0 |    n/a |    n/a |
+Closer to real use: a random client ID, a transaction per edit, an
+update handler attached.
 
-Notes:
+| Metric            |           ygo |           yjs |
+|-------------------|--------------:|--------------:|
+| Apply edits       |        23.4 s |        1.02 s |
+| Doc size V1       | 376,756 bytes | 311,038 bytes |
+| Doc size V2       | 159,935 bytes | 159,929 bytes |
+| Bytes of updates  |     8,196,294 |     6,324,510 |
 
-- **ywasm is NOT a fair representative of native yrs.** wasm-
-  bindgen adds substantial overhead (~5× on this workload per
-  the table above); native yrs's own benchmarks ship sub-1-second
-  B4 numbers. A direct ygo-vs-native-yrs run under identical
-  hardware is on the roadmap but not yet executed.
-- **ygo V1 doc size is within ~1.40× of yjs's V1** (223,414 vs
-  159,929 bytes). The historical ~12× bloat (1.97 MB, visible in
-  this table before June 2026) is resolved: commit-time block
-  squash merges per-character insert runs at commit, and GC frees
-  deleted content, the same merging yjs performs. The remaining
-  1.4× gap comes from runs that cross transaction boundaries less
-  favourably than yjs's in-memory merge timing.
-- **ygo V2 doc size matches yjs byte-for-byte-scale** (159,921 vs
-  159,929 bytes — parity). V2's per-column RLE compression plus
-  commit-time GC dedupe everything the squash reaches and more.
-  V2 is the right choice for persistence and snapshots.
-- **Apply throughput is ~3.5× yjs's wall-clock on different
-  hardware** (20.3 s on Apple M3 vs 5.7 s on the slower i5-8400,
-  so the hardware-normalized gap is wider). It was ~1.85× before
-  commit-time squash + GC landed; the per-commit merge and GC
-  scans roughly doubled apply time, in exchange for the 8.8×
-  smaller V1 documents. Relative to yrs's published sub-10-s B4
-  numbers this sits at roughly 2× — at the DESIGN.md target
-  boundary. Known optimization headroom: the squash scan re-walks
-  the full new-block range each commit.
-- **Encode V2 is ~17× slower** than encode V1 (10.5 vs 0.6 ms)
-  because of `StringEncoder` UTF-16 length computation and per-key
-  staging. With squash shipped, V1 encode is both the fastest and
-  the hot-path default; V2 remains the persistence format where
-  its size parity with yjs pays.
+- Applying edits is about 20× slower than yjs on the same machine.
+- With equal client IDs the two produce documents of identical size
+  in both formats. ygo's random client IDs are 53-bit and yjs 13's
+  are 32-bit, which is what makes V1 and the updates larger.
 
-A proper cross-impl harness that runs ygo + native yrs +
-yjs through a single comparison runner under identical
-hardware is on the [tech-debt list](docs/tech-debt.md). The
-numbers above are honest absolute figures with hardware
-caveats; a head-to-head harness is a "later" optimization.
+`dmonad/crdt-benchmarks` publishes yjs and ywasm results from other
+hardware (Intel i5-8400, Node 20.5). Its document sizes are V2.
+No run against native yrs exists, so the DESIGN.md goal of staying
+within 2× of yrs is unverified. A cross-implementation harness is on
+the [tech-debt list](docs/tech-debt.md).
 
 ## Reproducing
 

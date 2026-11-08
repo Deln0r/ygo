@@ -48,7 +48,7 @@ the hole was then discarded as already-known. Reading a room backward is
 exactly the delivery pattern that triggers it.
 
 This complements, and does not replace, the centralised path: ygo already ships
-a Hocuspocus-compatible WebSocket [server](../../server). Use that when you run
+a `y-websocket`-compatible WebSocket [server](../../server). Use that when you run
 the infrastructure; use this when you would rather not.
 
 ## Deliberately thin

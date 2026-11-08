@@ -1,6 +1,6 @@
 # Ygo
 
-[![Official Yjs port](https://img.shields.io/badge/Yjs%20docs-official%20port-7c3aed.svg)](https://docs.yjs.dev/ecosystem/ports-to-other-languages)
+[![Listed in the Yjs docs](https://img.shields.io/badge/Yjs%20docs-listed%20port-7c3aed.svg)](https://docs.yjs.dev/ecosystem/ports-to-other-languages)
 [![CI](https://github.com/Deln0r/ygo/actions/workflows/test.yml/badge.svg)](https://github.com/Deln0r/ygo/actions/workflows/test.yml)
 [![Coverage](https://coveralls.io/repos/github/Deln0r/ygo/badge.svg?branch=main)](https://coveralls.io/github/Deln0r/ygo?branch=main)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Deln0r/ygo.svg)](https://pkg.go.dev/github.com/Deln0r/ygo)
@@ -10,26 +10,26 @@
 [![Live Demo](https://img.shields.io/badge/live%20demo-ygo.deln0r.com-22c55e.svg)](https://ygo.deln0r.com)
 [![Codeberg Mirror](https://img.shields.io/badge/codeberg-mirror-2185d0?logo=codeberg&logoColor=white)](https://codeberg.org/Deln0r/ygo)
 
-Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications, [officially listed](https://docs.yjs.dev/ecosystem/ports-to-other-languages) in the Yjs documentation's ports page.
+Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications, listed on the [ports page](https://docs.yjs.dev/ecosystem/ports-to-other-languages) of the Yjs documentation.
 
-Ygo speaks the **Yjs V1 and V2 wire formats byte-for-byte**. JavaScript clients running `yjs@13.x` synchronize directly with Go servers and vice versa, with both directions verified through **287 cross-language fixture scenarios** generated from `yjs@13.6.33`. The bundled WebSocket server is Hocuspocus-compatible. No CGO; `gomobile bind` produces an iOS xcframework and Android AAR (manually verified, not run in CI).
+Ygo speaks the **Yjs V1 and V2 wire formats** byte for byte, apart from the few Any values listed under [Strings and values](#strings-and-values). The encoding is verified in both directions through **287 cross-language fixture scenarios** generated from `yjs@13.6.33`. The bundled WebSocket server speaks the `y-websocket` protocol: JavaScript clients using `y-websocket` connect to it directly, and the Go client connects to the reference `y-websocket` server. **Hocuspocus clients and servers do not interoperate with ygo today** (see [known gaps](#known-gaps)). No CGO; `gomobile bind` produces an iOS xcframework (built by hand, not run in CI). The Android build is currently broken.
 
 ## Highlights
 
-- **Byte-for-byte wire compatibility, verified in both directions.** 287 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push, so a regression in either direction fails the build.
-- **Pure Go, no CGO — mobile included.** Cross-compiles freely to every Go target. The CRDT core, the sync client and the server also compile to `js/wasm` and `wasip1/wasm`; the one exception is the SQLite-backed store in [`persist/sqlite`](persist/sqlite), since `modernc.org/sqlite` is transpiled C with no wasm target — a browser build supplies its own [`persist.Store`](persist) instead (it is a seven-method interface). `gomobile bind` produces an iOS xcframework and Android AAR (manually verified on 2026-06-12, not run in CI) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
-- **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native y-websocket/Hocuspocus provider: handshake, incremental updates, awareness, reconnect with backoff. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
-- **Complete CRDT type set.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments.
+- **Byte-level wire compatibility, verified in both directions.** 287 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push to `main` and every pull request, so a regression in either direction fails the build. The exceptions are the Any values listed under [Strings and values](#strings-and-values).
+- **Pure Go, no CGO.** The CRDT core, the sync client and the server compile with `CGO_ENABLED=0` for all 47 targets in `go tool dist list`, `js/wasm` and `wasip1/wasm` included. The SQLite-backed store in [`persist/sqlite`](persist/sqlite), and with it `yserve`, builds only where `modernc.org/sqlite` does: not on wasm, AIX, DragonFly, illumos, Plan 9, Solaris, MIPS or big-endian ppc64 Linux, NetBSD other than amd64, or OpenBSD other than amd64 and arm64. Elsewhere, supply your own [`persist.Store`](persist) (it is a seven-method interface). `gomobile bind` produces an iOS xcframework (built by hand on 2026-11-08, not run in CI; the Android build is [currently broken](#known-gaps)) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
+- **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native `y-websocket` provider: handshake, incremental updates, awareness, reconnect with backoff. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
+- **The Yjs shared types.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments. Not implemented: the legacy `XmlHook`, observers on `XmlFragment` and `XmlElement`, and `Text.ObserveDeep`.
 - **Change observers.** `Map.Observe` / `Array.Observe` / `Text.Observe` deliver Quill-style deltas of exactly what changed; `ObserveDeep` bubbles events from nested types with their path. Semantic parity with yjs's YMapEvent / YArrayEvent / YTextEvent. On mobile, `ObserveChanges` hands a native editor the delta as JSON.
-- **One update per transaction.** `Doc.OnUpdate` / `OnUpdateV2` hand you each committed transaction as an update holding just its changes, the bytes yjs emits on `doc.on('update')` (known exceptions in the status table), with the transaction's origin; an append costs about 20 bytes however long the history. `ApplyUpdateWithOrigin` tags a peer's update so an echo guard and the UndoManager can tell it apart, and `EncodeDiff` catches a peer up from its own clock.
-- **Compact encoding.** Commit-time block squash collapses per-character edits into single items (about 1 byte per character in V1), and garbage collection frees deleted content at commit. On a real-world editing trace V1 document size drops from ~1.97 MB to ~223 KB, competitive with V2.
+- **One update per transaction.** `Doc.OnUpdate` / `OnUpdateV2` hand you each committed transaction as an update holding just its changes, the bytes yjs emits on `doc.on('update')` (known exceptions in the status table), with the transaction's origin; an append costs under 30 bytes however long the history. `ApplyUpdateWithOrigin` tags a peer's update so an echo guard and the UndoManager can tell it apart, and `EncodeDiff` catches a peer up from its own clock.
+- **Compact encoding.** Commit-time block squash collapses per-character edits into single items (about 1 byte per character in V1), and garbage collection frees deleted content at commit. On a 260k-edit real-world trace a document with a random client ID takes 377 KB in V1 and 160 KB in V2 (yjs: 311 KB and 160 KB; ygo's random client IDs are 53-bit, yjs 13's are 32-bit). With the same client ID, ygo and yjs produce documents of identical size in both formats.
 - **Forward-looking wire handling.** ygo handles 53-bit client IDs throughout (byte-verified above 2^32), the confirmed wire-level change in the `yjs@14` release candidate, and decodes Skip structs in the update stream as no-op gaps (part of the wire format since yjs v13.5). Full attribution / IdMap support waits for the v14 format to stabilize.
-- **Ready-to-run server: [yserve](docs/yserve.md).** A self-hosted Yjs server in a single static binary — a Hocuspocus alternative with no Node, no Redis, no CGO. Same wire protocol, so existing `@hocuspocus/provider` / `y-websocket` clients connect unchanged; SQLite persistence and periodic document versioning built in. Also embeds as a plain `http.Handler` inside an existing Go backend.
-- **Scales horizontally.** Several server instances behind a load balancer converge on the same document through a pluggable [backplane](server/backplane): edits and live cursors both cross instances, so two users on different servers collaborate as if on one. An in-process hub ships in the core; an opt-in [NATS adapter](server/backplane/nats) (versioned separately so the core stays dependency-free) spans machines, with a JetStream mode that resumes delivery across a broker reconnect or restart. Clustered instances share one `Store` and run the same ygo version.
+- **Ready-to-run server: [yserve](docs/yserve.md).** A self-hosted Yjs server in one binary, with no Node and no Redis. `y-websocket` clients connect unchanged (checked with y-websocket 2.1 and 3.1), and SQLite persistence and periodic document versioning are built in. It also embeds as a plain `http.Handler` inside an existing Go backend. Read the [known gaps](#known-gaps) before deploying: the default message limit and room names with a slash both affect ordinary use.
+- **Scales horizontally, as a library.** Several instances of the [`server`](server) package behind a load balancer converge on the same document through a pluggable [backplane](server/backplane): edits and live cursors both cross instances, so two users on different servers collaborate as if on one. An in-process hub ships in the core; an opt-in [NATS adapter](server/backplane/nats) (a separate module, so NATS stays out of the core's dependencies) spans machines, with a JetStream mode that resumes delivery across a broker reconnect or restart. Clustered instances share one `Store` and run the same ygo version. The `yserve` binary has no backplane option.
 - **Federated transport over Matrix.** An opt-in [Matrix transport](integration/matrix) (a separate module, so mautrix stays out of a build that only wants the CRDT) turns an ordinary unencrypted Matrix room into the sync channel: peers publish updates as `dev.ygo.update` room events and merge what they read back, with no ygo server involved. A room is an append-only log with no ordering or exactly-once guarantee, which is exactly what Yjs updates tolerate. Room content is treated as untrusted — validated on both sides, decoded one event at a time so one bad event cannot break a whole page, encrypted rooms refused rather than silently written in the clear — though, as the module README spells out, Yjs updates do not authenticate deletes, so room membership is write access to the document. Exercised in CI against a real Dendrite on every push to `main` and every pull request. Its limits are documented rather than papered over.
 - **EU-sovereign mirror** on [codeberg.org/Deln0r/ygo](https://codeberg.org/Deln0r/ygo), auto-synced from GitHub on every push for adopters who prefer or require EU-hosted code infrastructure.
 
-**Live demo:** open [ygo.deln0r.com](https://ygo.deln0r.com) in two browser tabs and start typing. Same protocol any standard Yjs ecosystem client speaks, with a pure-Go server behind it.
+**Live demo:** open [ygo.deln0r.com](https://ygo.deln0r.com) in two browser tabs and start typing. The page runs a stock `y-websocket` client in JavaScript against a pure-Go server.
 
 ## Quick start
 
@@ -65,16 +65,17 @@ func main() {
 }
 ```
 
-For a collaborative server backend, see [yserve](docs/yserve.md) — a stand-alone, Hocuspocus-compatible WebSocket server with SQLite persistence and document versioning, in one static binary:
+For a collaborative server backend, see [yserve](docs/yserve.md), a stand-alone WebSocket server for `y-websocket` clients with SQLite persistence and document versioning, in one binary:
 
 ```bash
-go install github.com/Deln0r/ygo/cmd/yserve@latest
+# CGO_ENABLED=0 makes the binary fully static on Linux
+CGO_ENABLED=0 go install github.com/Deln0r/ygo/cmd/yserve@latest
 yserve -addr :1234 -store data.db -version-interval 10m
 ```
 
 ### Sending each change
 
-`Doc.OnUpdate` hands you every committed transaction as a V1 update holding exactly that transaction's changes, the bytes of yjs's `doc.on('update')`, except in the pinned case listed in the status table below and for the Any values ygo writes differently: an object with more than one key (ygo sorts the keys, yjs keeps their insertion order) and a whole-number `float64` (kept a float64, where lib0 writes a varint). Forward them to peers or append them to a log; an append costs a few bytes however long the document's history is. Apply what peers send with an origin, so the handler can tell their updates from yours:
+`Doc.OnUpdate` hands you every committed transaction as a V1 update holding exactly that transaction's changes, the bytes of yjs's `doc.on('update')`, except in the pinned case listed in the status table below and for the Any values listed under [Strings and values](#strings-and-values). Forward them to peers or append them to a log; an append costs a few bytes however long the document's history is. Apply what peers send with an origin, so the handler can tell their updates from yours:
 
 ```go
 type peer struct{ id string }
@@ -154,11 +155,20 @@ txn.Commit()
 got, ok := m.GetDoc(d, "child") // got.GUID() == sub.GUID()
 ```
 
-The `ContentDoc` wire format (GUID + options) is byte-compatible with `yjs@13.6.33`, verified by cross-language fixtures. Lifecycle events are observable via `d.OnSubdocs` (added / removed / loaded GUIDs per transaction); `SetDocWithOptions(..., autoLoad)` and `subdoc.Load()` drive the loaded set, so a sync provider knows which nested documents to fetch.
+The `ContentDoc` wire format (GUID + options) is byte-compatible with `yjs@13.6.33`, verified by cross-language fixtures. Lifecycle events are observable via `d.OnSubdocs` (added / removed / loaded GUIDs per transaction); `SetDocWithOptions(..., autoLoad)` and `subdoc.Load()` drive the loaded set, so a sync provider knows which nested documents to fetch. `Load` is reported with the next transaction on the parent, where yjs reports it at once.
 
 ### Strings and values
 
 lib0 rejects strings that are not valid UTF-8, so ygo makes every string it is given valid at the call, before it becomes part of an item: each byte that does not start a valid UTF-8 sequence becomes U+FFFD, so UTF-16 indexes into the string you passed still point at the same places (values nested deeper than 1000 levels are not checked below that depth). An embed or format value that is not a plain value (strings, numbers, bools, nil, `[]byte`, `[]any`, `map[string]any`) is marshaled once, at the call, and stored as that JSON. A value passed to the API belongs to the document from then on: do not mutate it, or a value a read returns, after the call. Updates arriving with invalid UTF-8 are rejected (`ygo.ErrInvalidUTF8`); bytes an older release stored load as they were.
+
+Some Any values change when ygo encodes them again. Clients online when the update arrives get the original bytes, but a client that receives the value from a Go peer's state (a late joiner, or after the server compacts) gets something else:
+
+- a JS `BigInt` becomes a plain number and loses precision beyond 2^53;
+- `undefined` becomes `null`, also inside objects;
+- `-0` becomes `0`;
+- an object with more than one key comes back with its keys sorted, where yjs keeps their insertion order.
+
+Separately, a whole-number `float64` set from Go is written as a float64, where lib0 writes a varint.
 
 ### Observing changes
 
@@ -180,7 +190,18 @@ defer unsub()
 
 ## Status
 
-**Feature-complete and stable.** The CRDT engine, the V1 and V2 wire formats, and the full type set above are validated bidirectionally against `yjs@13.6.33` and exercised in CI on every push. The public API is considered stable for the v1.x line; changes follow semantic versioning, with new functionality as minor releases and breaking changes deferred to a future major.
+**Stable CRDT core, with known gaps.** The CRDT engine, the V1 and V2 wire formats, and the type set above are validated bidirectionally against `yjs@13.6.33` and exercised in CI on every push to `main`. The public API is considered stable for the v1.x line; changes follow semantic versioning, with new functionality as minor releases and breaking changes deferred to a future major.
+
+### Known gaps
+
+- **Hocuspocus.** `@hocuspocus/provider` cannot sync with the ygo server, and the Go client cannot sync with `@hocuspocus/server` (checked with provider 2.15, 3.4 and 4.8 and server 4.8). Hocuspocus starts every frame with the document name; ygo's frames start with the message type, as `y-websocket`'s do.
+- **Android.** `gomobile bind -target=android` fails since v1.8.0: the generated Java for `XmlFragment` and `XmlElement` defines `toString()` twice. v1.7.0 is the last version that builds an `.aar`. iOS builds.
+- **Message size.** The server reads client messages up to 32 KiB by default. A larger one (a big paste, or the first sync of a large document) closes the connection with 1009 and the client reconnects in a loop. Raise `ReadLimit` (`yserve -read-limit`).
+- **Room names with a slash.** The default `DocNameFn` drops the first path segment when there are several, so the rooms `team-a/doc` and `team-b/doc` are one document. Embedders can set `DocNameFn`; with `yserve`, do not use `/` in room names.
+- **Any values.** See [Strings and values](#strings-and-values).
+- **Speed.** Applying edits is about 20× slower than yjs on the same machine. See [Benchmarks](#benchmarks).
+
+### Status by layer
 
 | Layer | Status |
 |---|---|
@@ -197,18 +218,18 @@ defer unsub()
 | `internal/types/Xml*` (XmlFragment, XmlElement, XmlText) | done; ProseMirror/Tiptap/BlockNote unblocked. XmlHook (legacy) deferred. |
 | Persistence (`Store` interface + `modernc.org/sqlite` reference impl) | done; append-only update log, Flush compaction, LoadDoc / GetStateVector / GetDiff helpers; pure-Go (no CGO). The sqlite backend runs in WAL mode with a busy timeout for concurrency-safe writes |
 | Update-level utilities (`MergeUpdates` / `MergeUpdatesV2` / `DiffUpdate` / `EncodeStateVectorFromUpdate`) | done; yjs-parity helpers to merge, diff, and compute a state vector from update bytes, for server-side compaction and diffing. `EncodeStateVectorFromUpdate` reads the bytes directly; the merge and diff helpers reconstruct a document internally. Merging preserves blocks whose causal ancestor is absent from the set, writing `Skip` runs for the holes exactly as yjs does, so an incomplete set is coalesced rather than silently truncated |
-| y-sync protocol (`internal/sync`) | done; full Hocuspocus message subset (Sync + Awareness + QueryAwareness + Auth + Stateless + BroadcastStateless + Close + SyncStatus); per-document Auth permission scoping deferred ([tech-debt](docs/tech-debt.md)) |
+| y-sync protocol (`internal/sync`) | done for `y-websocket` clients (Sync + Awareness + QueryAwareness). The Hocuspocus message types (Auth, Stateless, BroadcastStateless, Close, SyncStatus) are implemented on the same frames, without Hocuspocus's document-name prefix, so stock Hocuspocus clients cannot use them; per-document Auth permission scoping deferred ([tech-debt](docs/tech-debt.md)) |
 | Awareness (`internal/awareness`) | done; LWW presence map, JSON wire payload per y-protocols, self-eviction defense, SweepOutdated, decode caps + per-room client cap + tombstone GC (DoS hardening) |
-| `server/` (WebSocket sync server) | done; `http.Handler` mount-anywhere shape, per-doc broadcaster, persists every applied update to optional `persist.Store`. Connection lifecycle hooks (`OnConnect` / `OnDisconnect` / `OnChange` / `OnLoadDocument` / `OnAuthenticate` / `OnStateless`), read-only viewers (`ReadOnly`), resource caps (`MaxConnsPerDoc` / `MaxDocs` / `MaxAwarenessClients`), a send queue and writer per connection so a slow client never delays its room (one that falls behind is closed and resyncs: `MaxSendQueue` / `MaxSendQueueBytes` / `WriteTimeout`), a `Stats` load snapshot, and awareness disconnect tombstones + periodic presence sweep (`AwarenessTimeout`) |
-| `server/backplane` (multi-instance clustering) | done; pluggable pub/sub `Backplane` so instances behind a load balancer converge on one document, carrying both document updates and presence (relayed presence held to its own origin-partitioned share of the per-room cap, so a flood on one instance cannot starve local clients on another). In-process `Memory` hub in the core; the opt-in [NATS adapter](server/backplane/nats) is a separate module (core stays dependency-free) offering core-NATS at-most-once or a JetStream mode that resumes across a broker reconnect or restart. Requires a shared `Store`, and all instances in a cluster must run the same version |
+| `server/` (WebSocket sync server) | done; `http.Handler` mount-anywhere shape, per-doc broadcaster, persists every applied update to optional `persist.Store`. Connection lifecycle hooks (`OnConnect` / `OnDisconnect` / `OnChange` / `OnLoadDocument` / `OnAuthenticate` / `OnStateless`; the last two fire only for Hocuspocus message types, which stock clients do not send on these frames, so authenticate at the upgrade with `OnConnect`), read-only viewers (`ReadOnly`), resource caps (`MaxConnsPerDoc` / `MaxDocs` / `MaxAwarenessClients`), a send queue and writer per connection so a slow client never delays its room (one that falls behind is closed and resyncs: `MaxSendQueue` / `MaxSendQueueBytes` / `WriteTimeout`), a `Stats` load snapshot, and awareness disconnect tombstones + periodic presence sweep (`AwarenessTimeout`) |
+| `server/backplane` (multi-instance clustering) | done; pluggable pub/sub `Backplane` so instances behind a load balancer converge on one document, carrying both document updates and presence (relayed presence held to its own origin-partitioned share of the per-room cap, so a flood on one instance cannot starve local clients on another). In-process `Memory` hub in the core; the opt-in [NATS adapter](server/backplane/nats) is a separate module (so NATS stays out of the core's dependencies) offering core-NATS at-most-once or a JetStream mode that resumes across a broker reconnect or restart. Requires a shared `Store`, and all instances in a cluster must run the same version. Library only: `yserve` has no backplane option |
 | [`integration/matrix`](integration/matrix) (federated transport) | done; opt-in separate module carrying updates as `dev.ygo.update` room events over a Matrix room, no ygo server involved. Backward `/messages` pagination from the `/sync` `prev_batch` token (an empty page is not the end of history), per-call event-ID dedup, `ygo.ValidateUpdate` on both publish and read, per-event decoding so one hostile event costs one event rather than a whole page, an event-size ceiling, refusal of end-to-end-encrypted rooms, and a `/messages` fallback when `/sync` is unusable. Unit suite against a strict in-process double plus a real Dendrite in CI on every push to `main` and every pull request. Deliberately thin: whole blobs, no state-vector diffing, no compaction — see its README for what that costs |
-| [yserve](docs/yserve.md) (Hocuspocus-compat server binary) | done; single static binary with SQLite persistence (`-store`) and periodic document versioning (`-version-interval` / `-keep-versions`); `cmd/ygo-server` remains as a deprecated alias |
-| `gomobile/` (app-level mobile SDK for iOS/Android) | done; pure-Go (no CGO) bindable SDK with two levels: the full shared type set — `Text` (UTF-16 mutators), rich text (`ApplyDelta` / `Format` / `InsertEmbed` — Quill deltas in, symmetric with `ObserveChanges`), `Map` and `Array` (typed JSON values, nested types), and `XmlFragment` / `XmlElement` / `XmlText` (ProseMirror / Tiptap) — plus `UndoManager` (tracking the origin of a `WithOrigin` handle, so a collaborator's update applied with `ApplyUpdateWithOrigin` stays out of the user's undo), cursor anchors (relative positions), live collaborator presence (`ObservePresence` / `PresenceStates` delivering remote cursors and identity as JSON), and an embedded sync `Client` (`NewClient` / `Connect` / `Listener`) so a Swift / Kotlin app edits the Doc and renders UI while sync runs in the background; plus the bytes-in/bytes-out wire layer for custom transports, with `ObserveUpdates` delivering each transaction's update. `gomobile bind` was manually verified once (2026-06-12, Xcode 16 + NDK 27 + Go 1.26) to produce a valid `Ygo.xcframework` (arm64 + simulator universal) and Android `.aar` (arm64-v8a / armeabi-v7a / x86 / x86_64); the bind step is not run in CI (the pure-Go package compiles in CI, guarding against CGO leak). See [gomobile/README.md](gomobile/README.md) for commands. |
+| [yserve](docs/yserve.md) (server binary for `y-websocket` clients) | done; one binary with SQLite persistence (`-store`) and periodic document versioning (`-version-interval` / `-keep-versions`); `cmd/ygo-server` remains as a deprecated alias |
+| `gomobile/` (app-level mobile SDK for iOS/Android) | done for iOS, Android build broken ([known gaps](#known-gaps)); pure-Go (no CGO) bindable SDK with two levels: the full shared type set — `Text` (UTF-16 mutators), rich text (`ApplyDelta` / `Format` / `InsertEmbed` — Quill deltas in, symmetric with `ObserveChanges`), `Map` and `Array` (typed JSON values, nested types), and `XmlFragment` / `XmlElement` / `XmlText` (ProseMirror / Tiptap) — plus `UndoManager` (tracking the origin of a `WithOrigin` handle, so a collaborator's update applied with `ApplyUpdateWithOrigin` stays out of the user's undo), cursor anchors (relative positions), live collaborator presence (`ObservePresence` / `PresenceStates` delivering remote cursors and identity as JSON), and an embedded sync `Client` (`NewClient` / `Connect` / `Listener`) so a Swift / Kotlin app edits the Doc and renders UI while sync runs in the background; plus the bytes-in/bytes-out wire layer for custom transports, with `ObserveUpdates` delivering each transaction's update. `gomobile bind -target=ios,iossimulator` last ran by hand on 2026-11-08 (Xcode 26.5, Go 1.26.3) and produces `Ygo.xcframework` (arm64 + simulator). The bind step is not run in CI (the pure-Go package compiles in CI, guarding against CGO leak). See [gomobile/README.md](gomobile/README.md) for commands. |
 | V2 update encoding | done; lib0 RLE primitives + column encoder/decoder + `Update.{EncodeV2,DecodeV2}` + public `ygo.{EncodeStateAsUpdateV2,EncodeDiffV2,ApplyUpdateV2}`; bidirectional cross-language fixtures vs `yjs@13.6.33` |
 | Untrusted-input hardening | done; every wire-supplied element count in the V1/V2 update, snapshot, id-set, and Any-content decoders is bounded against the input length, closing a length-prefix amplification DoS (a few bytes forcing a multi-terabyte allocation). Continuous fuzzing of the decode + apply paths runs nightly in CI ([fuzz.yml](.github/workflows/fuzz.yml)) with the discovered crashers committed as regression corpus |
 | dmonad/crdt-benchmarks B1-B4 port | done; B1.1-B1.11 / B2.1-B2.4 / B3.1+3+4 / B4 (260k-edit real-world LaTeX trace). Baseline in [BENCHMARKS.md](BENCHMARKS.md). |
 | `UndoManager` (`internal/undo`) | done; scoped Undo / Redo over Map / Array / Text with capture-timeout grouping, tracked-origin filtering (`AddTrackedOrigin` / `RemoveTrackedOrigin`), and a `Redone` chain for deletion restore, deleted nested types included: the type comes back as a new copy with its content, as in yjs. A subdocument reference is not restored, on its own or inside a deleted type, where yjs restores a new reference with the same GUID and options. Cross-language conformance vs `yjs@13.6.33`: 27 final-state scenarios, plus 46 undo scenarios in the update-event set, nested types above all, that check every update, return value and stack state on the way |
-| Per-transaction updates (`Doc.OnUpdate` / `OnUpdateV2`, `ApplyUpdateWithOrigin`) | done; the yjs `update` / `updateV2` events, emitted after GC with the transaction's origin (byte for byte apart from the pinned cases here and the Any values ygo writes differently: multi-key objects, whose keys it sorts, and whole-number float64s); `EncodeDiff` / `EncodeDiffV2` cut the first block at the remote clock as yjs does, but leave out the pending buffer, which yjs appends. 112 cross-language scenarios, including the format cleanup yjs runs after a remote transaction and updates whose blocks wait on each other, each checked for the order of the types every transaction changes and replayed as V1, V2 and both by turns, 1 pinned divergence (a root first read as text after formatted text arrived inserts with the attributes in effect, where yjs can insert at a search marker without them) |
+| Per-transaction updates (`Doc.OnUpdate` / `OnUpdateV2`, `ApplyUpdateWithOrigin`) | done; the yjs `update` / `updateV2` events, emitted after GC with the transaction's origin (byte for byte apart from the pinned cases here and the Any values listed under [Strings and values](#strings-and-values)); `EncodeDiff` / `EncodeDiffV2` cut the first block at the remote clock as yjs does, but leave out the pending buffer, which yjs appends. 112 cross-language scenarios, including the format cleanup yjs runs after a remote transaction and updates whose blocks wait on each other, each checked for the order of the types every transaction changes and replayed as V1, V2 and both by turns, 1 pinned divergence (a root first read as text after formatted text arrived inserts with the attributes in effect, where yjs can insert at a search marker without them) |
 | Snapshots (`CreateSnapshot` / `EncodeSnapshot` / `RestoreSnapshot`) | done; V1 wire format byte-compatible with `yjs@13.6.33` (cross-language fixtures incl. multi-client), `RestoreSnapshot` mirrors `Y.createDocFromSnapshot` |
 | Subdocuments (`Map.SetDoc` / `Map.GetDoc`) | done; `ContentDoc` wire format (GUID + options) byte-compatible with `yjs@13.6.33`, cross-language fixtures. Lifecycle events via OnSubdocs / autoLoad / Load |
 | Wire client-ID width | 53-bit client IDs throughout (`uint64` + varint), byte-verified against `yjs@13.6.33` for IDs above 2^32. Forward-compatible with the wider client-ID space yjs@14 introduces |
@@ -221,10 +242,10 @@ defer unsub()
 ## Goals
 
 1. **Binary protocol compatibility** with [Yjs](https://github.com/yjs/yjs) v13.x in both V1 and V2 wire formats. Byte-for-byte. JS clients sync with Go servers and vice versa, bidirectionally verified.
-2. **Idiomatic Go API.** Channels for events, explicit transactions, `error` returns.
-3. **Pure Go.** No CGO. `gomobile bind` works for iOS/Android.
+2. **Idiomatic Go API.** Callbacks for events, explicit transactions, `error` returns.
+3. **Pure Go.** No CGO. `gomobile bind` for iOS and Android (the Android build is [currently broken](#known-gaps)).
 4. **Pluggable persistence** with `modernc.org/sqlite` reference implementation.
-5. **Performance within 2× of [yrs](https://github.com/y-crdt/y-crdt)** on `dmonad/crdt-benchmarks` B1-B4. See [BENCHMARKS.md](BENCHMARKS.md).
+5. **Performance within 2× of [yrs](https://github.com/y-crdt/y-crdt)** on `dmonad/crdt-benchmarks` B1-B4. Not verified: no run against native yrs exists, and on B4 ygo is about 20× slower than yjs on the same machine. See [Benchmarks](#benchmarks).
 
 ## Non-goals
 
@@ -245,43 +266,46 @@ One more fixture set compares bytes with yjs but stays out of these totals while
 
 The fixtures regenerate from pinned `yjs@13.6.33` + `lib0@0.2.119` + `y-protocols@1.0.7` on every CI run; `git diff --exit-code testdata/` catches byte-level regressions.
 
+Byte equality does not extend to the Any values listed under [Strings and values](#strings-and-values).
+
 ## How is this different from Hocuspocus / y-websocket / y-leveldb?
 
 | Project | Runtime | What it provides | Relationship to Ygo |
 |---|---|---|---|
 | `yjs` (npm) | Node / browser | The reference CRDT implementation | Ygo's wire-format target |
 | `y-websocket` | Node | Reference WebSocket server | [yserve](docs/yserve.md) is a Go-native equivalent |
-| `Hocuspocus` | Node | Production WebSocket server with auth, persistence, extensions | [yserve](docs/yserve.md) speaks the same 8-message envelope (Sync / Awareness / QueryAwareness / Auth / Stateless / BroadcastStateless / Close / SyncStatus) in one static binary |
+| `Hocuspocus` | Node | Production WebSocket server with auth, persistence, extensions | Not interoperable with ygo today: its frames start with the document name, ygo's do not |
 | `yrs` | Rust | Reference Rust port | Ygo's executable spec for porting decisions |
 | `y-leveldb`, `y-indexeddb` | Node / browser | Persistence backends | Ygo's `persist/sqlite` is a Go-native equivalent |
 | **Ygo** | **Go** | **CRDT engine + WS server + persistence in one monorepo, pure-Go for native mobile** | **This project** |
 
-If you have an existing Yjs deployment and want to move the server side to Go (no Node runtime, single static binary, native iOS / Android via gomobile) — Ygo is the path. If you're starting fresh and your team is comfortable with Node, Hocuspocus is the mature choice.
+If you run a `y-websocket` deployment and want to move the server side to Go (no Node runtime, one binary), ygo is an option; read the [known gaps](#known-gaps) first. A Hocuspocus deployment cannot switch without changing its clients. If you're starting fresh and your team is comfortable with Node, Hocuspocus is the mature choice.
 
 ## Benchmarks
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the full table. Highlights from B4 (259,778-edit real-world LaTeX paper trace) on Apple M3, Go 1.26:
+See [BENCHMARKS.md](BENCHMARKS.md) for the full table. B4 (259,778-edit real-world LaTeX paper trace) on one Apple M3, measured on 2026-11-08 with ygo v1.31.0 on Go 1.26.3 and yjs 13.6.33 on Node 26.6, all edits in one transaction with client ID 1:
 
-| Metric | Ygo V1 | Ygo V2 | yjs (Node, Intel i5-8400) | ywasm (Intel i5-8400) |
-|---|---|---|---|---|
-| Apply all edits | 20.3 s | 20.3 s | 5.7 s | 28.7 s |
-| Encoded doc size | **223 KB** | **160 KB** | 160 KB | 160 KB |
-| Encode time | 0.6 ms | 10.5 ms | 11 ms | 3 ms |
-| Parse time | 4.4 ms | 4.5 ms | 39 ms | 16 ms |
+| Metric | Ygo | yjs |
+|---|---|---|
+| Apply all edits | 20.3-21.4 s | 1.0-1.3 s |
+| Encoded doc size, V1 | 223 KB | 223 KB |
+| Encoded doc size, V2 | 160 KB | 160 KB |
+| Encode V1 / V2 | 0.8 ms / 7.5 ms | 2.4 ms / 1.7 ms |
+| Parse V1 / V2 | 4.6 ms / 4.8 ms | 5.6 ms / 4.6 ms |
 
 **How to read this:**
 
-- **Doc sizes are now at or near yjs parity.** V1 lands within 1.4× of yjs (223 KB vs 160 KB; it was 1.97 MB, ~12× bloat, before commit-time block squash + GC shipped). V2 matches yjs byte-for-byte-scale at 160 KB. A 2,000-character sequential insert encodes to ~1.0 byte/char in V1. Squash ships with the paired Apply-side partial-overlap handling that keeps remote integration correct when a peer sends a merged block overlapping the receiver's state.
-- **Apply throughput is the trade.** ~3.5× yjs wall-clock on different hardware (Apple M3 vs the slower i5-8400, so the normalized gap is wider): the per-commit squash + GC scans that buy the 8.8× smaller documents roughly doubled apply time versus the pre-squash build. Against yrs's published sub-10-s B4 numbers this sits at about 2×, at the DESIGN.md target boundary, with known commit-pipeline optimization headroom. (ywasm is yrs compiled to WebAssembly and is not representative of native yrs — wasm overhead inflates it ~5×.)
-- **Encode and parse are fast once the doc is compact:** V1 encode 0.6 ms and parse 4.4 ms on the 223 KB document, both ahead of yjs's published numbers on its hardware.
+- **Applying edits is where ygo is behind:** about 20× slower than yjs on the same machine. A transaction per edit with a random client ID and an update handler, which is closer to real use, takes 23.4 s against 1.0 s.
+- **Document sizes match yjs** when the client IDs match. With a random client ID, ygo's V1 document is 377 KB and yjs's 311 KB, because ygo's random IDs are 53-bit and yjs 13's are 32-bit. V2 stays at 160 KB for both.
+- **Encode and parse** are in the same range as yjs, except V2 encode, which is about 4× slower.
 
-A direct head-to-head harness against native yrs under identical hardware is on the roadmap but not yet run; the numbers above are honest absolute figures with hardware caveats.
+No head-to-head run against native yrs exists.
 
 ## Roadmap
 
-Shipped since v1.0 (June 2026): a full Hocuspocus-compatible sync server (connection lifecycle hooks, read-only viewers, resource caps, a stats snapshot), horizontal scaling across instances with cross-cluster cursors, an offline-first Go client, WAL-backed SQLite persistence, continuous fuzzing, the yjs update-level utilities, and per-transaction update events with origins (1.22.0). See the [CHANGELOG](CHANGELOG.md), the [releases](https://github.com/Deln0r/ygo/releases), and [examples/](examples).
+Shipped since v1.0 (June 2026): a sync server with connection lifecycle hooks, read-only viewers, resource caps and a stats snapshot, horizontal scaling across instances with cross-cluster cursors, an offline-first Go client, WAL-backed SQLite persistence, continuous fuzzing, the yjs update-level utilities, and per-transaction update events with origins (1.22.0). See the [CHANGELOG](CHANGELOG.md), the [releases](https://github.com/Deln0r/ygo/releases), and [examples/](examples).
 
-Open: a documentation site, an external security audit, and yjs v14 wire features (attribution / IdMap) once v14 reaches GA.
+Open: the [known gaps](#known-gaps) above, including interoperability with Hocuspocus, a documentation site, an external security audit, and yjs v14 wire features (attribution / IdMap) once v14 reaches GA.
 
 Per-layer port notes live in [docs/yrs-port-notes/](docs/yrs-port-notes/). Items intentionally deferred or partial are tracked in [docs/tech-debt.md](docs/tech-debt.md). Detailed design decisions in [DESIGN.md](DESIGN.md).
 

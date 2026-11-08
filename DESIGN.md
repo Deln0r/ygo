@@ -22,7 +22,7 @@ Pure-Go implementation of the Yjs CRDT framework, binary-protocol compatible wit
 | Awareness CRDT | Yes |
 | Block squashing | Yes |
 | `Store` interface + `modernc.org/sqlite` impl | Yes |
-| Hocuspocus-compat WebSocket server (`cmd/ygo-server`) | Yes |
+| `y-websocket`-compatible WebSocket server (`cmd/ygo-server`) | Yes |
 | `gomobile bind` build target | Yes |
 
 ## v1.0 scope
@@ -91,7 +91,7 @@ go func() {
 
 - `NewDoc()`, not `NewYDoc()`
 - Explicit transactions (mirror yrs's `transact_mut`)
-- Channels for events, not callbacks
+- Callbacks for events
 - `error` returns, no panics
 - `context.Context` on long-running operations
 - Map keys: `string` only
