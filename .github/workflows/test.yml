@@ -63,6 +63,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           file: coverage.txt
           format: golang
+          # The action downloads its reporter from GitHub releases on every
+          # run. On 8 Nov 2026 those downloads failed for hours and turned a
+          # docs-only commit red with every test passing: a missing upload
+          # must not fail the build.
+          fail-on-error: false
 
   backplane-nats:
     name: backplane-nats (nested module)
