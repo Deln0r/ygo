@@ -115,6 +115,8 @@ Recommended layout. `internal/sync/protocol.go` holds typed `MessageType uint8` 
 
 ## Auth flow
 
+> Corrected 10 Nov 2026, from captures of the real providers and servers: the Auth sub-types are Token 0, PermissionDenied 1, Authenticated 2 (`@hocuspocus/common` `auth.ts`), every frame starts with `varString(documentName)`, an accepted token gets Authenticated with a scope, and a refused one gets PermissionDenied with a reason while the socket stays open. The paragraphs below are the original notes. See `docs/tech-debt.md`, "Hocuspocus framing".
+
 Hocuspocus's auth path: client sends `MessageAuth` (tag `2`) with payload `varuint(authSubType) • varstring(token)` (`AuthMessageType.Token`; `MessageReceiver.ts:77-89`). Server invokes `onAuthenticate(token)`; on success no reply is needed and Sync proceeds; on failure the server sends a Close (tag `7`) with a "permission denied" reason and terminates the WS with code `4401`.
 
 In Go: `Options.OnAuthenticate func(ctx, docName, token string) error` — `nil` accepts, error sends `MessageClose`. **Recommendation: defer to v0.2.** Bare y-websocket does not support auth at all (commented out at `utils.js:70`), so a y-websocket-compatible server with zero auth covers the majority of adopters. The full `AuthMessageType` sub-tag protocol and permission-denied close-code dance is a non-trivial v0.1 surface.

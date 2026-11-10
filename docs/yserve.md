@@ -6,8 +6,9 @@ yserve is a self-hosted Yjs sync backend in one binary. It speaks the
 document versioning are built in.
 
 **`@hocuspocus/provider` does not work with yserve.** Hocuspocus starts
-every frame with the document name, which yserve does not parse. See
-[Limits](#limits) before deploying.
+every frame with the document name, which yserve does not parse. (The Go
+client speaks Hocuspocus to Hocuspocus servers with
+`client.Options.Hocuspocus`.) See [Limits](#limits) before deploying.
 
 **No Node. No Redis. No CGO.** Pure Go from the WebSocket accept loop
 down to the SQLite pages (via `modernc.org/sqlite`), which is why the

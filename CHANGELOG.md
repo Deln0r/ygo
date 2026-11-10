@@ -14,6 +14,39 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.36.0] - 2026-11-10
+
+**Upgrade impact**:
+
+- **The Auth sub-types are Hocuspocus's numbers now:** Token 0, PermissionDenied 1, Authenticated 2, as `@hocuspocus/common` 2.15, 3.4 and 4.8 have them; ygo had PermissionDenied 0, Authenticated 1, Token 2, which no client uses. On the server's y-websocket path, which runs `OnAuthenticate` for an Auth frame without a routing key, the Authenticated reply changes from `02 01 00` to `02 02` plus the scope (`"read-write"`, or `"readonly"` on a read-only connection), PermissionDenied is `02 01` (was `02 00`), and a Token must use sub-type 0 (was 2).
+- **An Auth frame without a payload and a CLOSE without a reason decode** (a server's token request, a provider's CLOSE). The server ignored such a frame's decode error before by closing the connection with 1002; a bare `07` is now ignored.
+- **The `client` is unchanged unless `Options.Hocuspocus` is set.**
+
+### Added
+
+- **Hocuspocus mode in the `client`** (`Options.Hocuspocus`), for `@hocuspocus/server` 2, 3 and 4:
+  - every frame starts with the document name, and the URL is dialed as given;
+  - the session opens with Auth (`Options.Token`, or `Options.TokenFunc` asked at every connect and whenever the server asks for the token again), SyncStep1 and the awareness state, as providers send them;
+  - `OnAuthenticated(scope)` and `Client.Scope()`; a refused token is `ErrPermissionDenied` with the server's reason, and the next dial waits at least 30 seconds;
+  - `Client.Unsynced()` counts the sync messages the server has not confirmed, as the provider's `unsyncedChanges`; a read-only connection's refused update is `ErrUpdateRefused`;
+  - a CLOSE from the server is `ErrDocumentClosed` and the client dials again; `Close` sends the provider's CLOSE first;
+  - `OnStateless` and `Client.SendStateless` for stateless messages;
+  - local edits wait for the reply to the server's SyncStep1, which carries them, so offline edits go up once;
+  - with nothing else to send for half the awareness timeout, a QueryAwareness keeps server 4's idle timeout off: it counts no client ping, and every server ignores QueryAwareness.
+- **gomobile:** `SetHocuspocus(token)`, `SetToken`, `Scope`, `Unsynced`, `SendStateless`, and an optional `AuthListener` (`OnAuthenticated`, `OnPermissionDenied`) set with `SetAuthListener`, apart from `Listener` so existing implementations keep compiling.
+- **`internal/sync`:** `EncodeRoute`, `DecodeRoute`, `RouteDocName`, `ScopeReadWrite`, `ScopeReadOnly`; `EncodeAuthAuthenticated` takes the scope.
+
+### Tests
+
+- **Against the real servers** (new CI job `hocuspocus`, `testdata/e2e/hocuspocus.mjs` driving the Go program `testdata/e2e/hpclient`): `@hocuspocus/server` 4.8.0, 3.4.4 and 2.15.3, each next to the provider of its version, and server 2.15 without an `onAuthenticate` hook. Per server: authenticated read-write, synced, a late joiner reads the provider's edit, edits both ways, `Unsynced` back to 0, presence both ways, stateless both ways, no error over the session; a refused token (`ErrPermissionDenied` with the reason, never synced); a read-only token (scope, `ErrUpdateRefused`, not applied, `Unsynced` above 0). Server 4.8 with a 1.5-second timeout: the keepalive holds past it, and without it the server's CLOSE is `ErrDocumentClosed` and the client syncs again. 60 checks.
+- **Against a scripted server** (`client/hocuspocus_test.go`): the opening frames byte for byte, offline edits only in the reply, `Unsynced`, one error per refused attempt and the denial wait, a refused update, a server CLOSE and the reconnect, the CLOSE on `Close`, the token request, frames for another document dropped, no Pong to a Ping, stateless both ways, the keepalive. `-race -count=10`.
+- **gomobile:** the `AuthListener` gets the scope and the refusal reason.
+- **`internal/sync`:** the Auth, CLOSE, SyncStatus and routing-key bytes against captures of the real providers and servers.
+
+### Documentation
+
+- README, `docs/yserve.md`, `gomobile/README.md`: the Go client speaks Hocuspocus; yserve still does not serve Hocuspocus providers. `docs/tech-debt.md`: "Hocuspocus framing" resolved for the client, open for the server; new entry "The y-websocket client sends offline edits twice on reconnect". `docs/yrs-port-notes/protocol-sync.md`: the Auth notes corrected.
+
 ## [1.35.0] - 2026-11-10
 
 **Upgrade impact**:
@@ -2217,6 +2250,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.36.0]: https://github.com/Deln0r/ygo/releases/tag/v1.36.0
 [1.35.0]: https://github.com/Deln0r/ygo/releases/tag/v1.35.0
 [1.34.0]: https://github.com/Deln0r/ygo/releases/tag/v1.34.0
 [1.33.0]: https://github.com/Deln0r/ygo/releases/tag/v1.33.0

@@ -367,16 +367,21 @@
 
 ## Sync protocol / WebSocket server
 
-### Hocuspocus framing (open)
+### Hocuspocus framing (client resolved in 1.36.0, server open)
 
 - **What:** `@hocuspocus/provider` (2.15, 3.4, 4.8) cannot sync with the ygo server, and the Go client cannot sync with `@hocuspocus/server` 4.8. Every Hocuspocus frame starts with `varString(documentName)` before the message type; ygo's frames start with the message type, as y-websocket's do. Found on 8 Nov 2026 by running the real clients: the two entries below were marked resolved against fixtures built without the document name, so they held only for y-websocket-style frames.
-- **Fix needs:** reading the document name in front of every frame (the first frame decides between the two framings: y-websocket always opens with Sync step 1, type 0, and a document name is never empty), the Auth handshake Hocuspocus clients wait for, several documents over one socket, and a CI job with the real provider and server.
+- **Resolved for the client in 1.36.0:** `client.Options.Hocuspocus`: the routing key on every frame, Auth with the sub-types and scope `@hocuspocus/common` uses (the numbers in `internal/sync` were in another order, which no client uses), the SyncStatus bookkeeping (`Client.Unsynced`), CLOSE both ways, stateless messages, and a QueryAwareness keepalive for server 4's idle timeout, which counts no client ping. The CI job `hocuspocus` runs it against servers 4.8, 3.4 and 2.15 next to the provider of each version.
+- **Still open, the server:** yserve parses no routing key. Fix needs: reading the document name in front of every frame (the first frame decides between the two framings: y-websocket always opens with Sync step 1, type 0, and a document name is never empty), the Auth handshake providers wait for, several documents over one socket, and a CI job with the real providers.
+
+### The y-websocket client sends offline edits twice on reconnect (open)
+
+- **What:** a local edit made while the y-websocket client is offline leaves a flush queued; on reconnect it goes out as an Update right after the client's SyncStep1, and again in the reply to the server's SyncStep1, which the server computed before the Update arrived. Harmless (updates are idempotent) but double the upload. The Hocuspocus mode holds local edits until the server's SyncStep1 is answered, as the provider does; the y-websocket path could do the same.
 
 ### Hocuspocus extensions (resolved)
 
 - **Was:** the full Hocuspocus envelope adds 5 message types beyond the bare y-websocket subset (Auth, Stateless, BroadcastStateless, Close, SyncStatus); `HandleFrame` silently dropped all of them.
 - **Resolved by:**
-  - `internal/sync/protocol.go` adds AuthSubType constants (PermissionDenied=0, Authenticated=1, Token=2) and `CloseStatusUnauthorized = 4401`.
+  - `internal/sync/protocol.go` adds AuthSubType constants (PermissionDenied=0, Authenticated=1, Token=2; renumbered in 1.36.0 to Token 0, PermissionDenied 1, Authenticated 2, as `@hocuspocus/common` has them) and `CloseStatusUnauthorized = 4401`.
   - `internal/sync/framing.go` adds encoders + decoders for all 5 types. DecodeEnvelope populates Frame.AuthSub for Auth messages.
   - `internal/sync/handler.go` adds `OnAuthenticate(docName, token) error` and `OnStateless(docName, payload)` hooks plus `AuthFailed` flag. Auth handler decodes Token sub-type, invokes the callback; on deny sends AuthPermissionDenied + Close and sets AuthFailed. Stateless invokes the callback (no reply). BroadcastStateless also fans out via Broadcast. Close and SyncStatus accepted silently.
   - `server/server.go` exposes `Options.OnAuthenticate` and `Options.OnStateless`. The readLoop checks `AuthFailed` after each HandleFrame and tears down the WS with `CloseStatusUnauthorized` (4401) when set.

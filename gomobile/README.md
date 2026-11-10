@@ -37,6 +37,27 @@ c.Connect()
 Pass the app's document path (e.g. `applicationSupportDirectory` on iOS).
 No CGO, so the SQLite database needs no native library.
 
+## Hocuspocus servers
+
+`Client.SetHocuspocus(token)` (call before `Connect`) makes the client
+speak the Hocuspocus protocol, for `@hocuspocus/server` 2, 3 and 4. The
+URL is the server's, without the document name:
+
+```go
+c := gomobile.NewClient("wss://collab.example.com", "note", doc)
+c.SetHocuspocus(userToken)
+c.SetAuthListener(auth) // OnAuthenticated(scope), OnPermissionDenied(reason)
+c.Connect()
+```
+
+`SetToken` replaces the token for the next connect or the server's
+next token request. `Scope()` is `"read-write"` or `"readonly"` once the
+server accepted the token; `Unsynced()` is the number of updates the
+server has not yet confirmed. After a refused token the client tries
+again no sooner than 30 seconds later; call `Close` to stop.
+`AuthListener` is separate from `Listener`, so existing listeners keep
+compiling.
+
 ## Observing changes
 
 `Text.ObserveChanges` and `Map.ObserveChanges` deliver the exact change
