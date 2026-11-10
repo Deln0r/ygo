@@ -61,8 +61,12 @@ async function onStateless ({ payload, connection }) {
 
 async function startServer (v, { auth = true, timeout } = {}) {
   const mod = await import(PACKAGES[v].server)
-  const opts = { port: 0, quiet: true, stopOnSignals: false, onStateless }
-  if (v !== 4) opts.address = '127.0.0.1'
+  // Server 4 passes `address` to listen as the host. Servers 2 and 3 pass
+  // it under a key node ignores, so they listen on every interface; on
+  // macOS another local process bound to 127.0.0.1 on the same port then
+  // takes the connections (seen once as 404s while other test servers
+  // ran). CI runs this job alone.
+  const opts = { port: 0, address: '127.0.0.1', quiet: true, stopOnSignals: false, onStateless }
   if (auth) opts.onAuthenticate = onAuthenticate
   if (timeout) opts.timeout = timeout
   const s = v === 2 ? new mod.Hocuspocus(opts) : new mod.Server(opts)
