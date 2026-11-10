@@ -65,6 +65,19 @@ func NewDocWithOptions(opts Options) *Doc { return doc.NewDocWithOptions(opts) }
 // implementations, observability code).
 type Branch = block.Branch
 
+// Undefined is a JavaScript undefined stored as a map value or inside an Any
+// array or object. It is not nil, which is null: Map.Get returns Undefined{}
+// for a key yjs set to undefined, and Map.Set(txn, k, Undefined{}) stores
+// one. It encodes as lib0's undefined, so JavaScript peers read undefined.
+type Undefined = block.Undefined
+
+// BigInt is a JavaScript BigInt, carried by lib0 as a signed 64-bit integer.
+// It is not an int64, which is a JavaScript number: a BigInt a peer stored
+// reads as BigInt and is written back as one, and a BigInt set from Go
+// reaches JavaScript as a BigInt. In a V1 format attribute or embed, which
+// is JSON, it is written as a number and every reader gets a float64.
+type BigInt = block.BigInt
+
 // MaxClientID is the upper bound on Doc.ClientID values
 // (2^53 - 1, matching JS Yjs's safe-integer range).
 const MaxClientID = doc.MaxClientID

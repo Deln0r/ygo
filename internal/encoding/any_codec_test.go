@@ -1,11 +1,14 @@
 package encoding
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"math"
 	"reflect"
 	"testing"
+
+	"github.com/Deln0r/ygo/internal/block"
 )
 
 func TestAny_RoundTrip_BasicTypes(t *testing.T) {
@@ -191,9 +194,9 @@ func TestAny_RoundTrip_Object(t *testing.T) {
 }
 
 func TestAny_DecodeBigInt(t *testing.T) {
-	// 8-byte BE int64. Decoder must accept; encoder side does not
-	// currently emit BigInt (callers use int64/int → integer/float64).
-	// JS Yjs payloads containing BigInt must still round-trip on Go.
+	// 8-byte BE signed, lib0 writeBigInt64. It decodes to block.BigInt, not
+	// int64: an int64 is a JS number, and re-encoding a BigInt as a number
+	// changed its type for every reader and lost precision beyond 2^53.
 	in := []byte{AnyTagBigInt, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a}
 	out, tail, err := DecodeAny(in)
 	if err != nil {
@@ -202,8 +205,80 @@ func TestAny_DecodeBigInt(t *testing.T) {
 	if len(tail) != 0 {
 		t.Errorf("trailing bytes: % x", tail)
 	}
-	if got, ok := out.(int64); !ok || got != 42 {
-		t.Errorf("got %v (%T), want int64(42)", out, out)
+	if got, ok := out.(block.BigInt); !ok || got != 42 {
+		t.Errorf("got %v (%T), want block.BigInt(42)", out, out)
+	}
+}
+
+// TestAny_ValuesLib0Keeps pins the three values lib0 round-trips and ygo
+// changed before v1.33.0: each decodes to its own Go value and encodes back
+// to lib0's bytes (lib0 0.2.119 writeAny).
+func TestAny_ValuesLib0Keeps(t *testing.T) {
+	cases := []struct {
+		name  string
+		hex   string
+		check func(any) bool
+	}{
+		{"undefined", "7f", func(v any) bool { _, ok := v.(block.Undefined); return ok }},
+		{"BigInt 5", "7a0000000000000005", func(v any) bool { return v == block.BigInt(5) }},
+		{"BigInt -1", "7affffffffffffffff", func(v any) bool { return v == block.BigInt(-1) }},
+		{"BigInt 2^53+1", "7a0020000000000001", func(v any) bool { return v == block.BigInt(1<<53+1) }},
+		{"BigInt min", "7a8000000000000000", func(v any) bool { return v == block.BigInt(math.MinInt64) }},
+		{"-0", "7d40", func(v any) bool { f, ok := v.(float64); return ok && f == 0 && math.Signbit(f) }},
+		{"0", "7d00", func(v any) bool { return v == int64(0) }},
+		{"array of undefined and -0", "75027f7d40", func(v any) bool {
+			arr, ok := v.([]any)
+			if !ok || len(arr) != 2 {
+				return false
+			}
+			_, u := arr[0].(block.Undefined)
+			f, z := arr[1].(float64)
+			return u && z && math.Signbit(f)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in, _ := hex.DecodeString(c.hex)
+			v, tail, err := DecodeAny(in)
+			if err != nil || len(tail) != 0 {
+				t.Fatalf("decode %s: %v, tail % x", c.hex, err, tail)
+			}
+			if !c.check(v) {
+				t.Fatalf("decode %x: got %#v (%T)", in, v, v)
+			}
+			if got := EncodeAny(nil, v); !bytes.Equal(got, in) {
+				t.Fatalf("encode %#v: % x, want % x", v, got, in)
+			}
+		})
+	}
+}
+
+// TestAny_NonCanonicalNegativeZero: lib0 readVarInt reads any zero
+// magnitude with the sign bit as -0, however many continuation bytes.
+func TestAny_NonCanonicalNegativeZero(t *testing.T) {
+	for _, h := range []string{"7d40", "7dc000", "7dc08000"} {
+		in, _ := hex.DecodeString(h)
+		v, tail, err := DecodeAny(in)
+		if err != nil || len(tail) != 0 {
+			t.Fatalf("%s: %v, tail % x", h, err, tail)
+		}
+		if f, ok := v.(float64); !ok || f != 0 || !math.Signbit(f) {
+			t.Errorf("%s: got %#v, want float64 negative zero", h, v)
+		}
+	}
+}
+
+// TestAny_EncodeNegativeZero: a Go negative zero of either float width is
+// written as lib0 writes -0, and positive zero keeps the float64 rule.
+func TestAny_EncodeNegativeZero(t *testing.T) {
+	if got := hex.EncodeToString(EncodeAny(nil, math.Copysign(0, -1))); got != "7d40" {
+		t.Errorf("float64 -0: %s, want 7d40", got)
+	}
+	if got := hex.EncodeToString(EncodeAny(nil, float32(math.Copysign(0, -1)))); got != "7d40" {
+		t.Errorf("float32 -0: %s, want 7d40", got)
+	}
+	if got := hex.EncodeToString(EncodeAny(nil, float64(0))); got != "7b0000000000000000" {
+		t.Errorf("float64 0: %s, want 7b0000000000000000 (a whole-number float64 stays a float64)", got)
 	}
 }
 

@@ -4,9 +4,12 @@ package anyval
 
 import (
 	"encoding/json"
+	"math"
 	"sort"
+	"strconv"
 	"unicode/utf8"
 
+	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/utf16"
 )
 
@@ -126,7 +129,7 @@ func IsTree(v any, depth int) bool {
 		return false
 	}
 	switch x := v.(type) {
-	case nil, bool, string, []byte, int, int32, int64, float32, float64:
+	case nil, bool, string, []byte, int, int32, int64, float32, float64, block.Undefined, block.BigInt:
 		return true
 	case []any:
 		for _, el := range x {
@@ -145,4 +148,53 @@ func IsTree(v any, depth int) bool {
 	default:
 		return false
 	}
+}
+
+// ForJSON returns v as JSON.stringify sees it, for every place ygo renders a
+// value as JSON: an undefined object entry is dropped, an undefined anywhere
+// else is null, -0 is 0, and a BigInt is a JSON number with all its digits
+// (where JSON.stringify throws). Containers are copied; v is not changed.
+// Values that are not Any trees pass through for encoding/json to handle.
+func ForJSON(v any) any { return forJSON(v, 0) }
+
+func forJSON(v any, depth int) any {
+	if depth > MaxTreeDepth {
+		return v
+	}
+	switch x := v.(type) {
+	case block.Undefined:
+		return nil
+	case block.BigInt:
+		return json.Number(strconv.FormatInt(int64(x), 10))
+	case float64:
+		if x == 0 && math.Signbit(x) {
+			return float64(0)
+		}
+	case float32:
+		if x == 0 && math.Signbit(float64(x)) {
+			return float32(0)
+		}
+	case []any:
+		if x == nil {
+			return x
+		}
+		out := make([]any, len(x))
+		for i, el := range x {
+			out[i] = forJSON(el, depth+1)
+		}
+		return out
+	case map[string]any:
+		if x == nil {
+			return x
+		}
+		out := make(map[string]any, len(x))
+		for k, el := range x {
+			if _, undefined := el.(block.Undefined); undefined {
+				continue
+			}
+			out[k] = forJSON(el, depth+1)
+		}
+		return out
+	}
+	return v
 }

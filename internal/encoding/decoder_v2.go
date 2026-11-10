@@ -269,10 +269,18 @@ func (d *DecoderV2) ReadKey() (string, error) {
 // stream, as yjs UpdateDecoderV2.readJSON reads it, with numbers mapped
 // to the types the V1 path yields so callers see the same Go types
 // whichever wire format delivered the document. See json_any.go.
+//
+// A format value that is undefined itself reads as nil, as before v1.33.0:
+// yjs reads such a marker as null at most lookups but not all, and ygo's
+// text code does not model the difference. Undefined nested inside a value
+// is only data and is kept.
 func (d *DecoderV2) ReadJSON() (block.Any, error) {
 	v, err := d.ReadAny()
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := v.(block.Undefined); ok {
+		return nil, nil
 	}
 	return jsonValueFromAny(v), nil
 }

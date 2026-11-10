@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/lib0"
 )
@@ -17,9 +18,11 @@ import (
 // payload: lib0 Any starts with a 1-byte type tag (116..127),
 // JSON starts with the textual representation.
 //
-// nil values encode as the JSON literal "null".
+// nil values encode as the JSON literal "null". Values go through
+// anyval.ForJSON first, so undefined, -0 and BigInt come out as
+// JSON.stringify writes them (BigInt, where it throws, as a number).
 func writeJSON(buf []byte, v block.Any) []byte {
-	raw, err := json.Marshal(v)
+	raw, err := json.Marshal(anyval.ForJSON(v))
 	if err != nil {
 		// Fall back to the JSON null literal — yjs has the same
 		// failure mode (JSON.stringify of a circular structure

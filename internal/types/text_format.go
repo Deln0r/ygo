@@ -499,18 +499,31 @@ func embedContent(value any) (block.Content, uint64) {
 		s = utf16.ValidString(s)
 		return block.Content{Kind: block.KindString, Str: s}, utf16.Length(s)
 	}
-	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{anyval.ValidJSON(value)}}, 1
+	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{undefinedAsNil(anyval.ValidJSON(value))}}, 1
+}
+
+// undefinedAsNil turns a format value or an embed that is undefined itself
+// into nil. A peer reads such a value as nil (DecoderV2.ReadJSON; V1 writes
+// JSON, which has no undefined), so the writer's own document must hold the
+// same. Undefined nested inside the value is data and stays.
+func undefinedAsNil(v any) any {
+	if _, ok := v.(block.Undefined); ok {
+		return nil
+	}
+	return v
 }
 
 // validAttrs returns attrs with each key fixed by utf16.ValidString and each
-// value by anyval.ValidJSON (format values are written as JSON), copying the
+// value by anyval.ValidJSON (format values are written as JSON), and a value
+// that is undefined itself turned into nil (undefinedAsNil), copying the
 // map only when something changes, so the caller's map is not modified; nil
 // stays nil and an empty map stays empty. Two keys that become equal keep
 // the value of the key that sorts last.
 func validAttrs(attrs Attrs) Attrs {
 	changed := false
 	for k, v := range attrs {
-		if !utf8.ValidString(k) || anyval.NeedsJSONFix(v) {
+		_, undefined := v.(block.Undefined)
+		if !utf8.ValidString(k) || anyval.NeedsJSONFix(v) || undefined {
 			changed = true
 			break
 		}
@@ -525,7 +538,7 @@ func validAttrs(attrs Attrs) Attrs {
 	sort.Strings(keys)
 	out := make(Attrs, len(attrs))
 	for _, k := range keys {
-		out[utf16.ValidString(k)] = anyval.ValidJSON(attrs[k])
+		out[utf16.ValidString(k)] = undefinedAsNil(anyval.ValidJSON(attrs[k]))
 	}
 	return out
 }
@@ -877,9 +890,9 @@ func copyNonEmptyAttrs(attrs Attrs) Attrs {
 // the process - and the event path runs on updates from peers.
 //
 // JS has one number type, so every Go integer and float kind compares by
-// value as a number: int(1), int64(1) (how lib0 integers and bigints decode)
-// and float64(1) (how JSON numbers decode) are equal, NaN is not equal to
-// itself, and 0 equals -0.
+// value as a number: int(1), int64(1) (how lib0 integers decode) and
+// float64(1) (how JSON numbers decode) are equal, NaN is not equal to
+// itself, and 0 equals -0. A block.BigInt equals only the same BigInt.
 func attrValuesEqual(a, b any) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -993,6 +1006,13 @@ func sameObject(a, b any) bool {
 func strictEqual(a, b any) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
+	}
+	// A BigInt is not a number to JS: 5n === 5 is false, and two BigInts
+	// compare exactly, beyond float64's 53 bits.
+	ba, aBig := a.(block.BigInt)
+	bb, bBig := b.(block.BigInt)
+	if aBig || bBig {
+		return aBig && bBig && ba == bb
 	}
 	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
 	if na, ok := jsNumber(va); ok {

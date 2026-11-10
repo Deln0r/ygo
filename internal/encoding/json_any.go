@@ -69,11 +69,10 @@ func jsonValueForAny(v block.Any) block.Any {
 // document's own stored content, and encoding a document must not change the
 // Go types a later reader of that document sees.
 //
-// One deliberate departure: negative zero stays a float64. lib0 writes it as a
-// varint with the sign flag set (7d40), which the Any codec here cannot express;
-// as an int64 it would become an unsigned 0 and lose its sign on the way to
-// every peer. As a float64 the value survives, at the cost of byte identity for
-// that one number. yjs's own V1 path does not preserve it either.
+// Negative zero stays a float64: as an int64 it would lose its sign. The Any
+// encoder writes a float64 negative zero as 7d40, the varint with the sign flag
+// that lib0 writes for -0. yjs's own V1 path does not preserve it (JSON has no
+// -0).
 func classifyNumbers(v any) any {
 	switch x := v.(type) {
 	case int:
