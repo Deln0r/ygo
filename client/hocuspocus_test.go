@@ -34,6 +34,7 @@ type fakeHocus struct {
 	frames [][]byte
 	conns  []*websocket.Conn
 	dials  atomic.Int32
+	reject atomic.Bool // answer 503 instead of upgrading
 	url    string
 	// afterSync, when set, runs once a connection's handshake is done.
 	afterSync func(conn *websocket.Conn)
@@ -54,6 +55,10 @@ func (f *fakeHocus) send(ctx context.Context, conn *websocket.Conn, key string, 
 
 func (f *fakeHocus) serve(w http.ResponseWriter, r *http.Request) {
 	f.dials.Add(1)
+	if f.reject.Load() {
+		http.Error(w, "not yet", http.StatusServiceUnavailable)
+		return
+	}
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
@@ -230,17 +235,22 @@ func TestHocus_OpenFrames(t *testing.T) {
 	}
 }
 
-// Edits made offline go up in the reply to the server's SyncStep1 only, as
-// the provider sends them, not also in an Update first; the queued empty
-// update that follows is not sent; the server confirms everything.
+// Edits made while the client is offline go up in the reply to the
+// server's SyncStep1 only, as the provider sends them, not also in an
+// Update first; the empty update the queued flush then makes is not sent;
+// the server confirms everything. The edit is made while the client is
+// trying to connect, so a flush is queued, as between two sessions.
 func TestHocus_OfflineEditsOnlyInTheReply(t *testing.T) {
 	f := newFakeHocus(t)
+	f.reject.Store(true)
 	d := doc.NewDocWithOptions(doc.Options{ClientID: 96})
 	m := types.NewMap(d.Branch("m"))
+	c, ev := hocusClient(t, f, nil, d)
+	waitFor(t, "a refused dial", func() bool { return f.dials.Load() > 0 })
 	txn := d.WriteTxn()
 	m.Set(txn, "k", "offline")
 	txn.Commit()
-	c, ev := hocusClient(t, f, nil, d)
+	f.reject.Store(false)
 	waitChan(t, "synced", ev.synced)
 	waitFor(t, "Unsynced 0", func() bool { return c.Unsynced() == 0 })
 	time.Sleep(200 * time.Millisecond)
@@ -410,7 +420,7 @@ func TestHocus_TokenRequest(t *testing.T) {
 func TestHocus_OtherKeyPingStateless(t *testing.T) {
 	f := newFakeHocus(t)
 	other := doc.NewDocWithOptions(doc.Options{ClientID: 9})
-	om := types.NewMap(other.Branch("m"))
+	om := types.NewMap(other.Branch("settings")) // the map getKey reads
 	txn := other.WriteTxn()
 	om.Set(txn, "leak", "yes")
 	txn.Commit()
