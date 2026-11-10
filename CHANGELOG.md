@@ -14,6 +14,33 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.33.0] - 2026-11-10
+
+**Upgrade impact**:
+
+- **`undefined`, BigInt and -0 keep their identity.** A JavaScript `undefined` reads as `ygo.Undefined{}` (it was nil), a BigInt as `ygo.BigInt` (it was int64, and float64 in V2 format attributes and embeds), and -0 as a float64 negative zero (it was 0), from `Get`, `ToDelta`, events and `OldValue`. Code that checks `v == nil` or asserts `.(int64)` or `.(float64)` on such values behaves differently. All three are written back as lib0 writes them, except a format attribute whose value is undefined itself (below).
+- **A Go negative zero** (`float64` or `float32`) is written as `7d40`, as lib0 writes -0; it was a float64 (tag 123) or a float32 (tag 124). A document holding one changes those bytes on its next encode.
+- **V1 JSON content** (format attributes and embeds): -0 is written as `0`, an undefined object entry is left out and an undefined array entry is null, as `JSON.stringify` writes them; Go's encoder wrote `-0`. A BigInt is written as a number, where `JSON.stringify` throws, so in V1 a BigInt in a format attribute or an embed reaches every reader as a Number and loses digits beyond 2^53, while the writer's own document keeps the BigInt: formatting the range again with the same BigInt is a no-op on the writer and writes markers on every V1 reader. V2 keeps the BigInt everywhere. gomobile syncs V1.
+- **gomobile JSON** (`GetJSON`, `ToJSON`, change listeners): an undefined object entry is left out and an undefined array entry is null, as `JSON.stringify` writes them; a top-level undefined, which `JSON.stringify` cannot write, is null; -0 is 0; a BigInt is a number. A map change whose old value was undefined has no `oldValue`.
+- **Not changed: a format attribute whose value is `undefined` itself** reads as nil, as before, and is written back as null (`7e` where the writer wrote `7f`). yjs keeps it (`toDelta` gives `{x: undefined}`) and treats it as null at most lookups but not all; ygo does not model the difference. A Go caller's top-level `ygo.Undefined{}` as a format value or an embed is stored as nil, what every reader gets.
+- Documents an earlier version re-encoded keep what it wrote: null for an undefined, a number for a BigInt, 0 for -0.
+
+### Fixed
+
+- **A BigInt, `undefined` or -0 that a JavaScript client stored came back changed** to every client that read it from a Go peer's state: a late joiner, or anyone after the server compacted. `2n ** 53n + 1n` came back as the Number 9007199254740992, `undefined` as null (also inside objects), -0 as 0. Clients online at the time got the original bytes, so the document's value differed between clients.
+- **Format attributes compared a BigInt as a float64.** `5n` equalled `5`, and `2n ** 62n + 1n` equalled `2n ** 62n`, so a format yjs writes was skipped. A BigInt now equals only the same BigInt, as JavaScript's `===` has it.
+- **V1 JSON wrote -0 as `-0`**, where yjs writes `0`.
+
+### Added
+
+- `ygo.Undefined` and `ygo.BigInt`, to store a JavaScript `undefined` or BigInt from Go.
+
+### Tests
+
+- 20 scenarios from yjs 13.6.33 (`testdata/any-value-fixtures.json`): undefined, BigInt (5, -1, 2^53+1, -2^63) and -0 as map values, inside arrays and objects, in a subdocument's options, and in V2 format attributes and embeds. Each is read back as the right Go value, re-encoded to yjs's bytes (V2 always, V1 where yjs can write it: not for a BigInt format attribute or an embed, and a V1 format attribute has no -0 to read), and, where the API can write it, written from Go to the same bytes.
+- Formatting over an equal and an unequal BigInt, and over -0, against yjs's choice to write or skip markers.
+- The stock-client job reads a BigInt, undefined, -0 and an object holding them back through yserve as a late joiner; v1.32.0 fails all four checks.
+
 ## [1.32.0] - 2026-11-10
 
 **Upgrade impact**:
@@ -2117,6 +2144,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.33.0]: https://github.com/Deln0r/ygo/releases/tag/v1.33.0
 [1.32.0]: https://github.com/Deln0r/ygo/releases/tag/v1.32.0
 [1.31.0]: https://github.com/Deln0r/ygo/releases/tag/v1.31.0
 [1.30.0]: https://github.com/Deln0r/ygo/releases/tag/v1.30.0
