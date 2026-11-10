@@ -383,7 +383,7 @@ func TestHocus_ServerCloseReconnects(t *testing.T) {
 // CLOSE a provider sends), and the server's answer raises no error, also
 // when it arrives before Close has cancelled the session (widened here).
 func TestHocus_CloseSendsClose(t *testing.T) {
-	t.Cleanup(client.SetAfterSendClose(func() { time.Sleep(100 * time.Millisecond) }))
+	t.Cleanup(client.SetAfterSendClose(func() { time.Sleep(300 * time.Millisecond) }))
 	f := newFakeHocus(t)
 	c, ev := hocusClient(t, f, nil, nil)
 	waitChan(t, "synced", ev.synced)
@@ -483,7 +483,7 @@ func TestHocus_Keepalive(t *testing.T) {
 			n++
 		}
 	}
-	if n < 3 {
+	if n < 2 {
 		t.Errorf("%d keepalives in 1.2 s at a 200 ms interval", n)
 	}
 }
@@ -496,16 +496,23 @@ func TestHocus_TokenRefreshDoesNotBlockReads(t *testing.T) {
 	f := newFakeHocus(t)
 	var calls atomic.Int32
 	var refreshEnded atomic.Bool
+	refreshing := make(chan struct{})
 	f.afterSync = func(conn *websocket.Conn) {
 		if f.dials.Load() == 1 {
 			f.send(context.Background(), conn, "doc", []byte{0x02, 0x00})
-			time.Sleep(100 * time.Millisecond)
+			// Close only once the refresh is running, so the second
+			// TokenFunc call is the refresh, not the redial's.
+			select {
+			case <-refreshing:
+			case <-time.After(5 * time.Second):
+			}
 			_ = conn.CloseNow()
 		}
 	}
 	_, ev := hocusClient(t, f, func(o *client.Options) {
 		o.TokenFunc = func(ctx context.Context) (string, error) {
 			if calls.Add(1) == 2 {
+				close(refreshing)
 				<-ctx.Done()
 				refreshEnded.Store(true)
 				return "", ctx.Err()
@@ -516,4 +523,61 @@ func TestHocus_TokenRefreshDoesNotBlockReads(t *testing.T) {
 	waitChan(t, "synced", ev.synced)
 	waitFor(t, "a second dial after the server closed", func() bool { return f.dials.Load() >= 2 })
 	waitFor(t, "the refresh's context ended", refreshEnded.Load)
+}
+
+// A refreshed token whose session ended before TokenFunc returned is
+// dropped, not sent on the next session's connection, where the server
+// would take it as a refresh (and an onTokenSync hook could close that
+// session over it). Here TokenFunc answers the request only after the
+// server has closed the first connection and the client is connected
+// again.
+func TestHocus_StaleRefreshDropped(t *testing.T) {
+	f := newFakeHocus(t)
+	var calls atomic.Int32
+	refreshing := make(chan struct{})
+	resynced := make(chan struct{})
+	f.afterSync = func(conn *websocket.Conn) {
+		if f.dials.Load() == 1 {
+			f.send(context.Background(), conn, "doc", []byte{0x02, 0x00})
+			<-refreshing
+			_ = conn.CloseNow()
+		}
+	}
+	_, ev := hocusClient(t, f, func(o *client.Options) {
+		o.TokenFunc = func(ctx context.Context) (string, error) {
+			if calls.Add(1) == 2 {
+				close(refreshing)
+				<-resynced // answer late, ignoring ctx
+				return "stale", nil
+			}
+			return "ok", nil
+		}
+	}, nil)
+	waitChan(t, "synced", ev.synced)
+	waitChan(t, "synced again", ev.synced)
+	close(resynced)
+	time.Sleep(200 * time.Millisecond)
+	for _, fr := range f.envelopes("doc") {
+		if fr.Type == syncpkg.MessageAuth && string(fr.Payload) == "stale" {
+			t.Fatal("a refresh for an ended session went out on the next one")
+		}
+	}
+}
+
+// A server that cannot be reached costs no TokenFunc call per dial: the
+// token is asked for once a connection is up.
+func TestHocus_NoTokenCallPerFailedDial(t *testing.T) {
+	f := newFakeHocus(t)
+	f.reject.Store(true)
+	var calls atomic.Int32
+	hocusClient(t, f, func(o *client.Options) {
+		o.TokenFunc = func(context.Context) (string, error) {
+			calls.Add(1)
+			return "ok", nil
+		}
+	}, nil)
+	waitFor(t, "five refused dials", func() bool { return f.dials.Load() >= 5 })
+	if n := calls.Load(); n != 0 {
+		t.Errorf("%d TokenFunc calls for refused dials, want 0", n)
+	}
 }

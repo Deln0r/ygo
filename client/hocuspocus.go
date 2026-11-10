@@ -139,21 +139,30 @@ func (c *Client) handleHocus(s *hpSession, frame *syncpkg.Frame) bool {
 			s.fail(fmt.Errorf("%w: %s", ErrPermissionDenied, frame.Payload))
 			c.dropConn()
 		case syncpkg.AuthToken:
-			// The server asks for the token again (servers 3 and 4). The
-			// refresh runs off the read loop, so the loop still sees the
-			// connection close, which ends the refresh's context.
+			// The server asks for the token again (servers 3 and 4, when
+			// the app or an extension calls requestToken). The refresh runs
+			// off the read loop, so the loop still sees the connection
+			// close, which ends the refresh's context; the token goes to
+			// the connection that asked, and not at all once its session
+			// is over (a later session's server would take a stale token
+			// as a refresh, and its onTokenSync could close it). A failed
+			// write is the session's read error's to report.
 			c.mu.Lock()
-			ctx := c.connCtx
+			conn, ctx := c.conn, c.connCtx
 			c.mu.Unlock()
-			if ctx != nil {
+			if conn != nil && ctx != nil {
 				go func() {
 					tok, err := c.token(ctx)
-					if err == nil {
-						err = c.write(syncpkg.EncodeAuthToken(tok))
+					if ctx.Err() != nil {
+						return
 					}
-					if err != nil && ctx.Err() == nil && c.opts.OnError != nil {
-						c.opts.OnError(fmt.Errorf("client: token refresh: %w", err))
+					if err != nil {
+						if c.opts.OnError != nil {
+							c.opts.OnError(fmt.Errorf("client: token refresh: %w", err))
+						}
+						return
 					}
+					_ = conn.Write(ctx, websocket.MessageBinary, append(syncpkg.EncodeRoute(c.opts.DocName), syncpkg.EncodeAuthToken(tok)...))
 				}()
 			}
 		}

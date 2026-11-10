@@ -63,10 +63,10 @@ type Options struct {
 
 	// Token is the token a Hocuspocus server's onAuthenticate gets ("" by
 	// default, as providers send). TokenFunc, when set, is asked instead
-	// before every dial and whenever the server asks for the token again;
-	// an error from it ends that attempt. Its context ends when the client
-	// closes, and for a refresh the server asked for, when the connection
-	// does.
+	// once each connection is up and whenever the server asks for the
+	// token again; an error from it ends that attempt. Its context ends
+	// with the connection, and at connect after LivenessTimeout too; it
+	// must return when the context ends.
 	Token     string
 	TokenFunc func(ctx context.Context) (string, error)
 
@@ -485,14 +485,8 @@ func (c *Client) run(ctx context.Context) {
 // whether the dial succeeded.
 func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	dialURL := strings.TrimRight(c.opts.URL, "/") + "/" + c.opts.DocName
-	var tok string
 	if c.opts.Hocuspocus {
 		dialURL = strings.TrimRight(c.opts.URL, "/")
-		// The token is asked for before the dial, so a slow TokenFunc
-		// holds no connection open with nothing read from it.
-		if tok, err = c.token(ctx); err != nil {
-			return false, fmt.Errorf("client: TokenFunc: %w", err)
-		}
 	}
 	conn, live, err := c.dial(ctx, dialURL)
 	if err != nil {
@@ -523,6 +517,19 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	}()
 
 	if hp != nil {
+		// The token is asked for once the connection is up, so a server
+		// that cannot be reached does not cost a TokenFunc call per dial;
+		// with the liveness check on, the call is bounded by its timeout,
+		// since nothing reads the connection meanwhile.
+		tctx, tcancel := sessCtx, context.CancelFunc(func() {})
+		if c.opts.LivenessTimeout > 0 {
+			tctx, tcancel = context.WithTimeout(sessCtx, c.opts.LivenessTimeout)
+		}
+		tok, err := c.token(tctx)
+		tcancel()
+		if err != nil {
+			return true, fmt.Errorf("client: TokenFunc: %w", err)
+		}
 		if err := c.hocusHandshake(tok); err != nil {
 			return true, err
 		}

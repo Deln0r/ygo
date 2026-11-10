@@ -12,7 +12,10 @@ import (
 // separate from Listener so that existing Listener implementations keep
 // compiling; set it with Client.SetAuthListener. Each call runs on a
 // goroutine of its own, so calling Close from it is safe; dispatch to
-// the main thread before touching UI.
+// the main thread before touching UI. Being off the client's goroutines,
+// its calls are not ordered against Listener's: OnAuthenticated can come
+// after Listener.OnSynced(true) for the same connection, and
+// OnPermissionDenied after Close has returned.
 type AuthListener interface {
 	// OnAuthenticated fires when the server accepts the token, on every
 	// connect, with the scope it granted: "read-write" or "readonly".
