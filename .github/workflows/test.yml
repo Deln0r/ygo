@@ -159,6 +159,31 @@ jobs:
         working-directory: testdata/e2e
         run: node y-websocket.mjs "$RUNNER_TEMP/yserve"
 
+  hocuspocus:
+    name: Go client against Hocuspocus servers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # The ygo client in Hocuspocus mode against stock @hocuspocus/server
+      # 4.8, 3.4 and 2.15, next to the stock provider of each version:
+      # sync both ways, presence, stateless, a refused and a read-only
+      # token, server 2 without an auth hook, and server 4's idle timeout
+      # with and without the keepalive. Server 4 needs node 22.
+      - name: build the Go side
+        run: go build -o "$RUNNER_TEMP/hpclient" ./testdata/e2e/hpclient
+      - name: install the servers and providers
+        working-directory: testdata/e2e
+        run: npm ci
+      - name: run the checks
+        working-directory: testdata/e2e
+        run: node hocuspocus.mjs "$RUNNER_TEMP/hpclient"
+
   gomobile-android:
     name: gomobile bind (Android)
     runs-on: ubuntu-latest
