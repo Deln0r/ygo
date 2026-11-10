@@ -1,7 +1,7 @@
 // Package client is a Yjs sync provider over WebSocket: the Go
 // equivalent of y-websocket's WebsocketProvider, for yserve and the
-// reference y-websocket server. It does not speak Hocuspocus's framing,
-// which prefixes every frame with the document name.
+// reference y-websocket server, and, with Options.Hocuspocus, of
+// Hocuspocus's provider, for @hocuspocus/server 2, 3 and 4.
 //
 // A Client owns a live connection for one document: it runs the
 // y-protocols handshake (SyncStep1 / SyncStep2), broadcasts local
@@ -48,8 +48,34 @@ import (
 type Options struct {
 	// URL is the server base, e.g. "ws://localhost:8080" or
 	// "wss://collab.example.com". The document name is appended as
-	// the URL path (y-websocket convention).
+	// the URL path (y-websocket convention); in Hocuspocus mode the
+	// URL is dialed as given, without a trailing slash, and the
+	// document name goes in every frame.
 	URL string
+
+	// Hocuspocus selects the Hocuspocus protocol: every frame starts
+	// with the document name, the connection opens with an Auth frame
+	// carrying the token, the server confirms each update with a
+	// SyncStatus, and Close tells the server the client is done with
+	// the document. For @hocuspocus/server 2, 3 and 4; yserve does not
+	// serve it.
+	Hocuspocus bool
+
+	// Token is the token a Hocuspocus server's onAuthenticate gets ("" by
+	// default, as providers send). TokenFunc, when set, is asked instead
+	// on every connect and whenever the server asks for the token again;
+	// an error from it ends that attempt.
+	Token     string
+	TokenFunc func(ctx context.Context) (string, error)
+
+	// OnAuthenticated fires when a Hocuspocus server accepts the token,
+	// with the scope it granted ("read-write" or "readonly"), on every
+	// connect.
+	OnAuthenticated func(scope string)
+
+	// OnStateless gets the payload of each stateless message (type 5) a
+	// Hocuspocus server sends.
+	OnStateless func(payload string)
 
 	// DocName addresses the document on the server.
 	DocName string
@@ -172,6 +198,14 @@ type Client struct {
 	lastPersisted store.StateVector
 	persistCount  int
 
+	// Hocuspocus mode: the current session's state, the granted scope,
+	// the unconfirmed sync messages, and when the client last wrote.
+	hp        *hpSession
+	scope     string
+	unsynced  atomic.Int64
+	base      time.Time
+	lastWrite atomic.Int64
+
 	// pongs counts the liveness check's pings that got their pong;
 	// liveChecks the sessions dialed with the check on; stallCuts the
 	// connections it dropped for a write the kernel stopped taking.
@@ -226,6 +260,7 @@ func New(opts Options) (*Client, error) {
 		dirtyDoc:       make(chan struct{}, 1),
 		dirtyAwareness: make(chan struct{}, 1),
 		dirtyPersist:   make(chan struct{}, 1),
+		base:           time.Now(),
 	}, nil
 }
 
@@ -356,6 +391,9 @@ func (c *Client) Close() error {
 	if unsubscribe != nil {
 		unsubscribe()
 	}
+	if c.opts.Hocuspocus {
+		c.sendClose()
+	}
 	cancel()
 	<-done
 	if persistDone != nil {
@@ -415,8 +453,13 @@ func (c *Client) run(ctx context.Context) {
 		if err != nil && c.opts.OnError != nil {
 			c.opts.OnError(err)
 		}
-		// Jittered sleep, then grow the backoff.
+		// Jittered sleep, then grow the backoff. A refused token waits at
+		// least deniedBackoff, so it does not run the server's
+		// onAuthenticate at the reconnect rate.
 		sleep := backoff/2 + time.Duration(rand.Int63n(int64(backoff/2+1)))
+		if errors.Is(err, ErrPermissionDenied) {
+			sleep = max(sleep, deniedBackoff, c.opts.MaxBackoff)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -433,6 +476,9 @@ func (c *Client) run(ctx context.Context) {
 // whether the dial succeeded.
 func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	dialURL := strings.TrimRight(c.opts.URL, "/") + "/" + c.opts.DocName
+	if c.opts.Hocuspocus {
+		dialURL = strings.TrimRight(c.opts.URL, "/")
+	}
 	conn, live, err := c.dial(ctx, dialURL)
 	if err != nil {
 		return false, fmt.Errorf("client: dial %s: %w", dialURL, err)
@@ -442,9 +488,14 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	defer sessCancel()
 	defer conn.Close(websocket.StatusNormalClosure, "client closing")
 
+	var hp *hpSession
+	if c.opts.Hocuspocus {
+		hp = &hpSession{answered: make(chan struct{})}
+	}
 	c.mu.Lock()
 	c.conn = conn
 	c.connCtx = sessCtx
+	c.hp = hp
 	c.mu.Unlock()
 	// Clear the per-session conn when the session ends, so a stale closed
 	// conn is never visible between sessions (write() then guards
@@ -453,34 +504,50 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 		c.mu.Lock()
 		c.conn = nil
 		c.connCtx = nil
+		c.hp = nil
+		c.scope = ""
 		c.mu.Unlock()
 	}()
 
-	// Client side of the y-protocols handshake: announce our state
-	// vector, ask for awareness, and push our awareness state if there is
-	// one, as y-websocket does. The state goes out one clock up: the
-	// server keeps the clock of the state it removed when the last
-	// session ended, and ignores a state at that clock.
-	if err := c.sendStep1(); err != nil {
-		return true, err
-	}
-	_ = c.write(syncpkg.EncodeQueryAwareness())
-	if c.awareness.RenewLocalState(0) {
-		c.sendAwareness()
+	if hp != nil {
+		if err := c.hocusHandshake(sessCtx); err != nil {
+			return true, err
+		}
+	} else {
+		// Client side of the y-protocols handshake: announce our state
+		// vector, ask for awareness, and push our awareness state if
+		// there is one, as y-websocket does. The state goes out one
+		// clock up: the server keeps the clock of the state it removed
+		// when the last session ended, and ignores a state at that clock.
+		if err := c.sendStep1(); err != nil {
+			return true, err
+		}
+		_ = c.write(syncpkg.EncodeQueryAwareness())
+		if c.awareness.RenewLocalState(0) {
+			c.sendAwareness()
+		}
 	}
 
 	writeErr := make(chan error, 1)
-	go func() { writeErr <- c.writePump(sessCtx) }()
+	go func() { writeErr <- c.writePump(sessCtx, hp) }()
 	var silent chan bool
 	if live != nil {
 		silent = make(chan bool, 1)
 		go func() { silent <- c.watch(sessCtx, conn, live) }()
 	}
 
-	readErr := c.readPump(sessCtx, conn, live)
+	readErr := c.readPump(sessCtx, conn, live, hp)
 	sessCancel()
 	<-writeErr
-	if silent != nil && <-silent {
+	wasSilent := silent != nil && <-silent
+	// One error per session: what the server said ended it, else the
+	// silence, else the read error that followed.
+	if hp != nil {
+		if err := hp.failure(); err != nil {
+			return true, err
+		}
+	}
+	if wasSilent {
 		return true, fmt.Errorf("%w (%s)", ErrServerSilent, c.opts.LivenessTimeout)
 	}
 	return true, readErr
@@ -489,27 +556,39 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 // readPump applies inbound frames until the connection drops. conn is
 // passed explicitly (not read from c.conn) so the read path never
 // touches the lock-guarded field without the lock.
-func (c *Client) readPump(ctx context.Context, conn *websocket.Conn, live *liveness) error {
+func (c *Client) readPump(ctx context.Context, conn *websocket.Conn, live *liveness, hp *hpSession) error {
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
 			return fmt.Errorf("client: read: %w", err)
 		}
 		live.startFrame()
-		c.handleFrame(raw)
+		c.handleFrame(raw, hp)
 		live.endFrame()
 	}
 }
 
-// handleFrame applies one frame the read loop read.
-func (c *Client) handleFrame(raw []byte) {
+// handleFrame applies one frame the read loop read. In Hocuspocus mode
+// the frame starts with its routing key; one for another document is
+// dropped.
+func (c *Client) handleFrame(raw []byte, hp *hpSession) {
+	if hp != nil {
+		key, rest, err := syncpkg.DecodeRoute(raw)
+		if err != nil || key != c.opts.DocName {
+			return
+		}
+		raw = rest
+	}
 	frame, _, err := syncpkg.DecodeEnvelope(raw)
 	if err != nil {
 		return // ignore malformed frames, matching server leniency
 	}
+	if hp != nil && c.handleHocus(hp, frame) {
+		return
+	}
 	switch frame.Type {
 	case syncpkg.MessageSync, syncpkg.MessageSyncReply:
-		if err := c.handleSync(frame); err != nil && c.opts.OnError != nil {
+		if err := c.handleSync(frame, hp); err != nil && c.opts.OnError != nil {
 			c.opts.OnError(err)
 		}
 	case syncpkg.MessageAwareness:
@@ -527,12 +606,14 @@ func (c *Client) handleFrame(raw []byte) {
 	case syncpkg.MessageQueryAwareness:
 		c.sendAwareness()
 	case syncpkg.MessagePing:
-		_ = c.write(syncpkg.EncodePong())
+		if hp == nil {
+			_ = c.write(syncpkg.EncodePong())
+		}
 	}
 }
 
 // handleSync dispatches one sync sub-message.
-func (c *Client) handleSync(frame *syncpkg.Frame) error {
+func (c *Client) handleSync(frame *syncpkg.Frame, hp *hpSession) error {
 	switch frame.SyncSub {
 	case syncpkg.SyncStep1:
 		// Server announces its state vector; reply with the diff and
@@ -549,6 +630,9 @@ func (c *Client) handleSync(frame *syncpkg.Frame) error {
 			return err
 		}
 		c.raiseLastSent(localSV)
+		if hp != nil {
+			hp.answer()
+		}
 		return nil
 	case syncpkg.SyncStep2, syncpkg.SyncUpdate:
 		if len(frame.Payload) == 0 {
@@ -645,18 +729,36 @@ func (c *Client) raiseLastSent(sv store.StateVector) {
 // it is half the awareness timeout old, checking every tenth of the
 // timeout (at least every 100ms), as y-protocols does, so the server and
 // peers keep an idle client's presence.
-func (c *Client) writePump(ctx context.Context) error {
+//
+// In Hocuspocus mode it holds local edits back until the server's
+// SyncStep1 is answered, since that reply carries them, as the provider
+// sends them; it skips an update with nothing in it, which a server
+// confirms with a SyncStatus all the same; and it sends a QueryAwareness
+// when it has sent nothing for half the awareness timeout: Hocuspocus 4
+// closes a connection it has heard nothing from for its timeout, and
+// counts no ping, while every server ignores QueryAwareness.
+func (c *Client) writePump(ctx context.Context, hp *hpSession) error {
 	renew := time.NewTicker(max(c.opts.AwarenessTimeout/10, 100*time.Millisecond))
 	defer renew.Stop()
+	docCh := c.dirtyDoc
+	var answered chan struct{}
+	if hp != nil {
+		docCh, answered = nil, hp.answered
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-answered:
+			docCh, answered = c.dirtyDoc, nil
 		case <-renew.C:
 			if c.awareness.RenewLocalState(c.opts.AwarenessTimeout / 2) {
 				c.sendAwareness()
 			}
-		case <-c.dirtyDoc:
+			if hp != nil && time.Since(c.base)-time.Duration(c.lastWrite.Load()) >= c.opts.AwarenessTimeout/2 {
+				_ = c.write(syncpkg.EncodeQueryAwareness())
+			}
+		case <-docCh:
 			// lastSent is read inside the transaction (see apply).
 			rtxn := c.doc.ReadTxn()
 			c.mu.Lock()
@@ -665,6 +767,12 @@ func (c *Client) writePump(ctx context.Context) error {
 			diff := encoding.EncodeDiff(c.doc, rtxn, since)
 			localSV := cloneSV(rtxn.Store().GetStateVector())
 			rtxn.Close()
+			if hp != nil && isEmptyUpdate(diff) {
+				continue
+			}
+			if hp != nil {
+				c.unsynced.Add(1)
+			}
 			if err := c.write(syncpkg.EncodeSyncUpdate(diff)); err != nil {
 				return err
 			}
@@ -692,7 +800,8 @@ func (c *Client) sendAwareness() {
 	_ = c.write(syncpkg.EncodeAwareness(blob))
 }
 
-// write sends one envelope over the current connection, if any.
+// write sends one envelope over the current connection, if any; in
+// Hocuspocus mode after the document's routing key.
 func (c *Client) write(envelope []byte) error {
 	c.mu.Lock()
 	conn, ctx := c.conn, c.connCtx
@@ -700,8 +809,16 @@ func (c *Client) write(envelope []byte) error {
 	if conn == nil {
 		return errors.New("client: not connected")
 	}
+	if c.opts.Hocuspocus {
+		envelope = append(syncpkg.EncodeRoute(c.opts.DocName), envelope...)
+		c.lastWrite.Store(int64(time.Since(c.base)))
+	}
 	return conn.Write(ctx, websocket.MessageBinary, envelope)
 }
+
+// isEmptyUpdate reports whether a V1 update holds no structs and no
+// deletions (00 00).
+func isEmptyUpdate(u []byte) bool { return len(u) == 2 && u[0] == 0 && u[1] == 0 }
 
 func (c *Client) setSynced(v bool) {
 	c.mu.Lock()
