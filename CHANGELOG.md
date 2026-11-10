@@ -14,6 +14,43 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.32.0] - 2026-11-10
+
+**Upgrade impact**:
+
+- **Document names keep every path segment.** The default `DocNameFn` dropped the first of several path segments, so the rooms `team-a/doc` and `team-b/doc` were one document and each saw the other's edits. It now takes the path below the mount point of the ServeMux pattern the request matched (`r.Pattern`, cut after its last literal slash), or the whole path when there is no pattern.
+  - Unchanged: a one-segment room at the root (`/room1`), everything under a one-segment ServeMux mount (`/collab/room1`, `/collab/team-a/doc`), and exact patterns of one or two segments (`/ws`, `/ws/doc`).
+  - Renamed:
+    - a path of two or more segments with the handler at the root, used directly or on a ServeMux at `/`: `/team-a/doc` is `team-a/doc` (was `doc`), and behind a proxy that keeps a prefix `/ws/demo` is `ws/demo` (was `demo`);
+    - a ServeMux mount two or more segments deep: `/api/collab/room` is `room` (was `collab/room`), and so for exact patterns of three or more segments;
+    - a mount prefix with no ServeMux pattern, under chi, gorilla/mux, gin, echo or `GODEBUG=httpmuxgo121=1`: `/collab/room1` is `collab/room1` (was `room1`).
+  - Stored documents keep their old names, so a renamed room starts empty; a y-websocket client that still holds the room's data sends it again when it connects. To keep a name, mount the handler on a ServeMux at the prefix, strip the prefix in `DocNameFn` (`strings.TrimPrefix(r.URL.Path, "/collab/")`), or run `yserve -path-prefix /ws/`. A `DocNameFn` can also restore the v1.31 rule exactly, and with it the rooms that share a document. The deprecated `ygo-server` takes the new names and has no `-path-prefix`.
+  - `yserve` with a `-path-prefix` other than `/` puts a ServeMux in front, which redirects paths with `//` or dot segments; WebSocket clients do not follow redirects.
+- **Read limit.** A client message may be up to 4 MiB when `ReadLimit` is zero; it was 32 KiB. The send queue's byte default stays 16 MiB.
+- **gomobile: `XmlFragment.ToString` and `XmlElement.ToString` are now `String`** (Swift `string()`, Kotlin and Java `toString()`). This breaks iOS code that calls `toString()` on these two types, in a minor release, because the old name made the Android binding impossible to compile.
+
+### Fixed
+
+- **Rooms whose names differ before a slash shared one document** (see Upgrade impact). A y-websocket client in `team-b/doc` received what another wrote in `team-a/doc`.
+- **A message over 32 KiB never got through.** The server closed the connection with 1009 and a y-websocket client resent the same message on every reconnect: a 40 000-character paste never reached anyone, with 18 closes in 3.5 seconds.
+- **The Android binding did not compile from v1.8.0 on.** gobind turned `ToString` on `XmlFragment` and `XmlElement` into a second `toString()` in the generated Java.
+- **`TestClient_ForwardsFormatCleanup` failed on slow machines.** It required the format cleanup as an update of its own, and on a slow machine the deletion can reach the server inside another update. It now checks the delete set of every update the server applies. The old version failed in 5 of 150 runs in a Linux container limited to 0.25 CPU with `-race` and coverage, the new one in none.
+
+### Added
+
+- `yserve -path-prefix`: the URL path the documents live under.
+
+### Documentation
+
+- The README, `docs/yserve.md` and the comments in `client`, `server`, `cmd/yserve` and `gomobile` no longer say ygo is Hocuspocus-compatible. `@hocuspocus/provider` 2.15, 3.4 and 4.8 cannot sync with yserve, and the Go client cannot sync with `@hocuspocus/server` 4.8: Hocuspocus starts every frame with the document name, ygo does not. Earlier entries in this file that say otherwise are wrong on this point.
+- The README lists the known gaps, measures B4 against yjs on one machine, and lists every Any value that changes when ygo encodes it again.
+
+### Infrastructure
+
+- CI runs stock y-websocket 2.1 and 3.1 clients against the yserve binary (`testdata/e2e`): sync, presence, a 200 000-character paste, rooms with a slash, a restart with a store, `-path-prefix`. On v1.31.0 the paste, the rooms and the restart fail.
+- CI binds the Android AAR on every push to `main` and every pull request.
+- A failed Coveralls upload no longer fails the build.
+
 ## [1.31.0] - 2026-11-03
 
 **Upgrade impact**:
@@ -2080,6 +2117,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.32.0]: https://github.com/Deln0r/ygo/releases/tag/v1.32.0
 [1.31.0]: https://github.com/Deln0r/ygo/releases/tag/v1.31.0
 [1.30.0]: https://github.com/Deln0r/ygo/releases/tag/v1.30.0
 [1.29.0]: https://github.com/Deln0r/ygo/releases/tag/v1.29.0
