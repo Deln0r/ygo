@@ -12,11 +12,11 @@
 
 Pure-Go port of [Yjs](https://github.com/yjs/yjs), the CRDT framework for collaborative applications, listed on the [ports page](https://docs.yjs.dev/ecosystem/ports-to-other-languages) of the Yjs documentation.
 
-Ygo speaks the **Yjs V1 and V2 wire formats** byte for byte, apart from the few Any values listed under [Strings and values](#strings-and-values). The encoding is verified in both directions through **287 cross-language fixture scenarios** generated from `yjs@13.6.33`. The bundled WebSocket server speaks the `y-websocket` protocol: JavaScript clients using `y-websocket` connect to it directly, and the Go client connects to the reference `y-websocket` server. **Hocuspocus clients and servers do not interoperate with ygo today** (see [known gaps](#known-gaps)). No CGO; `gomobile bind` produces an Android AAR (built in CI) and an iOS xcframework (built by hand).
+Ygo speaks the **Yjs V1 and V2 wire formats** byte for byte, apart from object key order, whole-number floats set from Go and a format attribute set to undefined (see [Strings and values](#strings-and-values)). The encoding is verified in both directions through **307 cross-language fixture scenarios** generated from `yjs@13.6.33`. The bundled WebSocket server speaks the `y-websocket` protocol: JavaScript clients using `y-websocket` connect to it directly, and the Go client connects to the reference `y-websocket` server. **Hocuspocus clients and servers do not interoperate with ygo today** (see [known gaps](#known-gaps)). No CGO; `gomobile bind` produces an Android AAR (built in CI) and an iOS xcframework (built by hand).
 
 ## Highlights
 
-- **Byte-level wire compatibility, verified in both directions.** 287 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, and the sync protocol, JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push to `main` and every pull request, so a regression in either direction fails the build. The exceptions are the Any values listed under [Strings and values](#strings-and-values).
+- **Byte-level wire compatibility, verified in both directions.** 307 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, the sync protocol, and the Any values JavaScript has and Go does not (undefined, BigInt, -0), JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push to `main` and every pull request, so a regression in either direction fails the build. The exceptions are the Any values listed under [Strings and values](#strings-and-values).
 - **Pure Go, no CGO.** The CRDT core, the sync client and the server compile with `CGO_ENABLED=0` for all 47 targets in `go tool dist list`, `js/wasm` and `wasip1/wasm` included. The SQLite-backed store in [`persist/sqlite`](persist/sqlite), and with it `yserve`, builds only where `modernc.org/sqlite` does: not on wasm, AIX, DragonFly, illumos, Plan 9, Solaris, MIPS or big-endian ppc64 Linux, NetBSD other than amd64, or OpenBSD other than amd64 and arm64. Elsewhere, supply your own [`persist.Store`](persist) (it is a seven-method interface). `gomobile bind` produces an Android AAR (built in CI on every push to `main` and every pull request) and an iOS xcframework (built by hand on 2026-11-10) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
 - **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native `y-websocket` provider: handshake, incremental updates, awareness, reconnect with backoff. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
 - **The Yjs shared types.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments. Not implemented: the legacy `XmlHook`, observers on `XmlFragment` and `XmlElement`, and `Text.ObserveDeep`.
@@ -161,14 +161,9 @@ The `ContentDoc` wire format (GUID + options) is byte-compatible with `yjs@13.6.
 
 lib0 rejects strings that are not valid UTF-8, so ygo makes every string it is given valid at the call, before it becomes part of an item: each byte that does not start a valid UTF-8 sequence becomes U+FFFD, so UTF-16 indexes into the string you passed still point at the same places (values nested deeper than 1000 levels are not checked below that depth). An embed or format value that is not a plain value (strings, numbers, bools, nil, `[]byte`, `[]any`, `map[string]any`) is marshaled once, at the call, and stored as that JSON. A value passed to the API belongs to the document from then on: do not mutate it, or a value a read returns, after the call. Updates arriving with invalid UTF-8 are rejected (`ygo.ErrInvalidUTF8`); bytes an older release stored load as they were.
 
-Some Any values change when ygo encodes them again. Clients online when the update arrives get the original bytes, but a client that receives the value from a Go peer's state (a late joiner, or after the server compacts) gets something else:
+JavaScript's `undefined`, `BigInt` and `-0` keep their identity: they read as `ygo.Undefined{}`, `ygo.BigInt` and a `float64` negative zero, and are written as lib0 writes them, checked byte for byte against yjs in both directions. A BigInt set from Go reaches JavaScript as a BigInt, except in a V1 format attribute or embed: those are JSON, where a BigInt is a Number and loses digits beyond 2^53. Where ygo renders a value as JSON (gomobile), an undefined object entry is left out and an undefined array entry is null, as `JSON.stringify` does; a top-level undefined is null, -0 is 0, and a BigInt, where `JSON.stringify` throws, is a number.
 
-- a JS `BigInt` becomes a plain number and loses precision beyond 2^53;
-- `undefined` becomes `null`, also inside objects;
-- `-0` becomes `0`;
-- an object with more than one key comes back with its keys sorted, where yjs keeps their insertion order.
-
-Separately, a whole-number `float64` set from Go is written as a float64, where lib0 writes a varint.
+Three differences remain. An object with more than one key comes back with its keys sorted, where yjs keeps their insertion order: clients online when the update arrives get the original bytes, but a client that receives the value from a Go peer's state (a late joiner, or after the server compacts) sees the sorted order. And a whole-number `float64` set from Go is written as a float64, where lib0 writes a varint. A format attribute whose value is `undefined` itself reads as nil (null) and is written back as null, where yjs keeps the undefined.
 
 ### Observing changes
 
@@ -196,7 +191,7 @@ defer unsub()
 
 - **Hocuspocus.** `@hocuspocus/provider` cannot sync with the ygo server, and the Go client cannot sync with `@hocuspocus/server` (checked with provider 2.15, 3.4 and 4.8 and server 4.8). Hocuspocus starts every frame with the document name; ygo's frames start with the message type, as `y-websocket`'s do.
 - **Message size.** The server reads client messages up to 4 MiB by default. A larger one (the first sync of a larger document) closes the connection with 1009, and the client reconnects and resends it in a loop. Raise `ReadLimit` (`yserve -read-limit`) above your largest document.
-- **Any values.** See [Strings and values](#strings-and-values).
+- **Any values.** An object with more than one key comes back with its keys sorted, and a format attribute set to undefined comes back as null; see [Strings and values](#strings-and-values).
 - **Speed.** Applying edits is about 20× slower than yjs on the same machine. See [Benchmarks](#benchmarks).
 
 ### Status by layer
@@ -253,18 +248,18 @@ defer unsub()
 
 ## Wire compatibility
 
-The single most-important guarantee of this project is byte-level wire compatibility with `yjs@13.x`. This is enforced by **287 cross-language fixture scenarios** (plus 56 lib0 primitive vectors):
+The single most-important guarantee of this project is byte-level wire compatibility with `yjs@13.x`. This is enforced by **307 cross-language fixture scenarios** (plus 56 lib0 primitive vectors):
 
 - **33 V1 forward fixtures** (`testdata/yjs-updates.json`) — JS Yjs encodes via `Y.encodeStateAsUpdate`, Go decodes and applies, state matches.
 - **37 V2 forward fixtures** (`testdata/yjs-update-v2-fixtures.json`) — same with `Y.encodeStateAsUpdateV2`.
 - **74 reverse fixtures** (`testdata/go-updates.json` + `go-update-v2-fixtures.json`) — Go encodes via `EncodeStateAsUpdate` / `EncodeStateAsUpdateV2`, JS Yjs decodes via `Y.applyUpdate` / `Y.applyUpdateV2`, state matches.
-- **143 feature fixtures** — XML (5), awareness (6), sync protocol (6), undo (27), snapshots (4), subdocuments (3), wire edge cases incl. 53-bit client IDs (3), nested-type GC (4), relative positions (11), observers (19, which observers fire and in what order), rich text (55, what inserts, embeds, formatting, deletes and Quill deltas do to a formatted text, compared as deltas, strings and events, not as bytes; the update-event set below compares rich-text updates byte for byte), all captured from the pinned JS reference and byte-compared in both directions where the feature has a Go encoder.
+- **163 feature fixtures** — XML (5), awareness (6), sync protocol (6), undo (27), snapshots (4), subdocuments (3), wire edge cases incl. 53-bit client IDs (3), nested-type GC (4), relative positions (11), observers (19, which observers fire and in what order), rich text (55, what inserts, embeds, formatting, deletes and Quill deltas do to a formatted text, compared as deltas, strings and events, not as bytes; the update-event set below compares rich-text updates byte for byte), Any values (20: undefined, BigInt and -0 as map values, inside arrays and objects, in a subdocument's options, and in V2 format attributes and embeds, checked as values and byte for byte both ways), all captured from the pinned JS reference and byte-compared in both directions where the feature has a Go encoder.
 
 One more fixture set compares bytes with yjs but stays out of these totals while any of its scenarios is a pinned divergence: per-transaction updates and diffs (112 scenarios, every `OnUpdate` / `OnUpdateV2` event and `EncodeDiff` / `EncodeDiffV2` against state vectors that end inside a block, undo of nested types, rich-text inserts and deltas, and the format cleanup after remote transactions among them; 1 pinned). Each pin is listed with its cause in the test and fails the build when the behaviour changes, in either direction.
 
 The fixtures regenerate from pinned `yjs@13.6.33` + `lib0@0.2.119` + `y-protocols@1.0.7` on every CI run; `git diff --exit-code testdata/` catches byte-level regressions.
 
-Byte equality does not extend to the Any values listed under [Strings and values](#strings-and-values).
+Byte equality does not extend to objects with more than one key, whose keys ygo sorts, to whole-number float64s set from Go, or to a format attribute set to undefined, which ygo writes back as null (see [Strings and values](#strings-and-values)).
 
 ## How is this different from Hocuspocus / y-websocket / y-leveldb?
 

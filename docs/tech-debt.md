@@ -325,13 +325,13 @@
 
 - **Where:** `internal/block/stubs.go` `type Any = any`.
 - **Was:** opaque `any` with encoder/decoder supporting only nil/bool/string/int*/float64.
-- **Partially resolved by:** `internal/encoding/any_codec.go` now covers all common lib0 Any variants — `[]byte` (binary, tag 116), `[]any` (array, tag 117), `map[string]any` (object, tag 118 with deterministic alphabetical key order so wire bytes stay reproducible across runs), `float32` (tag 124), and BigInt decode (tag 122 → `int64` via 8-byte BE, matching `writeBigInt64`). Per-variant round-trip tests in `any_codec_test.go`. B3.2 benchmark un-blocked and running.
-- **Remaining:** native BigInt encoding from Go (would need an explicit `BigInt` wrapper type so we can distinguish from `int64`; defer until an adopter actually needs to send BigInts from Go). `Any` is still a `type Any = any` alias rather than a tagged union — replacing with a proper union would be a public API change worth its own commit when the surrounding ergonomics make sense.
+- **Partially resolved by:** `internal/encoding/any_codec.go` now covers all common lib0 Any variants — `[]byte` (binary, tag 116), `[]any` (array, tag 117), `map[string]any` (object, tag 118 with deterministic alphabetical key order so wire bytes stay reproducible across runs), `float32` (tag 124), and BigInt (tag 122, `block.BigInt` both ways since v1.33.0). Per-variant round-trip tests in `any_codec_test.go`. B3.2 benchmark un-blocked and running.
+- **Remaining:** `Any` is still a `type Any = any` alias rather than a tagged union; replacing it would be a public API change worth its own commit when the surrounding ergonomics make sense.
 
-### `undefined` and -0 in Any values
+### `undefined` and -0 in Any values (resolved in v1.33.0, except a format value that is undefined itself)
 
 - **Where:** `internal/encoding/any_codec.go` (`DecodeAny` / `EncodeAny`), `internal/anyval`, every renderer of Any values to JSON (types, gomobile).
-- **What:** two values lib0 keeps through a round trip, ygo does not.
+- **Was:** two values lib0 keeps through a round trip, ygo did not.
   - lib0 tag 127, `undefined`, decodes to nil and is written back as null (126). yjs stores it from `Map.set(k, undefined)` and inside Any arrays and objects, and re-encodes it byte for byte. A JS peer reading a document after ygo compacted or relayed it gets `null` where the writer stored `undefined` (`v === undefined` changes; `map.has(k)` does not).
   - lib0 writes -0 as a varint with the sign bit (`7d40`), and decodes and re-encodes it so. ygo decodes through an `int64` and loses the sign: `Object.is(v, -0)` and `1/v` change for a JS reader, and the bytes change.
   - Probed against lib0 0.2.119 and yjs 13.6.33 on 3 November 2026 (`docs eb-1/ygo/tools/probe-r6.mjs`).
@@ -343,7 +343,8 @@
   - The reverse fixtures capture expected values as JSON, so a writer that emits null would pass a check built on them; the expectation needs its own tag.
   - Objects with more than one key cannot round-trip byte for byte anyway, since ygo sorts keys (README).
   - For -0, a representation that survives decode and encode without changing the documented rule that a whole-number float64 stays a float64.
-- **When to address:** a release of its own, with a plan reviewed before code (deferred from R6, November 2026).
+- **Resolved by (v1.33.0):** `block.Undefined` and `block.BigInt` (exported as `ygo.Undefined` and `ygo.BigInt`), tag 125 with the sign bit decoding to a float64 negative zero and a negative zero encoding as `7d40`, BigInt equality before the number comparison in `strictEqual`, and `anyval.ForJSON` for every JSON renderer. Fixtures: `testdata/any-value-fixtures.json`.
+- **Remaining:** a format attribute whose value is undefined itself reads as nil and is written back as null (a Go caller's top-level `Undefined{}` there, or as an embed, is stored as nil). yjs coalesces it to null at most lookups (`?? null`), compares it raw at others, and `formatText` treats a requested undefined as not requested; porting that is its own work. ygo's XML attributes hold strings only, where yjs accepts any value.
 
 ### Forward-dependency stubs are empty types
 
