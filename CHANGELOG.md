@@ -19,7 +19,7 @@ file.
 **Upgrade impact**:
 
 - **The `client` renews its presence.** While connected it sends its awareness state again once the state is half the awareness timeout old (15 seconds by default), as y-protocols does. Every new connection sends the state one clock up, and sends none when no state is set (it sent an empty or removed one). Each renewal and each connection fires the client's `Awareness().OnUpdate` with the local client as updated and origin `"local"`; `OnChange` does not fire, the state is the same. Code that treats every local `OnUpdate` as a user action sees one per connection and one every 15 seconds.
-- **Peers' presence is dropped when the connection closes**, as y-websocket drops it: after `OnSynced(false)`, `OnChange` and `OnUpdate` report the peers removed, and `States()` holds only the local client until the next handshake. gomobile's `ObservePresence` sees the peers leave on a disconnect and come back after the reconnect.
+- **Peers' presence is dropped when an open connection closes**, as y-websocket drops it: `OnChange` and `OnUpdate` report the peers removed, after `OnSynced(false)` when the connection had synced, and `States()` holds only the local client until the next handshake. A failed dial leaves the awareness alone. gomobile's `ObservePresence` sees the peers leave on a disconnect and come back after the reconnect.
 
 ### Fixed
 
@@ -30,18 +30,19 @@ file.
 
 ### Added
 
-- `client.Options.AwarenessTimeout`: how long peers keep the client's presence without hearing from it, 30 seconds by default. Set it to the server's timeout when that is shorter (`yserve -awareness-timeout`, `server.Options.AwarenessTimeout`); the client renews at half of it, checking every tenth (at least every 100ms). Above 30 seconds JavaScript peers drop the client anyway: y-protocols keeps a silent client for 30 seconds.
+- `client.Options.AwarenessTimeout`: how long peers keep the client's presence without hearing from it, 30 seconds by default. Set it to the server's timeout when that is shorter (`yserve -awareness-timeout`, `server.Options.AwarenessTimeout`); the client renews at half of it, checking every tenth (at least every 100ms). Do not set it above 30 seconds when JavaScript peers are in the room: y-protocols times out a client it has not heard from for 30 seconds.
 - `ygo.Awareness` methods `RenewLocalState(olderThan)` and `ForgetRemote()`, which the client uses for the above.
 
 ### Tests
 
 - Through `server`:
-  - an idle client stays visible to a peer for three times the server's awareness timeout;
+  - an idle client is never reported removed to a peer for three times the server's awareness timeout;
   - a client is visible again right after its connection drops and it reconnects;
   - a client whose old connection the server ends only after the reconnect (a proxy keeps the server's side open) is visible again right after the removal;
   - a peer that left while the client was offline, with the reconnect held until the server has removed it, is gone once the client reconnects;
   - a peer still online is back at once, without waiting for its next renewal, and was reported removed only after synced turned false;
-  - an `AwarenessTimeout` of 5 nanoseconds no longer panics the client.
+  - an `AwarenessTimeout` of 5 nanoseconds no longer panics the client;
+  - failed dials leave states the client did not bring in its `Awareness`.
 - `RenewLocalState` and `ForgetRemote` against their rules: the age threshold, no revival of a removed state, `OnUpdate` without `OnChange` on a renewal, both events on a forget, the local client kept, a remote state taken again at its old clock.
 
 ### Documentation

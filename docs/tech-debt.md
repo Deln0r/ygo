@@ -453,9 +453,9 @@
 ### Go client presence (resolved in 1.34.0, two differences open)
 
 - **Was:** the `client` sent its awareness state once per change and never renewed it, so the server's sweep and every y-protocols peer removed an idle client 30 seconds after its last change. On a reconnect it sent the state at the clock the server had kept for the removal, which the server refused. It kept peers' states across a reconnect, so one that left in between stayed. A removal of itself (the server ending an older connection of it late) bumped its clock and sent nothing, though the entry above said the next heartbeat would carry it: there was none.
-- **Resolved by:** the client renews its state at half of `Options.AwarenessTimeout`, checking every tenth of it (at least every 100ms); sends it one clock up on every new connection; drops peers' states and their clocks when a connection closes (`Awareness.ForgetRemote`), after synced turns false, as y-websocket does; and sends its state again at once when it reads a removal of itself while the state is set.
+- **Resolved by:** the client renews its state at half of `Options.AwarenessTimeout`, checking every tenth of it (at least every 100ms); sends it one clock up on every new connection; drops peers' states and their clocks when an open connection closes (`Awareness.ForgetRemote`), after synced turns false, as y-websocket does, and leaves them alone on a failed dial; and sends its state again at once when it reads a removal of itself while the state is set.
 - **Still different from y-websocket:**
-  - The client does not sweep peers that went silent. y-protocols removes a remote state 30 seconds after its last update; the Go client relies on the server's removal broadcasts (ygo's server, the y-websocket server and Hocuspocus all send them).
+  - The client does not sweep peers that went silent. y-protocols removes a remote state 30 seconds after its last update; the Go client relies on the server's removal broadcasts, which ygo's server and the y-websocket server send.
   - The client has no liveness check of its own. y-websocket closes its socket after 30 seconds without a message (`messageReconnectTimeout`) and reconnects; the Go client notices a connection that died without a FIN or RST only when TCP does.
 
 ### Resolved: server-driven timeout sweep + presence DoS hardening
