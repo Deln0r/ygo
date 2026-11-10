@@ -18,14 +18,15 @@ file.
 
 **Upgrade impact**:
 
-- **The `client` drops a dead connection and reconnects.** When nothing was read from the server for `LivenessTimeout` (30 seconds by default), nothing the client wrote made progress in that time, and a WebSocket ping got no pong for half of it, the client closes the connection and dials again, as y-websocket does after 30 seconds without a message. `OnError` gets `ErrServerSilent`. A dial is bounded by the same timeout. A negative `LivenessTimeout` turns the check off.
-- **An idle connection sees a ping** once the server has been silent for half the timeout (15 seconds). With an awareness state set, yserve and the y-websocket server echo the client's renewal every 15 seconds, so pings go out mostly from clients without a state. A server that answers no pings and sends nothing for 30 seconds is reconnected to each time; set `LivenessTimeout` negative for it.
-- **The client dials through a clone of `http.DefaultTransport`** whose connections it counts bytes on; proxy settings and TLS are the default transport's. If `http.DefaultTransport` was replaced by something that is not an `*http.Transport`, the client dials as before and the check is off. On js/wasm the check is off too: the browser's WebSocket has no ping.
+- **The `client` drops a dead connection and reconnects.** When nothing was read from the server for `LivenessTimeout` (30 seconds by default, at least 1 second), nothing the client wrote made progress in that time, and a WebSocket ping got no pong for half of it, the client closes the connection and dials again, as y-websocket does after 30 seconds without a message. `OnError` gets `ErrServerSilent`, or the read error when the ping itself could not be written for 5 seconds and the WebSocket library closed the connection first. With the check on, a dial is bounded by the same timeout. A negative `LivenessTimeout` turns the check off.
+- **An idle connection sees a ping** whenever nothing was read for half the timeout, in a quiet room about every 15 seconds. A server that answers no pings and sends nothing for 30 seconds is reconnected to each time; set `LivenessTimeout` negative for it.
+- **The client dials through a clone of `http.DefaultTransport`**, with its dialers (a custom TLS dialer included) and its proxy and TLS settings, and counts bytes on the connections they open. If `http.DefaultTransport` was replaced by something that is not an `*http.Transport`, the client dials as before and the check is off. On js/wasm the check is off too: the browser's WebSocket has no ping.
+- **Write progress is the kernel taking bytes** into the socket's send buffer, which a dead path does until the buffer is full: a client that keeps writing is dropped only after that, which on Linux can take minutes.
 
 ### Fixed
 
 - **A connection that died without a FIN or RST went unnoticed** until TCP gave up: a phone that changed networks, a NAT that dropped the mapping, a server that hung. The client stayed synced, edits went nowhere and peers looked online.
-- **A dial could wait for good** on a path that takes the TCP connection and forwards nothing.
+- **A dial could wait for good** on a path that takes the TCP connection and forwards nothing. It still can with the check off.
 
 ### Added
 
@@ -38,7 +39,9 @@ file.
   - an idle healthy connection gets pongs and is kept;
   - 8 MiB coming in at 2 MiB/s with a 2-second timeout, and going out at 2 MiB/s with a 3-second one, are not cut;
   - a dial through a path that forwards nothing fails after the timeout and is tried again;
-  - a negative timeout turns the check off;
+  - a negative timeout turns the check off: no session runs it;
+  - a 50ms timeout is raised to 1 second and keeps a healthy connection;
+  - over a custom `DialTLSContext` on `http.DefaultTransport` and a wss URL, the connection is counted and kept;
   - no client goroutine is left after `Close` with a ping out.
 - The same tests ran three times under `-race` in a Linux container limited to 2 CPUs.
 
