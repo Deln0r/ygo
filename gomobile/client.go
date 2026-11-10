@@ -30,7 +30,8 @@ type Listener interface {
 }
 
 // Client is the gomobile-bindable sync provider: a live WebSocket
-// session syncing one Doc with a yserve or y-websocket server.
+// session syncing one Doc with a yserve or y-websocket server, or, after
+// SetHocuspocus, a Hocuspocus server.
 // Construct with NewClient, optionally SetListener, start
 // with Connect, stop with Close. The native app edits the Doc through
 // Text / Map wrappers; sync happens in the background.
@@ -47,6 +48,12 @@ type Client struct {
 	cancelWatch    func()
 	presence       PresenceListener
 	cancelPresence func()
+
+	// Hocuspocus mode (SetHocuspocus): the token, read at every Auth,
+	// and the optional listener for the server's answer.
+	hocuspocus bool
+	token      string
+	auth       AuthListener
 }
 
 // NewClient prepares a sync client for the document. url is the
@@ -106,6 +113,7 @@ func (c *Client) Connect() error {
 		opts.OnSynced = l.OnSynced
 		opts.OnError = func(err error) { l.OnError(err.Error()) }
 	}
+	c.hocusOptions(&opts)
 	if c.storePath != "" {
 		st, err := sqlite.Open(c.storePath)
 		if err != nil {
