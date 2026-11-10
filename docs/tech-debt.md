@@ -366,6 +366,11 @@
 
 ## Sync protocol / WebSocket server
 
+### Hocuspocus framing (open)
+
+- **What:** `@hocuspocus/provider` (2.15, 3.4, 4.8) cannot sync with the ygo server, and the Go client cannot sync with `@hocuspocus/server` 4.8. Every Hocuspocus frame starts with `varString(documentName)` before the message type; ygo's frames start with the message type, as y-websocket's do. Found on 8 Nov 2026 by running the real clients: the two entries below were marked resolved against fixtures built without the document name, so they held only for y-websocket-style frames.
+- **Fix needs:** reading the document name in front of every frame (the first frame decides between the two framings: y-websocket always opens with Sync step 1, type 0, and a document name is never empty), the Auth handshake Hocuspocus clients wait for, several documents over one socket, and a CI job with the real provider and server.
+
 ### Hocuspocus extensions (resolved)
 
 - **Was:** the full Hocuspocus envelope adds 5 message types beyond the bare y-websocket subset (Auth, Stateless, BroadcastStateless, Close, SyncStatus); `HandleFrame` silently dropped all of them.

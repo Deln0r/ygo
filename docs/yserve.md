@@ -39,21 +39,21 @@ const doc = new Y.Doc()
 const provider = new WebsocketProvider('ws://localhost:8080', 'my-document', doc)
 ```
 
-Documents are addressed by URL path, as in y-websocket.
+Documents are addressed by the URL path, every segment kept, as in
+y-websocket's reference server: `ws://localhost:8080/team-a/doc` is the
+document `team-a/doc`. Behind a proxy that forwards a path prefix, pass it
+as `-path-prefix`, so that with `-path-prefix /ws/`
+`ws://host/ws/team-a/doc` is `team-a/doc` again.
 
 ## Limits
 
 - **Hocuspocus.** `@hocuspocus/provider` (checked with 2.15, 3.4 and
   4.8) cannot connect: its frames start with the document name.
-- **Message size.** A client message larger than `-read-limit` (32 KiB
+- **Message size.** A client message larger than `-read-limit` (4 MiB
   by default) closes the connection with 1009, and the client
-  reconnects and resends in a loop. A big paste or the first sync of a
-  large document is enough. Set `-read-limit` above your largest
+  reconnects and resends it in a loop. The first sync of a large
+  document is one message. Set `-read-limit` above your largest
   document.
-- **Room names with a slash.** The first path segment is dropped when
-  there are several, so the rooms `team-a/doc` and `team-b/doc` are one
-  document. Do not use `/` in room names. Embedders can set
-  `server.Options.DocNameFn`.
 
 ## Flags
 
@@ -63,7 +63,8 @@ Documents are addressed by URL path, as in y-websocket.
 | `-store` | (empty) | SQLite database path; empty = in-memory only |
 | `-version-interval` | `0` (off) | capture a version of each changed document at this interval; requires `-store` |
 | `-keep-versions` | `10` | keep at most N versions per document (0 = keep all) |
-| `-read-limit` | `0` (32 KiB) | max WebSocket frame the server reads per client; raise for large documents, `-1` = unlimited |
+| `-path-prefix` | `/` | URL path the documents live under; the rest of the path is the document name |
+| `-read-limit` | `0` (4 MiB) | max WebSocket frame the server reads per client; raise for large documents, `-1` = unlimited |
 | `-awareness-timeout` | `0` (30s) | evict a presence entry after it is silent this long |
 | `-max-awareness-clients` | `0` (4096) | cap distinct presence clients per room; `-1` = unlimited |
 | `-max-conns-per-doc` | `0` (4096) | cap simultaneous WebSocket connections per document; `-1` = unlimited. A previously uncapped deployment serving a room with more than 4096 concurrent connections must set `-1` to preserve that behavior after upgrade. |

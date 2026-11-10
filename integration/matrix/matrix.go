@@ -14,7 +14,7 @@
 // This is deliberately a THIN transport: it moves whole update blobs and
 // nothing else. No state-vector diffing, no session negotiation, no server.
 // The centralised path already exists (github.com/Deln0r/ygo/server, a
-// Hocuspocus-compatible WebSocket server); this is the federated alternative,
+// WebSocket server for y-websocket clients); this is the federated alternative,
 // not a second implementation of the same thing. Read README.md for what that
 // thinness costs - the limits are real and they are documented rather than
 // papered over.
