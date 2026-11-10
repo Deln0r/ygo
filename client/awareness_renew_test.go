@@ -365,3 +365,43 @@ func TestClient_TinyAwarenessTimeout(t *testing.T) {
 	c.SetAwarenessState([]byte(`{"n":1}`))
 	time.Sleep(300 * time.Millisecond)
 }
+
+// A failed dial leaves the awareness alone, as y-websocket removes remote
+// states only when an open connection closes: an Awareness the embedder
+// also feeds from elsewhere keeps those states while the server is down.
+func TestClient_FailedDialKeepsAwareness(t *testing.T) {
+	ln := mustListen(t)
+	url := "ws://" + ln.Addr().String()
+	_ = ln.Close() // nothing listens: every dial fails
+
+	aw := awareness.New(73)
+	peer := awareness.New(74)
+	peer.SetLocalState([]byte(`{"p":74}`))
+	if _, err := aw.Apply(peer.Encode(nil), "elsewhere"); err != nil {
+		t.Fatal(err)
+	}
+	failures := make(chan struct{}, 16)
+	c, err := client.New(client.Options{
+		URL: url, DocName: "room", Awareness: aw,
+		MinBackoff: 10 * time.Millisecond, MaxBackoff: 20 * time.Millisecond,
+		OnError: func(error) {
+			select {
+			case failures <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	for i := 0; i < 3; i++ {
+		waitChan(t, "a failed dial", failures)
+	}
+	if string(aw.States()[74]) != `{"p":74}` {
+		t.Error("failed dials removed a state the client did not bring")
+	}
+}

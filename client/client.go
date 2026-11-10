@@ -85,9 +85,9 @@ type Options struct {
 	// without hearing from it. The client renews its state at half of
 	// this, checking every tenth of it (at least every 100ms), as
 	// y-protocols does. Default 30s, the y-protocols value. Set it to the
-	// server's timeout when that is shorter; above 30s, JavaScript peers
-	// drop the client anyway, since y-protocols keeps a silent client for
-	// 30 seconds whatever the server does.
+	// server's timeout when that is shorter. Do not set it above 30s when
+	// JavaScript peers are in the room: y-protocols times out a client it
+	// has not heard from for 30 seconds, whatever the server does.
 	AwarenessTimeout time.Duration
 
 	// LocalStore, when set, makes the client offline-first: on Connect
@@ -332,7 +332,7 @@ func (c *Client) run(ctx context.Context) {
 	defer close(c.done)
 	backoff := c.opts.MinBackoff
 	for {
-		err := c.session(ctx)
+		opened, err := c.session(ctx)
 		// Reset the backoff when the session that just ended actually
 		// completed a handshake: a transient drop after healthy
 		// connectivity should redial fast, not at the grown backoff left
@@ -342,11 +342,14 @@ func (c *Client) run(ctx context.Context) {
 			backoff = c.opts.MinBackoff
 		}
 		c.setSynced(false)
-		// Peers' presence goes with the connection, after synced turns
-		// false, as y-websocket drops it: the next handshake brings the
-		// states of the peers online then, and a peer that left in between
-		// would otherwise stay.
-		c.awareness.ForgetRemote()
+		// Peers' presence goes with a connection that was open, after
+		// synced turns false, as y-websocket drops it: the next handshake
+		// brings the states of the peers online then, and a peer that left
+		// in between would otherwise stay. A failed dial leaves the
+		// awareness alone, as y-websocket does.
+		if opened {
+			c.awareness.ForgetRemote()
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -367,12 +370,13 @@ func (c *Client) run(ctx context.Context) {
 }
 
 // session runs one connection: dial, handshake, then concurrent read
-// and write pumps until either fails or ctx is cancelled.
-func (c *Client) session(ctx context.Context) error {
+// and write pumps until either fails or ctx is cancelled. opened reports
+// whether the dial succeeded.
+func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	dialURL := strings.TrimRight(c.opts.URL, "/") + "/" + c.opts.DocName
 	conn, _, err := websocket.Dial(ctx, dialURL, nil)
 	if err != nil {
-		return fmt.Errorf("client: dial %s: %w", dialURL, err)
+		return false, fmt.Errorf("client: dial %s: %w", dialURL, err)
 	}
 	conn.SetReadLimit(-1)
 	sessCtx, sessCancel := context.WithCancel(ctx)
@@ -399,7 +403,7 @@ func (c *Client) session(ctx context.Context) error {
 	// server keeps the clock of the state it removed when the last
 	// session ended, and ignores a state at that clock.
 	if err := c.sendStep1(); err != nil {
-		return err
+		return true, err
 	}
 	_ = c.write(syncpkg.EncodeQueryAwareness())
 	if c.awareness.RenewLocalState(0) {
@@ -412,7 +416,7 @@ func (c *Client) session(ctx context.Context) error {
 	readErr := c.readPump(sessCtx, conn)
 	sessCancel()
 	<-writeErr
-	return readErr
+	return true, readErr
 }
 
 // readPump applies inbound frames until the connection drops. conn is
