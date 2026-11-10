@@ -63,10 +63,14 @@ type Options struct {
 
 	// Token is the token a Hocuspocus server's onAuthenticate gets ("" by
 	// default, as providers send). TokenFunc, when set, is asked instead
-	// once each connection is up and whenever the server asks for the
-	// token again; an error from it ends that attempt. Its context ends
-	// with the connection, and at connect after LivenessTimeout too; it
-	// must return when the context ends.
+	// once each connection is up, as the provider asks its token function,
+	// and whenever the server asks for the token again. It must return when
+	// its context ends (with the connection, or on Close), and well within
+	// the server's pre-auth timeout (30 s for server 2). An error from it
+	// ends that attempt, and the next dial waits at least 30 seconds, as
+	// after a denial. A refresh can overlap the next connect's call, so it
+	// must be safe to call concurrently; Close does not wait for a refresh
+	// in flight.
 	Token     string
 	TokenFunc func(ctx context.Context) (string, error)
 
@@ -466,7 +470,7 @@ func (c *Client) run(ctx context.Context) {
 		// least deniedBackoff, so it does not run the server's
 		// onAuthenticate at the reconnect rate.
 		sleep := backoff/2 + time.Duration(rand.Int63n(int64(backoff/2+1)))
-		if errors.Is(err, ErrPermissionDenied) {
+		if errors.Is(err, ErrPermissionDenied) || errors.Is(err, errTokenFunc) {
 			sleep = max(sleep, deniedBackoff, c.opts.MaxBackoff)
 		}
 		select {
@@ -517,18 +521,13 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	}()
 
 	if hp != nil {
-		// The token is asked for once the connection is up, so a server
-		// that cannot be reached does not cost a TokenFunc call per dial;
-		// with the liveness check on, the call is bounded by its timeout,
-		// since nothing reads the connection meanwhile.
-		tctx, tcancel := sessCtx, context.CancelFunc(func() {})
-		if c.opts.LivenessTimeout > 0 {
-			tctx, tcancel = context.WithTimeout(sessCtx, c.opts.LivenessTimeout)
-		}
-		tok, err := c.token(tctx)
-		tcancel()
+		// The token is asked for once the connection is up, as the
+		// provider asks its token function, so a server that cannot be
+		// reached costs no TokenFunc call per dial. The server's own
+		// pre-auth timer bounds it (server 2 closes after 30 s).
+		tok, err := c.token(sessCtx)
 		if err != nil {
-			return true, fmt.Errorf("client: TokenFunc: %w", err)
+			return true, fmt.Errorf("%w: %w", errTokenFunc, err)
 		}
 		if err := c.hocusHandshake(tok); err != nil {
 			return true, err
@@ -552,6 +551,10 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	go func() { writeErr <- c.writePump(sessCtx, hp) }()
 	var silent chan bool
 	if live != nil {
+		// The check counts from here: the handshake (a TokenFunc call in
+		// Hocuspocus mode) may have taken a while with nothing to read.
+		live.read()
+		live.lastMark.Store(live.now())
 		silent = make(chan bool, 1)
 		go func() { silent <- c.watch(sessCtx, conn, live) }()
 	}

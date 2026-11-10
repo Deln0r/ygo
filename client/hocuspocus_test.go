@@ -581,3 +581,22 @@ func TestHocus_NoTokenCallPerFailedDial(t *testing.T) {
 		t.Errorf("%d TokenFunc calls for refused dials, want 0", n)
 	}
 }
+
+// A TokenFunc that fails (a revoked refresh token) costs the server no
+// upgrade at the reconnect rate: the next dial waits deniedBackoff, as
+// after a denial.
+func TestHocus_TokenFuncErrorBackoff(t *testing.T) {
+	t.Cleanup(client.SetDeniedBackoff(400 * time.Millisecond))
+	f := newFakeHocus(t)
+	_, ev := hocusClient(t, f, func(o *client.Options) {
+		o.TokenFunc = func(context.Context) (string, error) { return "", errors.New("signed out") }
+	}, nil)
+	time.Sleep(1100 * time.Millisecond)
+	if n := f.dials.Load(); n > 4 {
+		t.Errorf("%d dials in 1.1 s with a 400 ms wait after a TokenFunc error", n)
+	}
+	errs := ev.errors()
+	if len(errs) == 0 || !strings.Contains(errs[0].Error(), "signed out") {
+		t.Errorf("errors %v, want the TokenFunc error", errs)
+	}
+}

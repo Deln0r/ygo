@@ -32,10 +32,13 @@ var (
 	ErrUpdateRefused = errors.New("client: the server did not apply an update")
 )
 
-// deniedBackoff is the least a dial waits after a permission denial, so a
-// refused token does not run the server's onAuthenticate at the reconnect
-// rate.
+// deniedBackoff is the least a dial waits after a permission denial or a
+// TokenFunc error, so a refused or missing token does not cost the server
+// an upgrade and an onAuthenticate run at the reconnect rate.
 var deniedBackoff = 30 * time.Second
+
+// errTokenFunc wraps a TokenFunc error at connect.
+var errTokenFunc = errors.New("client: TokenFunc")
 
 // afterSendClose, set by tests, runs between Close's CLOSE and the
 // cancel, to widen the window in which the server's answer arrives.
@@ -104,9 +107,9 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	return c.opts.Token, nil
 }
 
-// hocusHandshake opens a Hocuspocus session: Auth with the token (asked
-// before the dial), then SyncStep1, then the awareness state if one is
-// set, as providers send them. No QueryAwareness: no server answers it.
+// hocusHandshake opens a Hocuspocus session: Auth with the token, then
+// SyncStep1, then the awareness state if one is set, as providers send
+// them. No QueryAwareness: no server answers it.
 func (c *Client) hocusHandshake(tok string) error {
 	c.unsynced.Store(1)
 	if err := c.write(syncpkg.EncodeAuthToken(tok)); err != nil {
