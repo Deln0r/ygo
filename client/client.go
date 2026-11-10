@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -82,8 +83,11 @@ type Options struct {
 
 	// AwarenessTimeout is how long peers keep this client's presence
 	// without hearing from it. The client renews its state at half of
-	// this, as y-protocols does. Default 30s, the y-protocols value; set it
-	// to the server's timeout when that is shorter.
+	// this, checking every tenth of it (at least every 100ms), as
+	// y-protocols does. Default 30s, the y-protocols value. Set it to the
+	// server's timeout when that is shorter; above 30s, JavaScript peers
+	// drop the client anyway, since y-protocols keeps a silent client for
+	// 30 seconds whatever the server does.
 	AwarenessTimeout time.Duration
 
 	// LocalStore, when set, makes the client offline-first: on Connect
@@ -338,6 +342,11 @@ func (c *Client) run(ctx context.Context) {
 			backoff = c.opts.MinBackoff
 		}
 		c.setSynced(false)
+		// Peers' presence goes with the connection, after synced turns
+		// false, as y-websocket drops it: the next handshake brings the
+		// states of the peers online then, and a peer that left in between
+		// would otherwise stay.
+		c.awareness.ForgetRemote()
 		if ctx.Err() != nil {
 			return
 		}
@@ -376,29 +385,26 @@ func (c *Client) session(ctx context.Context) error {
 	c.mu.Unlock()
 	// Clear the per-session conn when the session ends, so a stale closed
 	// conn is never visible between sessions (write() then guards
-	// conn==nil as "not connected"). Peers' presence goes with it, as
-	// y-websocket drops it: the next session's handshake brings the
-	// states of the peers online then, and a peer that left in between
-	// would otherwise stay.
+	// conn==nil as "not connected").
 	defer func() {
 		c.mu.Lock()
 		c.conn = nil
 		c.connCtx = nil
 		c.mu.Unlock()
-		c.awareness.ForgetRemote()
 	}()
 
 	// Client side of the y-protocols handshake: announce our state
-	// vector, ask for awareness, and push our awareness state. The state
-	// goes out one clock up: the server keeps the clock of the state it
-	// removed when the last session ended, and ignores a state at that
-	// clock.
+	// vector, ask for awareness, and push our awareness state if there is
+	// one, as y-websocket does. The state goes out one clock up: the
+	// server keeps the clock of the state it removed when the last
+	// session ended, and ignores a state at that clock.
 	if err := c.sendStep1(); err != nil {
 		return err
 	}
 	_ = c.write(syncpkg.EncodeQueryAwareness())
-	c.awareness.RenewLocalState(0)
-	c.sendAwareness()
+	if c.awareness.RenewLocalState(0) {
+		c.sendAwareness()
+	}
 
 	writeErr := make(chan error, 1)
 	go func() { writeErr <- c.writePump(sessCtx) }()
@@ -428,7 +434,17 @@ func (c *Client) readPump(ctx context.Context, conn *websocket.Conn) error {
 				c.opts.OnError(err)
 			}
 		case syncpkg.MessageAwareness:
-			_, _ = c.awareness.Apply(frame.Payload, "remote")
+			// A removal of this client while its state is set (the server
+			// ending an older connection of it after this one began) makes
+			// Apply raise the local clock past it; the state goes out again
+			// at once at that clock, as y-websocket sends it, rather than at
+			// the next renewal.
+			sum, _ := c.awareness.Apply(frame.Payload, "remote")
+			if slices.Contains(sum.Removed, c.awareness.ClientID()) {
+				if _, ok := c.awareness.LocalState(); ok {
+					c.sendAwareness()
+				}
+			}
 		case syncpkg.MessageQueryAwareness:
 			c.sendAwareness()
 		case syncpkg.MessagePing:
@@ -549,10 +565,10 @@ func (c *Client) raiseLastSent(sv store.StateVector) {
 // writePump flushes local doc and awareness changes to the server
 // until the session ends. It also renews the local awareness state once
 // it is half the awareness timeout old, checking every tenth of the
-// timeout, as y-protocols does, so the server and peers keep an idle
-// client's presence.
+// timeout (at least every 100ms), as y-protocols does, so the server and
+// peers keep an idle client's presence.
 func (c *Client) writePump(ctx context.Context) error {
-	renew := time.NewTicker(c.opts.AwarenessTimeout / 10)
+	renew := time.NewTicker(max(c.opts.AwarenessTimeout/10, 100*time.Millisecond))
 	defer renew.Stop()
 	for {
 		select {

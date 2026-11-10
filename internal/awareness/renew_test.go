@@ -73,12 +73,13 @@ func TestForgetRemote(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var reported []uint64
+	var reported, changed []uint64
 	a.OnUpdate(func(s Summary, _ any) { reported = append(reported, s.Removed...) })
+	a.OnChange(func(s Summary, _ any) { changed = append(changed, s.Removed...) })
 
 	got := a.ForgetRemote()
-	if len(got) != 1 || got[0] != 2 || len(reported) != 1 || reported[0] != 2 {
-		t.Errorf("ForgetRemote returned %v and reported %v, want [2] for both", got, reported)
+	if len(got) != 1 || got[0] != 2 || len(reported) != 1 || reported[0] != 2 || len(changed) != 1 || changed[0] != 2 {
+		t.Errorf("ForgetRemote returned %v, OnUpdate removed %v, OnChange removed %v; want [2] for all", got, reported, changed)
 	}
 	if ids := a.ClientIDs(); len(ids) != 1 || ids[0] != 1 {
 		t.Errorf("clients after ForgetRemote %v, want [1]", ids)
