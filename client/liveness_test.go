@@ -446,7 +446,11 @@ func TestClient_BusyReaderNotCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	waitChan(t, "the first handshake", ev.up)
+	select { // the handshake's OnSynced sleeps 3 seconds first
+	case <-ev.up:
+	case <-time.After(15 * time.Second):
+		t.Fatal("no first handshake")
+	}
 	time.Sleep(2 * time.Second)
 	noDrop(t, ev, "while the client was busy")
 	if n := client.LiveChecks(c); n != 1 {
@@ -457,8 +461,10 @@ func TestClient_BusyReaderNotCut(t *testing.T) {
 // A write that the kernel stops taking is cut even while the client is
 // busy with what it read: the reply to the server's SyncStep1 is written
 // from the read loop, and on a path that died mid-reply it would hold the
-// loop, and with it the pause, for good. The client holds 8 MiB the server
-// lacks; the proxy forwards 256 KiB of it and stops reading.
+// loop, and with it the pause, for good. The client holds 32 MiB the
+// server lacks, more than the kernel buffers on either side absorb (Linux
+// loopback took all of 8 MiB); the proxy forwards 256 KiB of it and stops
+// reading. The cut must come from the stalled-write rule.
 func TestClient_StalledWriteCutWhileBusy(t *testing.T) {
 	srv := server.New(server.Options{OriginPatterns: []string{"*"}, ReadLimit: 64 << 20})
 	t.Cleanup(func() { _ = srv.Close(context.Background()) })
@@ -468,7 +474,7 @@ func TestClient_StalledWriteCutWhileBusy(t *testing.T) {
 	d := doc.NewDocWithOptions(doc.Options{ClientID: 93})
 	m := types.NewMap(d.Branch("settings"))
 	txn := d.WriteTxn()
-	m.Set(txn, "blob", []byte(strings.Repeat("x", bigBlob)))
+	m.Set(txn, "blob", []byte(strings.Repeat("x", 32<<20)))
 	txn.Commit()
 	ev := newSyncEvents()
 	opts := ev.options(proxy.url(), 2*time.Second, 93)
@@ -486,10 +492,89 @@ func TestClient_StalledWriteCutWhileBusy(t *testing.T) {
 		select {
 		case err := <-ev.errs:
 			if errors.Is(err, client.ErrServerSilent) {
+				if client.StallCuts(c) == 0 {
+					t.Fatal("cut, but not by the stalled-write rule: the kernel took the whole reply")
+				}
 				return
 			}
 		case <-deadline:
 			t.Fatal("a write stalled in the read loop was never cut")
 		}
+	}
+}
+
+// tlsHandshakes counts goroutines stuck in a TLS handshake.
+func tlsHandshakes() int {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	return strings.Count(string(buf[:n]), "crypto/tls.(*Conn).handshakeContext")
+}
+
+// A deprecated DialTLS that returns an unhandshaken *tls.Conn, against a
+// path that takes the TCP connection and never answers: every failed dial
+// left a goroutine and a socket in a handshake nobody could cancel, since
+// the wrapper handshook it with a context of its own. Now net/http
+// handshakes it inside the request, whose cancel closes it.
+func TestClient_DeprecatedDialTLSNoLeak(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var held []net.Conn
+	var mu sync.Mutex
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			held = append(held, c) // never read, never answered
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range held {
+			_ = c.Close()
+		}
+	})
+
+	dt := http.DefaultTransport.(*http.Transport)
+	saved := dt.DialTLS                                         //nolint:staticcheck // the deprecated dialer is what is tested
+	dt.DialTLS = func(network, addr string) (net.Conn, error) { //nolint:staticcheck
+		raw, err := net.Dial(network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return tls.Client(raw, &tls.Config{InsecureSkipVerify: true}), nil //nolint:gosec // never connects
+	}
+	t.Cleanup(func() { dt.DialTLS = saved }) //nolint:staticcheck
+
+	before := tlsHandshakes()
+	ev := newSyncEvents()
+	c, err := client.New(ev.options("wss://"+ln.Addr().String(), time.Second, 94))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ev.errs:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%d dial failures, want 3", i)
+		}
+	}
+	_ = c.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for tlsHandshakes() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d handshakes left after Close, %d before", tlsHandshakes(), before)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

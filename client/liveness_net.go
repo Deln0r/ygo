@@ -35,6 +35,9 @@ func (c *trackedConn) Read(p []byte) (int, error) {
 }
 
 func (c *trackedConn) Write(p []byte) (int, error) {
+	// Stamp before counting, so the check never sees a write in progress
+	// with the previous write's stamp.
+	c.l.lastWriteActivity.Store(c.l.now())
 	c.l.writing.Add(1)
 	defer c.l.writing.Add(-1)
 	total := 0
@@ -88,7 +91,10 @@ func track(t *http.Transport, l *liveness) {
 	}
 	// net/http handshakes a *tls.Conn from a custom TLS dialer itself and
 	// refuses an h2 one for a WebSocket upgrade; behind a trackedConn it
-	// sees neither, so the wrapper does both first.
+	// sees neither, so the wrapper does both first, bounded by the dial's
+	// context. The deprecated DialTLS has no context to bound a handshake
+	// with, so its connection is wrapped as it comes and handshakes on its
+	// first write, which the request's cancel can still end.
 	wrapTLS := func(ctx context.Context, nc net.Conn, err error) (net.Conn, error) {
 		if err != nil {
 			return nil, err
@@ -113,8 +119,7 @@ func track(t *http.Transport, l *liveness) {
 	}
 	if dial := t.DialTLS; dial != nil { //nolint:staticcheck
 		t.DialTLS = func(network, addr string) (net.Conn, error) { //nolint:staticcheck
-			nc, err := dial(network, addr)
-			return wrapTLS(context.Background(), nc, err)
+			return wrap(dial(network, addr))
 		}
 	}
 }
@@ -183,9 +188,11 @@ func (c *Client) watch(ctx context.Context, conn *websocket.Conn, l *liveness) b
 				ticksSincePing = -1
 				continue
 			}
-			// A write the kernel has taken nothing of for the whole
-			// timeout: the path is dead, whatever else is going on.
+			// A write of which the kernel took no 16 KiB chunk for the
+			// whole timeout, with nothing read for half of it: the path is
+			// dead, busy read loop or not.
 			if l.writing.Load() > 0 && time.Duration(now-l.lastWriteActivity.Load()) >= timeout {
+				c.stallCuts.Add(1)
 				_ = conn.CloseNow()
 				return true
 			}

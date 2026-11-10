@@ -102,8 +102,9 @@ type Options struct {
 	// WebSocket library closed the connection first. While the client is
 	// busy with a frame it read (a large update applying, a callback that
 	// blocks), the check waits, since what the server sent meanwhile lies
-	// unread; a write the kernel takes nothing of for the whole timeout
-	// drops the connection all the same.
+	// unread; a write of which the kernel takes no 16 KiB chunk for the
+	// whole timeout, with nothing read for half of it, drops the
+	// connection all the same.
 	//
 	// Progress is counted in bytes on the TCP connection, so a transfer
 	// slower than the timeout is not cut. On the write side it is the
@@ -172,9 +173,11 @@ type Client struct {
 	persistCount  int
 
 	// pongs counts the liveness check's pings that got their pong;
-	// liveChecks the sessions dialed with the check on.
+	// liveChecks the sessions dialed with the check on; stallCuts the
+	// connections it dropped for a write the kernel stopped taking.
 	pongs      atomic.Int64
 	liveChecks atomic.Int64
+	stallCuts  atomic.Int64
 }
 
 // defaultLivenessTimeout is y-websocket's messageReconnectTimeout. Below
