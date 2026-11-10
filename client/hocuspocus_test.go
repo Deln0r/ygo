@@ -38,6 +38,9 @@ type fakeHocus struct {
 	url    string
 	// afterSync, when set, runs once a connection's handshake is done.
 	afterSync func(conn *websocket.Conn)
+	// holdStatus, when set, delays the SyncStatus for an Update until it
+	// is closed.
+	holdStatus chan struct{}
 }
 
 func newFakeHocus(t *testing.T) *fakeHocus {
@@ -115,6 +118,9 @@ func (f *fakeHocus) serve(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				_ = encoding.ApplyUpdate(f.doc, fr.Payload)
+				if fr.SyncSub == syncpkg.SyncUpdate && f.holdStatus != nil {
+					<-f.holdStatus
+				}
 				f.send(ctx, conn, key, syncpkg.EncodeSyncStatus(true))
 				if fr.SyncSub == syncpkg.SyncStep2 && f.afterSync != nil {
 					f.afterSync(conn)
@@ -279,6 +285,8 @@ func TestHocus_OfflineEditsOnlyInTheReply(t *testing.T) {
 // its SyncStatus brings it back. Outside Hocuspocus mode it is 0.
 func TestHocus_Unsynced(t *testing.T) {
 	f := newFakeHocus(t)
+	release := make(chan struct{})
+	f.holdStatus = release
 	c, ev := hocusClient(t, f, nil, nil)
 	waitChan(t, "synced", ev.synced)
 	waitFor(t, "Unsynced 0", func() bool { return c.Unsynced() == 0 })
@@ -286,14 +294,16 @@ func TestHocus_Unsynced(t *testing.T) {
 	txn := c.Doc().WriteTxn()
 	m.Set(txn, "x", "1")
 	txn.Commit()
-	waitFor(t, "the update confirmed", func() bool {
+	waitFor(t, "the update sent and unconfirmed", func() bool {
 		for _, fr := range f.envelopes("doc") {
 			if fr.Type == syncpkg.MessageSync && fr.SyncSub == syncpkg.SyncUpdate {
-				return c.Unsynced() == 0
+				return c.Unsynced() == 1
 			}
 		}
 		return false
 	})
+	close(release)
+	waitFor(t, "the update confirmed", func() bool { return c.Unsynced() == 0 })
 
 	plain, err := client.New(client.Options{URL: "ws://127.0.0.1:1", DocName: "d"})
 	if err != nil {
@@ -370,8 +380,10 @@ func TestHocus_ServerCloseReconnects(t *testing.T) {
 }
 
 // Close tells the server the client is done with the document (the bare
-// CLOSE a provider sends), and the server's answer raises no error.
+// CLOSE a provider sends), and the server's answer raises no error, also
+// when it arrives before Close has cancelled the session (widened here).
 func TestHocus_CloseSendsClose(t *testing.T) {
+	t.Cleanup(client.SetAfterSendClose(func() { time.Sleep(100 * time.Millisecond) }))
 	f := newFakeHocus(t)
 	c, ev := hocusClient(t, f, nil, nil)
 	waitChan(t, "synced", ev.synced)
@@ -474,4 +486,34 @@ func TestHocus_Keepalive(t *testing.T) {
 	if n < 3 {
 		t.Errorf("%d keepalives in 1.2 s at a 200 ms interval", n)
 	}
+}
+
+// A token refresh the server asks for does not hold the read loop: here
+// TokenFunc waits on its context the second time, and the server closes
+// the socket meanwhile. The client must see the close and dial again;
+// the refresh's context ends with the connection.
+func TestHocus_TokenRefreshDoesNotBlockReads(t *testing.T) {
+	f := newFakeHocus(t)
+	var calls atomic.Int32
+	var refreshEnded atomic.Bool
+	f.afterSync = func(conn *websocket.Conn) {
+		if f.dials.Load() == 1 {
+			f.send(context.Background(), conn, "doc", []byte{0x02, 0x00})
+			time.Sleep(100 * time.Millisecond)
+			_ = conn.CloseNow()
+		}
+	}
+	_, ev := hocusClient(t, f, func(o *client.Options) {
+		o.TokenFunc = func(ctx context.Context) (string, error) {
+			if calls.Add(1) == 2 {
+				<-ctx.Done()
+				refreshEnded.Store(true)
+				return "", ctx.Err()
+			}
+			return "ok", nil
+		}
+	}, nil)
+	waitChan(t, "synced", ev.synced)
+	waitFor(t, "a second dial after the server closed", func() bool { return f.dials.Load() >= 2 })
+	waitFor(t, "the refresh's context ended", refreshEnded.Load)
 }

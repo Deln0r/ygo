@@ -108,3 +108,34 @@ func TestHocuspocus_AuthListener(t *testing.T) {
 	t.Cleanup(func() { _ = bad.Close() })
 	badRec.wait(t, "OnPermissionDenied", func() bool { return len(badRec.denied) > 0 && badRec.denied[0] == "bad-token" })
 }
+
+type closingAuth struct {
+	c      *Client
+	closed chan struct{}
+}
+
+func (a *closingAuth) OnAuthenticated(string) {}
+
+func (a *closingAuth) OnPermissionDenied(string) {
+	_ = a.c.Close()
+	close(a.closed)
+}
+
+// An app that closes the client when its token is refused can do it from
+// the AuthListener: Close waits for the client's goroutines, and the
+// listener does not run on them.
+func TestHocuspocus_CloseFromAuthListener(t *testing.T) {
+	url := authOnlyServer(t)
+	c := NewClient(url, "doc", NewDoc())
+	a := &closingAuth{c: c, closed: make(chan struct{})}
+	c.SetHocuspocus("bad")
+	c.SetAuthListener(a)
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close from OnPermissionDenied did not return")
+	}
+}

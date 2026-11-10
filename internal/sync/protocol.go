@@ -100,7 +100,7 @@ const (
 
 // AuthSubType discriminates the inner Auth-message variant inside a
 // MessageAuth envelope. Values match @hocuspocus/common auth.ts
-// AuthMessageType, the same in 2.15.3, 3.4.4 and 4.8.0. Before v1.34.0
+// AuthMessageType, the same in 2.15.3, 3.4.4 and 4.8.0. Before 1.36.0
 // ygo had them in the reverse order.
 //
 // Wire shape:

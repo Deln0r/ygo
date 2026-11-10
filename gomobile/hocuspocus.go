@@ -10,15 +10,16 @@ import (
 
 // AuthListener receives a Hocuspocus server's answer to the token. It is
 // separate from Listener so that existing Listener implementations keep
-// compiling; set it with Client.SetAuthListener. Called from background
-// goroutines.
+// compiling; set it with Client.SetAuthListener. Each call runs on a
+// goroutine of its own, so calling Close from it is safe; dispatch to
+// the main thread before touching UI.
 type AuthListener interface {
 	// OnAuthenticated fires when the server accepts the token, on every
 	// connect, with the scope it granted: "read-write" or "readonly".
 	OnAuthenticated(scope string)
 	// OnPermissionDenied fires when the server refuses the token, with
 	// its reason. The client tries again after at least 30 seconds with
-	// the token it then has (SetToken); call Close to stop.
+	// the token it then has (SetToken); call Close to stop (safe here).
 	OnPermissionDenied(reason string)
 }
 
@@ -106,11 +107,13 @@ func (c *Client) hocusOptions(opts *client.Options) {
 	if a == nil {
 		return
 	}
-	opts.OnAuthenticated = a.OnAuthenticated
+	// Off the client's goroutines: Close waits for those, and an app
+	// that closes on a refusal calls it from here.
+	opts.OnAuthenticated = func(scope string) { go a.OnAuthenticated(scope) }
 	onError := opts.OnError
 	opts.OnError = func(err error) {
 		if errors.Is(err, client.ErrPermissionDenied) {
-			a.OnPermissionDenied(strings.TrimPrefix(err.Error(), client.ErrPermissionDenied.Error()+": "))
+			go a.OnPermissionDenied(strings.TrimPrefix(err.Error(), client.ErrPermissionDenied.Error()+": "))
 		}
 		if onError != nil {
 			onError(err)

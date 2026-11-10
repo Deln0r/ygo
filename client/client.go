@@ -63,8 +63,10 @@ type Options struct {
 
 	// Token is the token a Hocuspocus server's onAuthenticate gets ("" by
 	// default, as providers send). TokenFunc, when set, is asked instead
-	// on every connect and whenever the server asks for the token again;
-	// an error from it ends that attempt.
+	// before every dial and whenever the server asks for the token again;
+	// an error from it ends that attempt. Its context ends when the client
+	// closes, and for a refresh the server asked for, when the connection
+	// does.
 	Token     string
 	TokenFunc func(ctx context.Context) (string, error)
 
@@ -97,6 +99,9 @@ type Options struct {
 
 	// OnError observes non-fatal connection errors (dial failures,
 	// dropped connections). The client keeps reconnecting regardless.
+	// It runs on the client's goroutines: keep it fast, and do not call
+	// Close from it directly (Close waits for those goroutines); use
+	// go c.Close().
 	//
 	// OnError and OnSynced may be invoked concurrently from different
 	// goroutines (e.g. a local-store write failure overlapping a dial
@@ -198,9 +203,8 @@ type Client struct {
 	lastPersisted store.StateVector
 	persistCount  int
 
-	// Hocuspocus mode: the current session's state, the granted scope,
+	// Hocuspocus mode: the granted scope,
 	// the unconfirmed sync messages, and when the client last wrote.
-	hp        *hpSession
 	scope     string
 	unsynced  atomic.Int64
 	base      time.Time
@@ -393,6 +397,9 @@ func (c *Client) Close() error {
 	}
 	if c.opts.Hocuspocus {
 		c.sendClose()
+		if afterSendClose != nil {
+			afterSendClose()
+		}
 	}
 	cancel()
 	<-done
@@ -447,7 +454,9 @@ func (c *Client) run(ctx context.Context) {
 		if opened {
 			c.awareness.ForgetRemote()
 		}
-		if ctx.Err() != nil {
+		// Close may not have cancelled ctx yet (it sends the Hocuspocus
+		// CLOSE first); the teardown's errors are not the user's either way.
+		if ctx.Err() != nil || c.isClosed() {
 			return
 		}
 		if err != nil && c.opts.OnError != nil {
@@ -476,8 +485,14 @@ func (c *Client) run(ctx context.Context) {
 // whether the dial succeeded.
 func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	dialURL := strings.TrimRight(c.opts.URL, "/") + "/" + c.opts.DocName
+	var tok string
 	if c.opts.Hocuspocus {
 		dialURL = strings.TrimRight(c.opts.URL, "/")
+		// The token is asked for before the dial, so a slow TokenFunc
+		// holds no connection open with nothing read from it.
+		if tok, err = c.token(ctx); err != nil {
+			return false, fmt.Errorf("client: TokenFunc: %w", err)
+		}
 	}
 	conn, live, err := c.dial(ctx, dialURL)
 	if err != nil {
@@ -495,7 +510,6 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	c.mu.Lock()
 	c.conn = conn
 	c.connCtx = sessCtx
-	c.hp = hp
 	c.mu.Unlock()
 	// Clear the per-session conn when the session ends, so a stale closed
 	// conn is never visible between sessions (write() then guards
@@ -504,13 +518,12 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 		c.mu.Lock()
 		c.conn = nil
 		c.connCtx = nil
-		c.hp = nil
 		c.scope = ""
 		c.mu.Unlock()
 	}()
 
 	if hp != nil {
-		if err := c.hocusHandshake(sessCtx); err != nil {
+		if err := c.hocusHandshake(tok); err != nil {
 			return true, err
 		}
 	} else {
@@ -819,6 +832,12 @@ func (c *Client) write(envelope []byte) error {
 // isEmptyUpdate reports whether a V1 update holds no structs and no
 // deletions (00 00).
 func isEmptyUpdate(u []byte) bool { return len(u) == 2 && u[0] == 0 && u[1] == 0 }
+
+func (c *Client) isClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
 
 func (c *Client) setSynced(v bool) {
 	c.mu.Lock()

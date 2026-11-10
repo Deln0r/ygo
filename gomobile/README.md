@@ -54,7 +54,8 @@ c.Connect()
 next token request. `Scope()` is `"read-write"` or `"readonly"` once the
 server accepted the token; `Unsynced()` is the number of updates the
 server has not yet confirmed. After a refused token the client tries
-again no sooner than 30 seconds later; call `Close` to stop.
+again no sooner than 30 seconds later; call `Close` to stop, which is
+safe from the `AuthListener` (its calls run on goroutines of their own).
 `AuthListener` is separate from `Listener`, so existing listeners keep
 compiling.
 

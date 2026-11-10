@@ -17,8 +17,9 @@ import (
 var (
 	// ErrPermissionDenied: the server's onAuthenticate refused the token.
 	// The client closes the connection and dials again after at least
-	// deniedBackoff, asking TokenFunc for a token again; call Close from
-	// OnError to stop.
+	// deniedBackoff, asking TokenFunc for a token again. To stop, call
+	// Close from another goroutine (go c.Close()): Close waits for the
+	// goroutine that runs OnError.
 	ErrPermissionDenied = errors.New("client: permission denied")
 
 	// ErrDocumentClosed: the server closed the document on this
@@ -35,6 +36,10 @@ var (
 // refused token does not run the server's onAuthenticate at the reconnect
 // rate.
 var deniedBackoff = 30 * time.Second
+
+// afterSendClose, set by tests, runs between Close's CLOSE and the
+// cancel, to widen the window in which the server's answer arrives.
+var afterSendClose func()
 
 // hpSession is one connection's Hocuspocus state.
 type hpSession struct {
@@ -99,20 +104,12 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	return c.opts.Token, nil
 }
 
-func (c *Client) sendToken(ctx context.Context) error {
-	tok, err := c.token(ctx)
-	if err != nil {
-		return fmt.Errorf("client: TokenFunc: %w", err)
-	}
-	return c.write(syncpkg.EncodeAuthToken(tok))
-}
-
-// hocusHandshake opens a Hocuspocus session: Auth with the token, then
-// SyncStep1, then the awareness state if one is set, as providers send
-// them. No QueryAwareness: no server answers it.
-func (c *Client) hocusHandshake(ctx context.Context) error {
+// hocusHandshake opens a Hocuspocus session: Auth with the token (asked
+// before the dial), then SyncStep1, then the awareness state if one is
+// set, as providers send them. No QueryAwareness: no server answers it.
+func (c *Client) hocusHandshake(tok string) error {
 	c.unsynced.Store(1)
-	if err := c.sendToken(ctx); err != nil {
+	if err := c.write(syncpkg.EncodeAuthToken(tok)); err != nil {
 		return err
 	}
 	if err := c.sendStep1(); err != nil {
@@ -142,14 +139,22 @@ func (c *Client) handleHocus(s *hpSession, frame *syncpkg.Frame) bool {
 			s.fail(fmt.Errorf("%w: %s", ErrPermissionDenied, frame.Payload))
 			c.dropConn()
 		case syncpkg.AuthToken:
-			// The server asks for the token again (servers 3 and 4).
+			// The server asks for the token again (servers 3 and 4). The
+			// refresh runs off the read loop, so the loop still sees the
+			// connection close, which ends the refresh's context.
 			c.mu.Lock()
 			ctx := c.connCtx
 			c.mu.Unlock()
 			if ctx != nil {
-				if err := c.sendToken(ctx); err != nil && c.opts.OnError != nil {
-					c.opts.OnError(err)
-				}
+				go func() {
+					tok, err := c.token(ctx)
+					if err == nil {
+						err = c.write(syncpkg.EncodeAuthToken(tok))
+					}
+					if err != nil && ctx.Err() == nil && c.opts.OnError != nil {
+						c.opts.OnError(fmt.Errorf("client: token refresh: %w", err))
+					}
+				}()
 			}
 		}
 		return true

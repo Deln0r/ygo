@@ -14,6 +14,13 @@ func StallCuts(c *Client) int64 { return c.stallCuts.Load() }
 // LivenessTimeoutOf reports the timeout the client runs with.
 func LivenessTimeoutOf(c *Client) time.Duration { return c.opts.LivenessTimeout }
 
+// SetAfterSendClose sets a func Close runs between its CLOSE and the
+// cancel, and returns a func that clears it.
+func SetAfterSendClose(f func()) func() {
+	afterSendClose = f
+	return func() { afterSendClose = nil }
+}
+
 // SetDeniedBackoff sets the wait after a permission denial and returns
 // a func that restores it.
 func SetDeniedBackoff(d time.Duration) func() {
