@@ -282,6 +282,27 @@ func (a *Awareness) SetLocalState(jsonState []byte) {
 	a.fireUpdate(summary, originLocal)
 }
 
+// RenewLocalState re-announces the local state when it was last set or
+// renewed at least olderThan ago: the clock bumps and OnUpdate fires, as
+// y-protocols' check does when it sets the same state again (OnChange does
+// not fire, the state is equal). It reports whether it renewed; a removed
+// or never-set state is left alone. The check and the bump are one step,
+// so a RemoveLocalState racing it is never undone.
+func (a *Awareness) RenewLocalState(olderThan time.Duration) bool {
+	a.mu.Lock()
+	s, ok := a.states[a.clientID]
+	now := a.now()
+	if !ok || s.Data == nil || now.Sub(s.LastUpdated) < olderThan {
+		a.mu.Unlock()
+		return false
+	}
+	s.Clock++
+	s.LastUpdated = now
+	a.mu.Unlock()
+	a.fireUpdate(Summary{Updated: []uint64{a.clientID}}, originLocal)
+	return true
+}
+
 // SetLocalStateJSON marshals v with encoding/json and forwards to
 // SetLocalState. Returns the marshal error if any; the awareness
 // state is unchanged on error. Pass nil to remove the local state.
@@ -448,6 +469,36 @@ func (a *Awareness) SweepOutdated(threshold time.Duration) []uint64 {
 	summary := Summary{Removed: removed}
 	a.fireChange(summary, originTimeout)
 	a.fireUpdate(summary, originTimeout)
+	return removed
+}
+
+// ForgetRemote drops every client but the local one, as y-websocket does
+// when its connection closes, and forgets their clocks too, so the states
+// the next connection brings are taken as new: a peer still online comes
+// back at the clock it had, which a kept tombstone would refuse until its
+// next renewal. OnChange and OnUpdate report the clients that had a
+// state as removed. It returns them.
+func (a *Awareness) ForgetRemote() []uint64 {
+	a.mu.Lock()
+	var removed []uint64
+	for _, id := range a.live {
+		if id != a.clientID {
+			removed = append(removed, id)
+		}
+	}
+	for id := range a.states {
+		if id != a.clientID {
+			delete(a.states, id)
+			a.forget(id)
+		}
+	}
+	a.mu.Unlock()
+	if len(removed) == 0 {
+		return nil
+	}
+	summary := Summary{Removed: removed}
+	a.fireChange(summary, originLocal)
+	a.fireUpdate(summary, originLocal)
 	return removed
 }
 

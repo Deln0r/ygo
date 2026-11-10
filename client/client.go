@@ -80,6 +80,12 @@ type Options struct {
 	MinBackoff time.Duration
 	MaxBackoff time.Duration
 
+	// AwarenessTimeout is how long peers keep this client's presence
+	// without hearing from it. The client renews its state at half of
+	// this, as y-protocols does. Default 30s, the y-protocols value; set it
+	// to the server's timeout when that is shorter.
+	AwarenessTimeout time.Duration
+
 	// LocalStore, when set, makes the client offline-first: on Connect
 	// the document loads its persisted state from the store (so it is
 	// usable before any network), every subsequent change (local edit
@@ -138,6 +144,9 @@ func New(opts Options) (*Client, error) {
 	}
 	if opts.MaxBackoff <= 0 {
 		opts.MaxBackoff = 10 * time.Second
+	}
+	if opts.AwarenessTimeout <= 0 {
+		opts.AwarenessTimeout = awareness.DefaultTimeout
 	}
 	d := opts.Doc
 	if d == nil {
@@ -367,20 +376,28 @@ func (c *Client) session(ctx context.Context) error {
 	c.mu.Unlock()
 	// Clear the per-session conn when the session ends, so a stale closed
 	// conn is never visible between sessions (write() then guards
-	// conn==nil as "not connected").
+	// conn==nil as "not connected"). Peers' presence goes with it, as
+	// y-websocket drops it: the next session's handshake brings the
+	// states of the peers online then, and a peer that left in between
+	// would otherwise stay.
 	defer func() {
 		c.mu.Lock()
 		c.conn = nil
 		c.connCtx = nil
 		c.mu.Unlock()
+		c.awareness.ForgetRemote()
 	}()
 
 	// Client side of the y-protocols handshake: announce our state
-	// vector, ask for awareness, and push our awareness state.
+	// vector, ask for awareness, and push our awareness state. The state
+	// goes out one clock up: the server keeps the clock of the state it
+	// removed when the last session ended, and ignores a state at that
+	// clock.
 	if err := c.sendStep1(); err != nil {
 		return err
 	}
 	_ = c.write(syncpkg.EncodeQueryAwareness())
+	c.awareness.RenewLocalState(0)
 	c.sendAwareness()
 
 	writeErr := make(chan error, 1)
@@ -530,12 +547,21 @@ func (c *Client) raiseLastSent(sv store.StateVector) {
 }
 
 // writePump flushes local doc and awareness changes to the server
-// until the session ends.
+// until the session ends. It also renews the local awareness state once
+// it is half the awareness timeout old, checking every tenth of the
+// timeout, as y-protocols does, so the server and peers keep an idle
+// client's presence.
 func (c *Client) writePump(ctx context.Context) error {
+	renew := time.NewTicker(c.opts.AwarenessTimeout / 10)
+	defer renew.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-renew.C:
+			if c.awareness.RenewLocalState(c.opts.AwarenessTimeout / 2) {
+				c.sendAwareness()
+			}
 		case <-c.dirtyDoc:
 			// lastSent is read inside the transaction (see apply).
 			rtxn := c.doc.ReadTxn()
