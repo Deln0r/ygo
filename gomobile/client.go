@@ -30,8 +30,8 @@ type Listener interface {
 }
 
 // Client is the gomobile-bindable sync provider: a live WebSocket
-// session syncing one Doc with a yserve / Hocuspocus / y-websocket
-// server. Construct with NewClient, optionally SetListener, start
+// session syncing one Doc with a yserve or y-websocket server.
+// Construct with NewClient, optionally SetListener, start
 // with Connect, stop with Close. The native app edits the Doc through
 // Text / Map wrappers; sync happens in the background.
 type Client struct {

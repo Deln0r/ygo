@@ -71,7 +71,7 @@ func TestMobile_Collections_RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	fragB := db.XmlFragment("doc")
-	waitFor(t, "b sees xml text", func() bool { return strings.Contains(fragB.ToString(), "hello") })
+	waitFor(t, "b sees xml text", func() bool { return strings.Contains(fragB.String(), "hello") })
 	waitFor(t, "b sees xml attr", func() bool {
 		eb := fragB.GetElement(0)
 		return eb != nil && eb.GetAttribute("align") == "center"

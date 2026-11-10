@@ -146,7 +146,7 @@ tree of collaborative objects.
 ProseMirror and Tiptap map onto. `XmlElement` carries a node name,
 string attributes (`SetAttribute` / `GetAttribute` / `AttributesJSON`),
 and ordered children; `XmlText` is a rich-text leaf whose `Text()`
-handle exposes the full `ApplyDelta` / `Format` surface. `ToString`
+handle exposes the full `ApplyDelta` / `Format` surface. `String`
 renders the subtree as HTML-like markup:
 
 ```go
@@ -154,7 +154,7 @@ frag := doc.XmlFragment("prose")
 p := frag.InsertElement(0, "paragraph")
 p.SetAttribute("align", "center")
 p.InsertText(0).Text().InsertAt(0, "hello")
-// frag.ToString() == `<paragraph align="center">hello</paragraph>`
+// frag.String() == `<paragraph align="center">hello</paragraph>`
 ```
 
 ## Collaborator presence and live cursors
@@ -220,14 +220,15 @@ Drag the `.xcframework` into Xcode under "Frameworks, Libraries,
 and Embedded Content"; the auto-generated Swift bridging header
 exposes `GomobileDoc`, `GomobileAwareness` and helpers like
 `GomobileNewDoc`, `GomobileNewDocWithClientID`. Last built on
-Xcode 26.5, Go 1.26.3, macOS 26 (Apple Silicon, 8 Nov 2026).
+Xcode 26.5, Go 1.26.3, macOS 26 (Apple Silicon, 10 Nov 2026).
 
 ## Android AAR build
 
-**Broken since v1.8.0.** The generated Java for `XmlFragment` and
-`XmlElement` defines `toString()` twice, so `javac` fails. v1.7.0 is the
-last version that builds an `.aar`. The steps and sizes below are from
-before the break.
+CI runs this bind on every push to `main` and every pull request. From v1.8.0 to v1.31.0 it failed:
+`XmlFragment.ToString` and `XmlElement.ToString` became a second
+`toString()` in the generated Java. Since v1.32.0 the methods are
+`String` (Swift `string()`, Kotlin and Java `toString()`), as on `Text`
+and `XmlText`.
 
 ```bash
 # One-time: install NDK + at least one SDK platform via sdkmanager.
@@ -249,15 +250,9 @@ $(go env GOPATH)/bin/gomobile bind \
     github.com/Deln0r/ygo/gomobile
 ```
 
-Produces an `.aar` (Android archive) ~8.4 MB containing native
-JNI libraries for all four standard Android architectures:
-
-| Slice | Size |
-|---|---|
-| `jni/arm64-v8a/libgojni.so` (modern devices) | 3.8 MB |
-| `jni/armeabi-v7a/libgojni.so` (older 32-bit) | 3.7 MB |
-| `jni/x86_64/libgojni.so` (emulator) | 4.1 MB |
-| `jni/x86/libgojni.so` (older emulator) | 3.7 MB |
+Produces an `.aar` (Android archive) containing native JNI libraries
+for all four standard Android architectures: `arm64-v8a` (modern
+devices), `armeabi-v7a` (older 32-bit), `x86_64` and `x86` (emulators).
 
 Plus `classes.jar` exposing the Java surface:
 - `gomobile.Doc` — the CRDT document handle (NewDoc / ApplyUpdate
@@ -271,8 +266,8 @@ Plus `classes.jar` exposing the Java surface:
 Drop the `.aar` into your Android Studio project's
 `app/libs/` directory, add `implementation files('libs/ygo.aar')`
 to `build.gradle`, and `import gomobile.Doc;` from Kotlin or
-Java. Verified on Android Studio Ladybug + NDK 27.0 + Go 1.26 /
-macOS 26 Apple Silicon (May 2026).
+Java. Last built by hand on NDK 27.0, the Android Studio JBR (Java
+21) and Go 1.26.3 on macOS 26 (10 Nov 2026).
 
 **NB on `androidapi 21`**: NDK 27 dropped support for API levels
 below 21 (Android 5.0 Lollipop). Without the explicit

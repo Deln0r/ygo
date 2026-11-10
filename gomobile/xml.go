@@ -92,8 +92,11 @@ func (f *XmlFragment) DeleteAt(index, length int) {
 	f.inner.Delete(txn, uint64(index), uint64(length))
 }
 
-// ToString renders the fragment and its subtree as HTML-like markup.
-func (f *XmlFragment) ToString() string {
+// String renders the fragment and its subtree as HTML-like markup
+// (Swift string(), Kotlin and Java toString()). It was ToString before
+// v1.32.0: gobind turned that into a second toString() in Java, and the
+// Android binding did not compile.
+func (f *XmlFragment) String() string {
 	rtxn := f.d.inner.ReadTxn()
 	defer rtxn.Close()
 	return f.inner.ToString()
@@ -201,8 +204,10 @@ func (e *XmlElement) DeleteAt(index, length int) {
 	e.inner.Delete(txn, uint64(index), uint64(length))
 }
 
-// ToString renders the element and its subtree as HTML-like markup.
-func (e *XmlElement) ToString() string {
+// String renders the element and its subtree as HTML-like markup
+// (Swift string(), Kotlin and Java toString()). It was ToString before
+// v1.32.0, for the reason given on XmlFragment.String.
+func (e *XmlElement) String() string {
 	rtxn := e.d.inner.ReadTxn()
 	defer rtxn.Close()
 	return e.inner.ToString()

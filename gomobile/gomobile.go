@@ -41,10 +41,10 @@
 //     via ApplyUpdateWithOrigin), receive each transaction's update
 //     through ObserveUpdates, bring your own transport.
 //
-// gomobile bind verification: actual `gomobile bind -target=ios`
-// or `-target=android` requires the corresponding toolchain (Xcode
-// / Android NDK) and is not run in CI. The package compiles under
-// pure Go to guarantee no inadvertent CGO leak via dependencies.
+// gomobile bind verification: CI runs `gomobile bind -target=android`
+// on every push to main and every pull request. `-target=ios` needs
+// Xcode and is run by hand. The package also compiles as pure Go, to
+// guarantee no inadvertent CGO leak via dependencies.
 package gomobile
 
 import (
