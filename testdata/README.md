@@ -6,6 +6,7 @@ ygo's tests assert byte-for-byte compatibility against these.
 ## Layout
 
 - `lib0.json` — fixture cases for `internal/lib0` varint/varstring/varbuffer/float encoding.
+- `any-value-fixtures.json` — documents from yjs holding undefined, BigInt and -0 (`gen/gen-any-values.mjs`); values are stored in a tagged form, since JSON cannot hold them.
 - (planned) `yjs/*.bin` — captured V1 update streams for `Y.Map`, `Y.Array`, `Y.Text` operation sequences.
 - (planned) `yjs/*.json` — sidecar metadata describing each `.bin` (operation log, expected final state).
 

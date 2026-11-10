@@ -36,6 +36,7 @@ const feature = [
   "testdata/relpos-fixtures.json",
   "testdata/observer-fixtures.json",
   "testdata/rich-text-fixtures.json",
+  "testdata/any-value-fixtures.json",
 ].reduce((n, f) => n + count(f), 0);
 const total = v1Forward + v2Forward + reverse + feature;
 

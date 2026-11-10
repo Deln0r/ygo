@@ -129,6 +129,29 @@ try {
     check(`${name}: rooms that differ before a slash stay apart`, text(y) === '')
   }
 
+  // Values lib0 keeps and ygo changed before v1.33.0: a late joiner reads
+  // them from the server's state, not from the writer's bytes.
+  {
+    const w = connect(Provider3, server.url, 'any-values')
+    await synced(w)
+    const wm = w.doc.getMap('m')
+    w.doc.transact(() => {
+      wm.set('big', 2n ** 53n + 1n)
+      wm.set('undef', undefined)
+      wm.set('negzero', -0)
+      wm.set('obj', { a: undefined, b: 5n })
+    })
+    await sleep(300)
+    const late = connect(Provider3, server.url, 'any-values')
+    await waitFor(() => late.doc.getMap('m').has('obj'))
+    const lm = late.doc.getMap('m')
+    check('a late joiner reads a BigInt as a BigInt, every digit', lm.get('big') === 2n ** 53n + 1n)
+    check('a late joiner reads undefined as undefined', lm.has('undef') && lm.get('undef') === undefined)
+    check('a late joiner reads -0 as -0', Object.is(lm.get('negzero'), -0))
+    const obj = lm.get('obj')
+    check('a late joiner reads undefined and BigInt inside an object', obj !== undefined && 'a' in obj && obj.a === undefined && obj.b === 5n)
+  }
+
   while (open.length) open.pop().close()
   await server.stop()
   server = await startServer(['-store', store])
