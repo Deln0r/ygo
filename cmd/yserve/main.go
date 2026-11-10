@@ -1,19 +1,18 @@
-// Command yserve is a self-hosted Yjs sync server in a single static
-// binary: a drop-in replacement for a Hocuspocus deployment with no
-// Node runtime, no Redis, and no CGO.
+// Command yserve is a self-hosted Yjs sync server in one binary, with
+// no Node runtime and no Redis; built with CGO_ENABLED=0 it is fully
+// static.
 //
-// It speaks the Hocuspocus message envelope (Sync, Awareness,
-// QueryAwareness, Auth, Stateless, BroadcastStateless, Close,
-// SyncStatus), so existing @hocuspocus/provider and y-websocket
-// clients connect unchanged. SQLite persistence and periodic document
-// versioning are built in.
+// It speaks the y-websocket protocol, so y-websocket clients connect
+// unchanged. @hocuspocus/provider cannot connect: Hocuspocus prefixes
+// every frame with the document name, which yserve does not parse.
+// SQLite persistence and periodic document versioning are built in.
 //
 // Usage:
 //
 //	yserve [-addr :8080] [-store path/to/ygo.db]
 //	       [-version-interval 10m] [-keep-versions 10]
 //	       [-read-limit BYTES] [-awareness-timeout 30s]
-//	       [-max-awareness-clients 4096]
+//	       [-max-awareness-clients 4096] [-path-prefix /]
 //
 // Without -store the server runs purely in-memory; documents are lost
 // when their last connection disconnects. With -store every applied
@@ -26,15 +25,17 @@
 // Versions survive log compaction and can be listed, loaded, and
 // restored programmatically via the persist package.
 //
-// -read-limit raises the maximum WebSocket frame size the server will
-// read (default 32 KiB); raise it for large documents whose sync frame
-// exceeds the default, or pass -1 for unlimited. -awareness-timeout and
+// -read-limit sets the maximum WebSocket message the server will read
+// (default 4 MiB); raise it for documents whose sync message exceeds the
+// default, or pass -1 for unlimited. -awareness-timeout and
 // -max-awareness-clients tune the presence layer's silent-client
 // eviction window and per-room client cap.
 //
-// Mount point: documents are addressed by the URL path. A client
-// connecting to ws://host:8080/my-doc operates on docName "my-doc",
-// matching y-websocket's convention.
+// Mount point: documents are addressed by the URL path, every segment
+// kept. A client connecting to ws://host:8080/team-a/doc operates on
+// docName "team-a/doc", as with y-websocket's reference server. Behind a
+// proxy that forwards a path prefix, pass it as -path-prefix: with
+// -path-prefix /ws/, ws://host/ws/team-a/doc is "team-a/doc" again.
 package main
 
 import (
@@ -44,6 +45,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strings"
 	"syscall"
 	"time"
 
@@ -57,7 +60,8 @@ func main() {
 	storePath := flag.String("store", "", "SQLite database path for persistence (empty = in-memory)")
 	versionInterval := flag.Duration("version-interval", 0, "capture a version of each changed document at this interval (0 = off; requires -store)")
 	keepVersions := flag.Int("keep-versions", 10, "keep at most N versions per document when auto-versioning (0 = keep all)")
-	readLimit := flag.Int64("read-limit", 0, "max WebSocket message size in bytes per client frame (0 = 32768 default; -1 = unlimited)")
+	readLimit := flag.Int64("read-limit", 0, "max WebSocket message size in bytes per client frame (0 = 4 MiB default; -1 = unlimited)")
+	pathPrefix := flag.String("path-prefix", "/", "URL path the documents live under; the rest of the path is the document name")
 	awarenessTimeout := flag.Duration("awareness-timeout", 0, "evict a presence entry after it is silent this long (0 = 30s default)")
 	maxAwarenessClients := flag.Int("max-awareness-clients", 0, "cap distinct presence clients per room (0 = 4096 default; -1 = unlimited)")
 	maxConnsPerDoc := flag.Int("max-conns-per-doc", 0, "cap simultaneous WebSocket connections per document (0 = 4096 default; -1 = unlimited)")
@@ -103,9 +107,23 @@ func main() {
 		MaxSendQueueBytes:   *maxSendQueueBytes,
 	})
 
+	// At the root the handler serves every path itself (the whole path is
+	// the document name); under a prefix a ServeMux strips it, and the
+	// ServeMux redirects paths with "//" or dot segments.
+	trimmed := "/" + strings.Trim(*pathPrefix, "/")
+	if strings.ContainsAny(*pathPrefix, "{} \t") || path.Clean(trimmed) != trimmed {
+		log.Fatalf("yserve: -path-prefix %q: give a plain path such as /ws/, without spaces, braces, // or dot segments", *pathPrefix)
+	}
+	handler := srv.Handler()
+	if trimmed != "/" {
+		mux := http.NewServeMux()
+		mux.Handle(trimmed+"/", srv.Handler())
+		handler = mux
+	}
+
 	httpSrv := &http.Server{
 		Addr:    *addr,
-		Handler: srv.Handler(),
+		Handler: handler,
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.

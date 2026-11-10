@@ -1,21 +1,22 @@
-// Package server implements the y-websocket / Hocuspocus-compatible
-// WebSocket sync server for ygo documents.
+// Package server implements a WebSocket sync server for ygo documents
+// that speaks the y-websocket protocol.
 //
 // The server exposes an http.Handler that adopters mount on their
 // own http.ServeMux at any path prefix. Per port-note §"Go
 // translation choices" — every adopter already has an HTTP server,
-// so we layer on top rather than impose our own runtime. A 30-line
-// cmd/ygo-server/main.go binary wraps this for stand-alone use.
+// so we layer on top rather than impose our own runtime. cmd/yserve
+// wraps this for stand-alone use.
 //
-// Wire format compatibility: the bare y-websocket subset of the
-// Hocuspocus envelope (tags 0=Sync, 1=Awareness, 3=QueryAwareness).
-// Auth (tag 2), Stateless (5/6), Close (7), SyncStatus (8) are
-// silently ignored — see docs/tech-debt.md. The Sync subset is
-// sufficient for full interop with y-websocket clients and the
-// Sync+Awareness subset of Hocuspocus clients.
+// Wire format: y-websocket frames, a message type followed by its
+// payload (0=Sync, 1=Awareness, 3=QueryAwareness). The server also
+// handles Hocuspocus's message types (Auth, Stateless,
+// BroadcastStateless, Close, SyncStatus) on the same frames, but
+// Hocuspocus clients prefix every frame with the document name, which
+// this server does not parse, so they cannot connect.
 //
-// Per-document state lives in a map keyed by docName (the last
-// path segment of the WS URL). Documents are loaded lazily on the
+// Per-document state lives in a map keyed by docName (by default the
+// URL path below the mux pattern the handler is mounted on; see
+// Options.DocNameFn). Documents are loaded lazily on the
 // first connection and evicted after the last connection closes (or,
 // with Options.DocIdleTimeout, after the idle window lapses);
 // if a persist.Store is configured, every applied update is
@@ -30,6 +31,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -49,8 +51,8 @@ import (
 )
 
 // Options configures a Server. The zero value is valid: in-memory
-// state only, no persistence, no auth, docName extracted as the
-// last URL path segment.
+// state only, no persistence, no auth, docName taken from the URL path
+// (see DocNameFn).
 type Options struct {
 	// Store optionally persists every applied update keyed by
 	// docName. When set, new documents load their history on first
@@ -59,10 +61,19 @@ type Options struct {
 	// disconnect.
 	Store persist.Store
 
-	// DocNameFn extracts the docName from the WS upgrade request.
-	// Defaults to last-path-segment, mirroring y-websocket's
-	// req.url.slice(1).split('?')[0] rule (port-note §3). Override
-	// when mounting on a complex URL scheme.
+	// DocNameFn extracts the docName from the WS upgrade request. The
+	// default is the whole URL path below the ServeMux pattern the
+	// handler is mounted on, slashes included: mounted at "/collab/",
+	// "/collab/team-a/doc" is "team-a/doc". Without a pattern it is the
+	// whole path without its leading slash, as y-websocket's reference
+	// server takes req.url.slice(1). Only net/http's ServeMux records the
+	// pattern (r.Pattern, not under GODEBUG=httpmuxgo121=1). Behind
+	// another router or a proxy that keeps a prefix, mount on a ServeMux
+	// at that prefix or strip it here, e.g.
+	//
+	//	DocNameFn: func(r *http.Request) string {
+	//		return strings.TrimPrefix(r.URL.Path, "/collab/")
+	//	},
 	DocNameFn func(r *http.Request) string
 
 	// OriginPatterns lists the allowed Origin headers for CORS-
@@ -73,7 +84,11 @@ type Options struct {
 	// AcceptOptions.
 	OriginPatterns []string
 
-	// OnAuthenticate is the Hocuspocus auth callback. When set,
+	// OnAuthenticate handles Hocuspocus's Auth message type, carried on
+	// y-websocket frames without Hocuspocus's document-name prefix. No
+	// stock client sends it: y-websocket has no auth message, and
+	// @hocuspocus/provider cannot connect to this server. To check a
+	// stock client, inspect the upgrade request in OnConnect. When set,
 	// the server expects every client to send a MessageAuth(Token)
 	// envelope shortly after connecting; the callback receives the
 	// docName + token and returns nil to accept or error to deny.
@@ -82,11 +97,11 @@ type Options struct {
 	//
 	// When nil (the bare y-websocket default), MessageAuth tokens
 	// are accepted silently — the server responds with
-	// AuthAuthenticated so Hocuspocus clients flip their internal
-	// "authenticated" flag and proceed.
+	// AuthAuthenticated, so a client that waits for it can proceed.
 	OnAuthenticate syncpkg.AuthHandler
 
-	// OnStateless is the Hocuspocus stateless-channel callback.
+	// OnStateless handles Hocuspocus's Stateless and BroadcastStateless
+	// message types, on the same frames as OnAuthenticate.
 	// Receives docName + payload string for both MessageStateless
 	// and MessageBroadcastStateless envelopes. Long-running work
 	// should be dispatched off-thread — this runs on the conn's
@@ -227,10 +242,11 @@ type Options struct {
 	MaxForeignAwarenessClients int
 
 	// ReadLimit sets the maximum WebSocket message size in bytes that
-	// the server will read from a single client frame. Defaults to
-	// coder/websocket's built-in 32 768-byte limit when zero. Raise
-	// this for large collaborative documents (e.g. 128 << 20 for
-	// 128 MiB). Set to -1 for unlimited.
+	// the server will read from a single client frame. Zero selects
+	// 4 MiB. A larger message closes the connection with 1009, and a
+	// client that resends it on reconnect never gets through, so raise
+	// this above the largest document a client may send in one sync
+	// (e.g. 128 << 20 for 128 MiB). Set to -1 for unlimited.
 	ReadLimit int64
 
 	// WriteTimeout bounds one write to one peer, done by that connection's
@@ -417,6 +433,11 @@ const defaultWriteTimeout = 10 * time.Second
 const (
 	defaultMaxSendQueue      = 4096
 	defaultMaxSendQueueBytes = 16 << 20
+
+	// defaultReadLimit is the per-message read limit when
+	// Options.ReadLimit is zero. Four times it is the send queue's byte
+	// default, so the two defaults stay in step.
+	defaultReadLimit = 4 << 20
 )
 
 // Server is the http.Handler implementation. Construct with New
@@ -780,13 +801,42 @@ func (s *Server) maxConns() int {
 	return s.opts.MaxConns
 }
 
-// defaultDocName implements the y-websocket path-strip convention.
+// defaultDocName returns the URL path below the ServeMux pattern the
+// request matched, or the whole path without its leading slash when
+// there is no pattern or the path does not start with it (the handler
+// used directly, or behind http.StripPrefix). It keeps every remaining
+// segment: dropping one would put the rooms "team-a/doc" and
+// "team-b/doc" in one document.
 func defaultDocName(r *http.Request) string {
-	p := strings.TrimPrefix(r.URL.Path, "/")
-	if i := strings.Index(p, "/"); i >= 0 {
-		p = p[i+1:]
+	p := r.URL.Path
+	if prefix := patternPathPrefix(r.Pattern); prefix != "" && strings.HasPrefix(p, prefix) {
+		return p[len(prefix):]
 	}
-	return p
+	return strings.TrimPrefix(p, "/")
+}
+
+// patternPathPrefix returns the mount point of a ServeMux pattern: its
+// literal path up to the first wildcard, cut after the last slash and
+// unescaped as r.URL.Path is. "GET example.com/collab/{doc...}" gives
+// "/collab/"; the exact patterns "/ws/doc" and "/ws" give "/ws/" and "/",
+// so their names stay "doc" and "ws". It returns "" for an empty pattern.
+func patternPathPrefix(pattern string) string {
+	if i := strings.IndexAny(pattern, " \t"); i >= 0 {
+		pattern = strings.TrimLeft(pattern[i:], " \t")
+	}
+	i := strings.IndexByte(pattern, '/')
+	if i < 0 {
+		return ""
+	}
+	pattern = pattern[i:]
+	if j := strings.IndexByte(pattern, '{'); j >= 0 {
+		pattern = pattern[:j]
+	}
+	pattern = pattern[:strings.LastIndexByte(pattern, '/')+1]
+	if u, err := url.PathUnescape(pattern); err == nil {
+		pattern = u
+	}
+	return pattern
 }
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
@@ -810,9 +860,11 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	if rec != nil {
 		raw = rec.conn
 	}
-	if s.opts.ReadLimit != 0 {
-		wsConn.SetReadLimit(s.opts.ReadLimit)
+	readLimit := s.opts.ReadLimit
+	if readLimit == 0 {
+		readLimit = defaultReadLimit
 	}
+	wsConn.SetReadLimit(readLimit)
 
 	c, state, ok, err := s.admitConn(r.Context(), docName, wsConn)
 	if err != nil {
