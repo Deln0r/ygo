@@ -14,6 +14,29 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.34.0] - 2026-11-10
+
+**Upgrade impact**:
+
+- **The `client` renews its presence.** While connected it sends its awareness state again once the state is half the awareness timeout old (15 seconds by default), as y-protocols does, and every new connection sends it one clock up. Each renewal fires the client's `Awareness().OnUpdate` with the local client as updated and origin `"local"`; `OnChange` does not fire, the state is the same. Code that treats every local `OnUpdate` as a user action sees one every 15 seconds.
+- **Peers' presence is dropped when the connection closes**, as y-websocket drops it: `OnChange` and `OnUpdate` report them removed and `States()` holds only the local client until the next handshake brings the peers online then. gomobile's `ObservePresence` sees the peers leave on a disconnect and come back after the reconnect.
+
+### Fixed
+
+- **An idle Go client disappeared from its room after 30 seconds.** It sent its presence once and never again, so the server's sweep and every y-protocols peer removed it while it was still connected. A JavaScript peer on y-websocket stopped seeing an idle Go client 33 seconds after it connected; it now sees it as long as it is connected.
+- **A Go client was invisible after a reconnect** until its state changed: the server keeps the clock of the state it removed when the connection dropped, and refused the same state at that clock.
+- **A peer that left while the client was offline stayed in its presence for good.** The server answers a reconnect with the states of the peers online, so one that left in between was never reported removed.
+
+### Added
+
+- `client.Options.AwarenessTimeout`: how long peers keep the client's presence without hearing from it, 30 seconds by default. Set it to the server's timeout when that is shorter (`yserve -awareness-timeout`, `server.Options.AwarenessTimeout`); the client renews at half of it.
+- `Awareness.RenewLocalState(olderThan)` and `Awareness.ForgetRemote()`, which the client uses for the above.
+
+### Tests
+
+- Through `server`: an idle client stays visible to a peer for three times the server's awareness timeout; a client is visible again right after its connection drops and it reconnects; a peer that left while the client was offline is gone once it reconnects; a peer still online is back at once, without waiting for its next renewal.
+- `RenewLocalState` and `ForgetRemote` against their rules: the age threshold, no revival of a removed state, `OnUpdate` without `OnChange`, the local client kept, a remote state taken again at its old clock.
+
 ## [1.33.0] - 2026-11-10
 
 **Upgrade impact**:
@@ -2144,6 +2167,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.34.0]: https://github.com/Deln0r/ygo/releases/tag/v1.34.0
 [1.33.0]: https://github.com/Deln0r/ygo/releases/tag/v1.33.0
 [1.32.0]: https://github.com/Deln0r/ygo/releases/tag/v1.32.0
 [1.31.0]: https://github.com/Deln0r/ygo/releases/tag/v1.31.0
