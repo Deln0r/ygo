@@ -1,0 +1,16 @@
+{
+  "name": "ygo-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs stock y-websocket clients against yserve.",
+  "dependencies": {
+    "ws": "8.22.1",
+    "y-websocket": "3.1.0",
+    "y-websocket-2": "npm:y-websocket@2.1.0",
+    "yjs": "13.6.33"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

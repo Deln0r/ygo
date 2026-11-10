@@ -135,6 +135,54 @@ jobs:
             GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist ./client ./server ./internal/...
           done
 
+  y-websocket:
+    name: y-websocket clients against yserve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # The fixtures compare bytes. This runs stock y-websocket clients
+      # (2.1 and 3.1) against the yserve binary: sync, presence, a large
+      # paste, rooms with a slash, a restart with a store, -path-prefix.
+      # Two bugs lived behind passing fixtures until it existed.
+      - name: build yserve
+        run: go build -o "$RUNNER_TEMP/yserve" ./cmd/yserve
+      - name: install the clients
+        working-directory: testdata/e2e
+        run: npm ci
+      - name: run the clients
+        working-directory: testdata/e2e
+        run: node y-websocket.mjs "$RUNNER_TEMP/yserve"
+
+  gomobile-android:
+    name: gomobile bind (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      # The pure-Go gomobile package compiles in the test job, but only
+      # gobind's generated Java shows whether the binding compiles: from
+      # v1.8.0 to v1.31.0 it did not (two toString methods) and nothing
+      # noticed. The runner image ships the Android SDK, the NDK and Java.
+      - name: bind the Android AAR
+        env:
+          MOBILE: v0.0.0-20261011034528-197770444867
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@$MOBILE
+          go install golang.org/x/mobile/cmd/gobind@$MOBILE
+          gomobile init
+          go get golang.org/x/mobile/bind@$MOBILE
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          gomobile bind -target=android -androidapi 21 -o "$RUNNER_TEMP/ygo.aar" ./gomobile
+          unzip -l "$RUNNER_TEMP/ygo.aar" | grep -q 'jni/arm64-v8a/libgojni.so'
+
   matrix-transport:
     name: matrix transport (real Dendrite)
     runs-on: ubuntu-latest
