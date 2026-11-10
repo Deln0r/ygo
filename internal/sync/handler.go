@@ -221,7 +221,7 @@ func (c *Conn) handleAuth(frame *Frame) error {
 		// No auth configured — accept silently. Sending
 		// Authenticated lets Hocuspocus clients flip their
 		// internal flag even when the server doesn't care.
-		return c.Send(EncodeAuthAuthenticated())
+		return c.Send(EncodeAuthAuthenticated(c.scope()))
 	}
 	if err := c.OnAuthenticate(c.DocName, token); err != nil {
 		// Reject — send PermissionDenied + Close. Mark the conn
@@ -232,7 +232,15 @@ func (c *Conn) handleAuth(frame *Frame) error {
 		c.AuthFailed = true
 		return nil
 	}
-	return c.Send(EncodeAuthAuthenticated())
+	return c.Send(EncodeAuthAuthenticated(c.scope()))
+}
+
+// scope is the Authenticated scope Hocuspocus sends for this connection.
+func (c *Conn) scope() string {
+	if c.ReadOnly {
+		return ScopeReadOnly
+	}
+	return ScopeReadWrite
 }
 
 func (c *Conn) handleSync(frame *Frame) error {

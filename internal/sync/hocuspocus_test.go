@@ -179,7 +179,7 @@ func TestHocus_EncodeDecode_WireBytesRoundTrip(t *testing.T) {
 		wantPayloadStr string
 	}{
 		{"auth.token", syncpkg.EncodeAuthToken("t"), syncpkg.MessageAuth, syncpkg.AuthToken, "t"},
-		{"auth.authenticated", syncpkg.EncodeAuthAuthenticated(), syncpkg.MessageAuth, syncpkg.AuthAuthenticated, ""},
+		{"auth.authenticated", syncpkg.EncodeAuthAuthenticated(syncpkg.ScopeReadWrite), syncpkg.MessageAuth, syncpkg.AuthAuthenticated, "read-write"},
 		{"auth.permission-denied", syncpkg.EncodeAuthPermissionDenied("expired"), syncpkg.MessageAuth, syncpkg.AuthPermissionDenied, "expired"},
 		{"stateless", syncpkg.EncodeStateless("p"), syncpkg.MessageStateless, 0, "p"},
 		{"broadcast-stateless", syncpkg.EncodeBroadcastStateless("p"), syncpkg.MessageBroadcastStateless, 0, "p"},

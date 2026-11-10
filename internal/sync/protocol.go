@@ -99,32 +99,38 @@ const (
 )
 
 // AuthSubType discriminates the inner Auth-message variant inside a
-// MessageAuth envelope. Values match @hocuspocus/server
-// MessageReceiver.ts MessageAuth enum.
+// MessageAuth envelope. Values match @hocuspocus/common auth.ts
+// AuthMessageType, the same in 2.15.3, 3.4.4 and 4.8.0. Before v1.34.0
+// ygo had them in the reverse order.
 //
 // Wire shape:
 //
 //	varuint(MessageAuth)       outer tag = 2
-//	varuint(AuthSubType)       0=PermissionDenied, 1=Authenticated, 2=Token
-//	varstring(payload)         reason | empty | token (per sub-type)
+//	varuint(AuthSubType)       0=Token, 1=PermissionDenied, 2=Authenticated
+//	varstring(payload)         token | reason | scope (per sub-type)
 type AuthSubType uint8
 
 const (
+	// AuthToken is the client's "here is my token" handshake:
+	// varstring(token), and from provider 4 on a varstring(version)
+	// that ygo ignores. From a server, with no fields, it asks the
+	// client to send its token again.
+	AuthToken AuthSubType = 0
+
 	// AuthPermissionDenied is the server's "your token was
 	// rejected" response. Payload is a varstring with a human-
 	// readable reason.
-	AuthPermissionDenied AuthSubType = 0
+	AuthPermissionDenied AuthSubType = 1
 
 	// AuthAuthenticated is the server's "your token was accepted"
-	// ack. Payload is an empty varstring.
-	AuthAuthenticated AuthSubType = 1
+	// ack. Payload is the scope, ScopeReadWrite or ScopeReadOnly.
+	AuthAuthenticated AuthSubType = 2
+)
 
-	// AuthToken is the client's "here is my token" handshake.
-	// Payload is a varstring with the opaque token. The server's
-	// OnAuthenticate callback consumes this and returns nil
-	// (accept) or an error (deny — server replies with
-	// AuthPermissionDenied + MessageClose).
-	AuthToken AuthSubType = 2
+// The scopes an Authenticated reply carries (@hocuspocus/common).
+const (
+	ScopeReadWrite = "read-write"
+	ScopeReadOnly  = "readonly"
 )
 
 // CloseStatus codes the server may include in a MessageClose

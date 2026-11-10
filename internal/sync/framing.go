@@ -3,6 +3,7 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Deln0r/ygo/internal/lib0"
 	"github.com/Deln0r/ygo/internal/utf16"
@@ -129,19 +130,17 @@ func EncodeAuthToken(token string) []byte {
 }
 
 // EncodeAuthAuthenticated builds the server-side "your token was
-// accepted" ack. Hocuspocus clients use this to flip an internal
-// "authenticated" flag before proceeding with Sync.
-func EncodeAuthAuthenticated() []byte {
+// accepted" ack with its scope (ScopeReadWrite or ScopeReadOnly).
+// Hocuspocus providers expose the scope as authorizedScope.
+func EncodeAuthAuthenticated(scope string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageAuth))
 	buf = lib0.WriteVarUint(buf, uint64(AuthAuthenticated))
-	return lib0.WriteVarString(buf, "")
+	return lib0.WriteVarString(buf, utf16.ValidString(scope))
 }
 
 // EncodeAuthPermissionDenied builds the server-side "your token
-// was rejected" response with a human-readable reason. After
-// sending, the server typically follows with an EncodeClose
-// envelope and closes the WS with code 4401
-// (CloseStatusUnauthorized).
+// was rejected" response with a human-readable reason. A Hocuspocus
+// server sends nothing else and keeps the socket open.
 func EncodeAuthPermissionDenied(reason string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageAuth))
 	buf = lib0.WriteVarUint(buf, uint64(AuthPermissionDenied))
@@ -164,9 +163,9 @@ func EncodeBroadcastStateless(payload string) []byte {
 	return lib0.WriteVarString(buf, utf16.ValidString(payload))
 }
 
-// EncodeClose builds a MessageClose envelope with a reason
-// string. Typically followed by a WS-level close with a numeric
-// status code (e.g. 4401 for unauthorized).
+// EncodeClose builds a MessageClose envelope with a reason string: a
+// Hocuspocus server closing one document on a socket. A provider's own
+// CLOSE has no reason field; DecodeEnvelope accepts both.
 func EncodeClose(reason string) []byte {
 	buf := lib0.WriteVarUint(nil, uint64(MessageClose))
 	return lib0.WriteVarString(buf, utf16.ValidString(reason))
@@ -247,9 +246,14 @@ func DecodeEnvelope(b []byte) (*Frame, []byte, error) {
 		}
 		b = b[n:]
 		frame.AuthSub = AuthSubType(subU)
-		// Every Auth sub-type carries a varstring payload
-		// (PermissionDenied = reason, Authenticated = empty,
-		// Token = token bytes).
+		// A varstring follows (Token = token, PermissionDenied =
+		// reason, Authenticated = scope), except in a server's token
+		// request: a Token with no fields. Provider 4 appends its
+		// version to a Token; it is left in the tail.
+		if len(b) == 0 {
+			frame.Payload = []byte{}
+			return frame, b, nil
+		}
 		payload, n, err := lib0.ReadVarString(b)
 		if err != nil {
 			return nil, b, fmt.Errorf("decode auth payload: %w", err)
@@ -257,7 +261,20 @@ func DecodeEnvelope(b []byte) (*Frame, []byte, error) {
 		frame.Payload = []byte(payload)
 		return frame, b[n:], nil
 
-	case MessageStateless, MessageBroadcastStateless, MessageClose:
+	case MessageClose:
+		// A provider's CLOSE has no reason; a server's has one.
+		if len(b) == 0 {
+			frame.Payload = []byte{}
+			return frame, b, nil
+		}
+		payload, n, err := lib0.ReadVarString(b)
+		if err != nil {
+			return nil, b, fmt.Errorf("decode %d payload: %w", mt, err)
+		}
+		frame.Payload = []byte(payload)
+		return frame, b[n:], nil
+
+	case MessageStateless, MessageBroadcastStateless:
 		payload, n, err := lib0.ReadVarString(b)
 		if err != nil {
 			return nil, b, fmt.Errorf("decode %d payload: %w", mt, err)
@@ -280,4 +297,30 @@ func DecodeEnvelope(b []byte) (*Frame, []byte, error) {
 		frame.Payload = append([]byte(nil), b...)
 		return frame, nil, nil
 	}
+}
+
+// EncodeRoute returns the Hocuspocus routing key as it leads every frame
+// on a Hocuspocus socket: varString(key). The key is the document name,
+// or the name, a NUL and a session id (provider 4's sessionAwareness).
+func EncodeRoute(key string) []byte {
+	return lib0.WriteVarString(nil, key)
+}
+
+// DecodeRoute splits a Hocuspocus frame into its routing key and the
+// envelope that follows it.
+func DecodeRoute(b []byte) (key string, rest []byte, err error) {
+	key, n, err := lib0.ReadVarString(b)
+	if err != nil {
+		return "", b, fmt.Errorf("decode routing key: %w", err)
+	}
+	return key, b[n:], nil
+}
+
+// RouteDocName returns the document a routing key addresses: the key up
+// to its first NUL.
+func RouteDocName(key string) string {
+	if i := strings.IndexByte(key, 0); i >= 0 {
+		return key[:i]
+	}
+	return key
 }
