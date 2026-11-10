@@ -55,14 +55,26 @@ func TestClient_AwarenessRenewedPastServerTimeout(t *testing.T) {
 	waitFor(t, "b synced", b.Synced)
 	a.SetAwarenessState([]byte(`{"name":"a"}`))
 	waitFor(t, "b sees a", func() bool { return b.Awareness().States()[61] != nil })
-
-	// Three times the server's timeout: without renewal the sweep removes
-	// a within its timeout plus one sweep tick.
-	for end := time.Now().Add(6 * time.Second); time.Now().Before(end); {
-		if b.Awareness().States()[61] == nil {
-			t.Fatal("b lost a's presence while a was connected")
+	// Without renewal the sweep removes a within its timeout plus one sweep
+	// tick, and a sends its state again on reading its own removal, so b
+	// sees a leave and come back within milliseconds: b's events catch
+	// that, a look at its states between them would not.
+	var removed atomic.Bool
+	b.Awareness().OnUpdate(func(s awareness.Summary, _ any) {
+		for _, id := range s.Removed {
+			if id == 61 {
+				removed.Store(true)
+			}
 		}
-		time.Sleep(50 * time.Millisecond)
+	})
+
+	// Three times the server's timeout.
+	time.Sleep(6 * time.Second)
+	if removed.Load() {
+		t.Error("b saw a removed while a was connected")
+	}
+	if b.Awareness().States()[61] == nil {
+		t.Error("b lost a's presence while a was connected")
 	}
 }
 
