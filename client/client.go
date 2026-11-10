@@ -30,6 +30,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -90,6 +91,25 @@ type Options struct {
 	// has not heard from for 30 seconds, whatever the server does.
 	AwarenessTimeout time.Duration
 
+	// LivenessTimeout bounds how long a connection that died without a
+	// FIN or RST (a phone that changed networks, a NAT that dropped the
+	// mapping, a server that hangs) goes unnoticed. The client drops the
+	// connection and reconnects, as y-websocket does after 30 seconds
+	// without a message, once nothing came from the server for this long,
+	// nothing it wrote made progress, and a WebSocket ping sent after half
+	// of it got no pong. Progress is counted in bytes, so a transfer
+	// slower than the timeout is not cut. Pings go out only when the
+	// server is otherwise silent: with an awareness state set, yserve and
+	// the y-websocket server echo the client's own renewal every 15
+	// seconds. The dial is bounded by it too.
+	//
+	// Default 30s. A negative value turns the check off, unlike the other
+	// durations here, where a negative value means the default; so does
+	// building for js/wasm, where the browser's WebSocket has no ping. A
+	// server that answers no pings and sends nothing for this long is
+	// reconnected to each time.
+	LivenessTimeout time.Duration
+
 	// LocalStore, when set, makes the client offline-first: on Connect
 	// the document loads its persisted state from the store (so it is
 	// usable before any network), every subsequent change (local edit
@@ -100,6 +120,10 @@ type Options struct {
 	// local persistence; the document lives only in memory.
 	LocalStore persist.Store
 }
+
+// ErrServerSilent is reported through OnError when the client dropped a
+// connection that stayed silent for LivenessTimeout.
+var ErrServerSilent = errors.New("client: no frame or pong from the server within LivenessTimeout")
 
 // Client is a live sync session for one document. Construct with New,
 // start with Connect, stop with Close. Safe for concurrent use.
@@ -133,7 +157,13 @@ type Client struct {
 	persistDone   chan struct{}
 	lastPersisted store.StateVector
 	persistCount  int
+
+	// pongs counts the liveness check's pings that got their pong.
+	pongs atomic.Int64
 }
+
+// defaultLivenessTimeout is y-websocket's messageReconnectTimeout.
+const defaultLivenessTimeout = 30 * time.Second
 
 // New validates opts and returns an unconnected Client.
 func New(opts Options) (*Client, error) {
@@ -151,6 +181,9 @@ func New(opts Options) (*Client, error) {
 	}
 	if opts.AwarenessTimeout <= 0 {
 		opts.AwarenessTimeout = awareness.DefaultTimeout
+	}
+	if opts.LivenessTimeout == 0 {
+		opts.LivenessTimeout = defaultLivenessTimeout
 	}
 	d := opts.Doc
 	if d == nil {
@@ -374,7 +407,7 @@ func (c *Client) run(ctx context.Context) {
 // whether the dial succeeded.
 func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	dialURL := strings.TrimRight(c.opts.URL, "/") + "/" + c.opts.DocName
-	conn, _, err := websocket.Dial(ctx, dialURL, nil)
+	conn, live, err := c.dial(ctx, dialURL)
 	if err != nil {
 		return false, fmt.Errorf("client: dial %s: %w", dialURL, err)
 	}
@@ -412,10 +445,18 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 
 	writeErr := make(chan error, 1)
 	go func() { writeErr <- c.writePump(sessCtx) }()
+	var silent chan bool
+	if live != nil {
+		silent = make(chan bool, 1)
+		go func() { silent <- c.watch(sessCtx, conn, live) }()
+	}
 
 	readErr := c.readPump(sessCtx, conn)
 	sessCancel()
 	<-writeErr
+	if silent != nil && <-silent {
+		return true, fmt.Errorf("%w (%s)", ErrServerSilent, c.opts.LivenessTimeout)
+	}
 	return true, readErr
 }
 
