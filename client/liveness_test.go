@@ -17,6 +17,7 @@ import (
 
 	"github.com/Deln0r/ygo/client"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/server"
 )
 
@@ -29,19 +30,21 @@ type freezeProxy struct {
 	ln        net.Listener
 	upRate    int // client to server, bytes per second; 0: unlimited
 	downRate  int // server to client
+	upLimit   int // client to server, bytes per connection before it stops reading; 0: none
+	stop      chan struct{}
 	freezeNew atomic.Bool
 	mu        sync.Mutex
 	pairs     []*atomic.Bool
 	conns     []net.Conn
 }
 
-func newFreezeProxy(t *testing.T, addr string, upRate, downRate int) *freezeProxy {
+func newFreezeProxy(t *testing.T, addr string, upRate, downRate, upLimit int) *freezeProxy {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &freezeProxy{ln: ln, upRate: upRate, downRate: downRate}
+	p := &freezeProxy{ln: ln, upRate: upRate, downRate: downRate, upLimit: upLimit, stop: make(chan struct{})}
 	go func() {
 		for {
 			cc, err := ln.Accept()
@@ -59,12 +62,13 @@ func newFreezeProxy(t *testing.T, addr string, upRate, downRate int) *freezeProx
 			p.pairs = append(p.pairs, f)
 			p.conns = append(p.conns, cc, sc)
 			p.mu.Unlock()
-			go pump(sc, cc, f, p.upRate)
-			go pump(cc, sc, f, p.downRate)
+			go pump(sc, cc, f, p.upRate, p.upLimit, p.stop)
+			go pump(cc, sc, f, p.downRate, 0, p.stop)
 		}
 	}()
 	t.Cleanup(func() {
 		_ = ln.Close()
+		close(p.stop)
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		for _, c := range p.conns {
@@ -75,9 +79,10 @@ func newFreezeProxy(t *testing.T, addr string, upRate, downRate int) *freezeProx
 }
 
 // pump copies src to dst until src ends, at most rate bytes per second
-// when rate > 0, dropping what it reads once frozen is set. It never
-// closes dst.
-func pump(dst, src net.Conn, frozen *atomic.Bool, rate int) {
+// when rate > 0, dropping what it reads once frozen is set. After limit
+// bytes (when limit > 0) it stops reading until stop closes, so the
+// sender's writes block. It never closes dst.
+func pump(dst, src net.Conn, frozen *atomic.Bool, rate, limit int, stop chan struct{}) {
 	size := 32 << 10
 	var gap time.Duration
 	if rate > 0 {
@@ -85,8 +90,14 @@ func pump(dst, src net.Conn, frozen *atomic.Bool, rate int) {
 		gap = time.Duration(int64(size) * int64(time.Second) / int64(rate))
 	}
 	buf := make([]byte, size)
+	forwarded := 0
 	for {
+		if limit > 0 && forwarded >= limit {
+			<-stop
+			return
+		}
 		n, err := src.Read(buf)
+		forwarded += n
 		if n > 0 && !frozen.Load() {
 			if _, werr := dst.Write(buf[:n]); werr != nil {
 				_, _ = io.Copy(io.Discard, src)
@@ -171,7 +182,7 @@ func liveServer(t *testing.T, upRate, downRate int) (*freezeProxy, string) {
 	})
 	t.Cleanup(func() { _ = srv.Close(context.Background()) })
 	url, ln := serveOn(t, srv)
-	return newFreezeProxy(t, ln.Addr().String(), upRate, downRate), url
+	return newFreezeProxy(t, ln.Addr().String(), upRate, downRate, 0), url
 }
 
 func noDrop(t *testing.T, ev *syncEvents, what string) {
@@ -333,8 +344,8 @@ func TestClient_LivenessTimeoutFloor(t *testing.T) {
 	c, ev := dialThrough(t, proxy.url(), 50*time.Millisecond, 90)
 	time.Sleep(2500 * time.Millisecond)
 	noDrop(t, ev, "with a 50ms timeout on a healthy connection")
-	if client.LiveChecks(c) != 1 {
-		t.Errorf("%d sessions, want 1", client.LiveChecks(c))
+	if client.LiveChecks(c) != 1 || client.LivenessTimeoutOf(c) != time.Second {
+		t.Errorf("%d sessions at %v, want 1 at 1s", client.LiveChecks(c), client.LivenessTimeoutOf(c))
 	}
 }
 
@@ -407,5 +418,78 @@ func TestClient_LivenessGoroutinesEndWithClose(t *testing.T) {
 			t.Fatalf("%d client goroutines after Close, %d before", clientGoroutines(), before)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A client busy with what it read (a large update applying on a slow
+// device, a callback that blocks) is not cut: the pong waits unread in the
+// kernel meanwhile. Before, the check counted that time as the server's
+// silence, dropped the connection, and the redial brought the same work
+// back. Here OnSynced blocks for three timeouts.
+func TestClient_BusyReaderNotCut(t *testing.T) {
+	proxy, _ := liveServer(t, 0, 0)
+	ev := newSyncEvents()
+	opts := ev.options(proxy.url(), time.Second, 92)
+	var first atomic.Bool
+	inner := opts.OnSynced
+	opts.OnSynced = func(v bool) {
+		if v && first.CompareAndSwap(false, true) {
+			time.Sleep(3 * time.Second)
+		}
+		inner(v)
+	}
+	c, err := client.New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	waitChan(t, "the first handshake", ev.up)
+	time.Sleep(2 * time.Second)
+	noDrop(t, ev, "while the client was busy")
+	if n := client.LiveChecks(c); n != 1 {
+		t.Errorf("%d sessions, want 1", n)
+	}
+}
+
+// A write that the kernel stops taking is cut even while the client is
+// busy with what it read: the reply to the server's SyncStep1 is written
+// from the read loop, and on a path that died mid-reply it would hold the
+// loop, and with it the pause, for good. The client holds 8 MiB the server
+// lacks; the proxy forwards 256 KiB of it and stops reading.
+func TestClient_StalledWriteCutWhileBusy(t *testing.T) {
+	srv := server.New(server.Options{OriginPatterns: []string{"*"}, ReadLimit: 64 << 20})
+	t.Cleanup(func() { _ = srv.Close(context.Background()) })
+	_, ln := serveOn(t, srv)
+	proxy := newFreezeProxy(t, ln.Addr().String(), 0, 0, 256<<10)
+
+	d := doc.NewDocWithOptions(doc.Options{ClientID: 93})
+	m := types.NewMap(d.Branch("settings"))
+	txn := d.WriteTxn()
+	m.Set(txn, "blob", []byte(strings.Repeat("x", bigBlob)))
+	txn.Commit()
+	ev := newSyncEvents()
+	opts := ev.options(proxy.url(), 2*time.Second, 93)
+	opts.Doc = d
+	c, err := client.New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case err := <-ev.errs:
+			if errors.Is(err, client.ErrServerSilent) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a write stalled in the read loop was never cut")
+		}
 	}
 }

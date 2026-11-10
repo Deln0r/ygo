@@ -16,6 +16,16 @@ type liveness struct {
 	lastMark  atomic.Int64
 	unmarked  atomic.Int64 // bytes written since the last mark
 	pongCount *atomic.Int64
+
+	// The read loop is busy with a frame it read (applying an update,
+	// running a callback, writing a reply) while busy is set; lastIdle is
+	// when it last went back to reading. writing counts writes in
+	// progress, lastWriteActivity is when one last started a chunk or got
+	// one taken.
+	busy              atomic.Bool
+	lastIdle          atomic.Int64
+	writing           atomic.Int32
+	lastWriteActivity atomic.Int64
 }
 
 // writeMark is how many bytes the kernel must take for a write to count as
@@ -33,6 +43,21 @@ func newLiveness(pongs *atomic.Int64) *liveness {
 func (l *liveness) now() int64 { return int64(time.Since(l.base)) }
 
 func (l *liveness) read() { l.lastRead.Store(l.now()) }
+
+// startFrame and endFrame bracket the read loop's work on one frame. Both
+// are no-ops on a nil liveness (the check off).
+func (l *liveness) startFrame() {
+	if l != nil {
+		l.busy.Store(true)
+	}
+}
+
+func (l *liveness) endFrame() {
+	if l != nil {
+		l.lastIdle.Store(l.now())
+		l.busy.Store(false)
+	}
+}
 
 func (l *liveness) wrote(n int) {
 	if l.unmarked.Add(int64(n)) >= writeMark {

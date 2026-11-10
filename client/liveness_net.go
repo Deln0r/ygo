@@ -4,6 +4,8 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
@@ -33,16 +35,20 @@ func (c *trackedConn) Read(p []byte) (int, error) {
 }
 
 func (c *trackedConn) Write(p []byte) (int, error) {
+	c.l.writing.Add(1)
+	defer c.l.writing.Add(-1)
 	total := 0
 	for len(p) > 0 {
 		chunk := p
 		if len(chunk) > writeChunk {
 			chunk = chunk[:writeChunk]
 		}
+		c.l.lastWriteActivity.Store(c.l.now())
 		n, err := c.Conn.Write(chunk)
 		total += n
 		if n > 0 {
 			c.l.wrote(n)
+			c.l.lastWriteActivity.Store(c.l.now())
 		}
 		if err != nil {
 			return total, err
@@ -80,14 +86,35 @@ func track(t *http.Transport, l *liveness) {
 			return wrap(dial(ctx, network, addr))
 		}
 	}
+	// net/http handshakes a *tls.Conn from a custom TLS dialer itself and
+	// refuses an h2 one for a WebSocket upgrade; behind a trackedConn it
+	// sees neither, so the wrapper does both first.
+	wrapTLS := func(ctx context.Context, nc net.Conn, err error) (net.Conn, error) {
+		if err != nil {
+			return nil, err
+		}
+		if tc, ok := nc.(*tls.Conn); ok {
+			if err := tc.HandshakeContext(ctx); err != nil {
+				_ = tc.Close()
+				return nil, err
+			}
+			if tc.ConnectionState().NegotiatedProtocol == "h2" {
+				_ = tc.Close()
+				return nil, errors.New("client: the TLS dialer negotiated h2; a WebSocket upgrade needs HTTP/1.1")
+			}
+		}
+		return wrap(nc, nil)
+	}
 	if dial := t.DialTLSContext; dial != nil {
 		t.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return wrap(dial(ctx, network, addr))
+			nc, err := dial(ctx, network, addr)
+			return wrapTLS(ctx, nc, err)
 		}
 	}
 	if dial := t.DialTLS; dial != nil { //nolint:staticcheck
 		t.DialTLS = func(network, addr string) (net.Conn, error) { //nolint:staticcheck
-			return wrap(dial(network, addr))
+			nc, err := dial(network, addr)
+			return wrapTLS(context.Background(), nc, err)
 		}
 	}
 }
@@ -151,8 +178,21 @@ func (c *Client) watch(ctx context.Context, conn *websocket.Conn, l *liveness) b
 			pinging = false
 		case <-ticker.C:
 			now := l.now()
-			sinceRead := time.Duration(now - l.lastRead.Load())
+			sinceRead := time.Duration(now - max(l.lastRead.Load(), l.lastIdle.Load()))
 			if sinceRead < timeout/2 {
+				ticksSincePing = -1
+				continue
+			}
+			// A write the kernel has taken nothing of for the whole
+			// timeout: the path is dead, whatever else is going on.
+			if l.writing.Load() > 0 && time.Duration(now-l.lastWriteActivity.Load()) >= timeout {
+				_ = conn.CloseNow()
+				return true
+			}
+			// The read loop is busy with a frame (an update applying, a
+			// callback, a reply being written): what the server sent since
+			// waits unread, so the silence is the client's own.
+			if l.busy.Load() {
 				ticksSincePing = -1
 				continue
 			}

@@ -98,8 +98,12 @@ type Options struct {
 	// without a message, once nothing came from the server for this long,
 	// nothing it wrote made progress, and a WebSocket ping sent after half
 	// of it got no pong. OnError then gets ErrServerSilent, or the read
-	// error when the ping itself could not be written for 5 seconds and
-	// the WebSocket library closed the connection first.
+	// error when the ping's own write blocked for 5 seconds and the
+	// WebSocket library closed the connection first. While the client is
+	// busy with a frame it read (a large update applying, a callback that
+	// blocks), the check waits, since what the server sent meanwhile lies
+	// unread; a write the kernel takes nothing of for the whole timeout
+	// drops the connection all the same.
 	//
 	// Progress is counted in bytes on the TCP connection, so a transfer
 	// slower than the timeout is not cut. On the write side it is the
@@ -470,7 +474,7 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 		go func() { silent <- c.watch(sessCtx, conn, live) }()
 	}
 
-	readErr := c.readPump(sessCtx, conn)
+	readErr := c.readPump(sessCtx, conn, live)
 	sessCancel()
 	<-writeErr
 	if silent != nil && <-silent {
@@ -482,38 +486,45 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 // readPump applies inbound frames until the connection drops. conn is
 // passed explicitly (not read from c.conn) so the read path never
 // touches the lock-guarded field without the lock.
-func (c *Client) readPump(ctx context.Context, conn *websocket.Conn) error {
+func (c *Client) readPump(ctx context.Context, conn *websocket.Conn, live *liveness) error {
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
 			return fmt.Errorf("client: read: %w", err)
 		}
-		frame, _, err := syncpkg.DecodeEnvelope(raw)
-		if err != nil {
-			continue // ignore malformed frames, matching server leniency
+		live.startFrame()
+		c.handleFrame(raw)
+		live.endFrame()
+	}
+}
+
+// handleFrame applies one frame the read loop read.
+func (c *Client) handleFrame(raw []byte) {
+	frame, _, err := syncpkg.DecodeEnvelope(raw)
+	if err != nil {
+		return // ignore malformed frames, matching server leniency
+	}
+	switch frame.Type {
+	case syncpkg.MessageSync, syncpkg.MessageSyncReply:
+		if err := c.handleSync(frame); err != nil && c.opts.OnError != nil {
+			c.opts.OnError(err)
 		}
-		switch frame.Type {
-		case syncpkg.MessageSync, syncpkg.MessageSyncReply:
-			if err := c.handleSync(frame); err != nil && c.opts.OnError != nil {
-				c.opts.OnError(err)
+	case syncpkg.MessageAwareness:
+		// A removal of this client while its state is set (the server
+		// ending an older connection of it after this one began) makes
+		// Apply raise the local clock past it; the state goes out again
+		// at once at that clock, as y-websocket sends it, rather than at
+		// the next renewal.
+		sum, _ := c.awareness.Apply(frame.Payload, "remote")
+		if slices.Contains(sum.Removed, c.awareness.ClientID()) {
+			if _, ok := c.awareness.LocalState(); ok {
+				c.sendAwareness()
 			}
-		case syncpkg.MessageAwareness:
-			// A removal of this client while its state is set (the server
-			// ending an older connection of it after this one began) makes
-			// Apply raise the local clock past it; the state goes out again
-			// at once at that clock, as y-websocket sends it, rather than at
-			// the next renewal.
-			sum, _ := c.awareness.Apply(frame.Payload, "remote")
-			if slices.Contains(sum.Removed, c.awareness.ClientID()) {
-				if _, ok := c.awareness.LocalState(); ok {
-					c.sendAwareness()
-				}
-			}
-		case syncpkg.MessageQueryAwareness:
-			c.sendAwareness()
-		case syncpkg.MessagePing:
-			_ = c.write(syncpkg.EncodePong())
 		}
+	case syncpkg.MessageQueryAwareness:
+		c.sendAwareness()
+	case syncpkg.MessagePing:
+		_ = c.write(syncpkg.EncodePong())
 	}
 }
 
