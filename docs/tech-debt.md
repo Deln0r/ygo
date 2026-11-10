@@ -395,6 +395,11 @@
 - **Resolved (1.28.0):** the write to each peer no longer runs on the broadcaster's goroutine. Each connection has a bounded send queue and its own writer goroutine; a broadcast only queues, so a slow or stuck client never delays its room, the awareness sweep or the backplane re-broadcast. A client that falls behind (`MaxSendQueue`, `MaxSendQueueBytes`, or a queued message older than `WriteTimeout`) is closed, with 1013 if it still reads (one that does not read is cut by its write deadline), and resyncs when it reconnects. Coalescing a slow client's queued updates into one, instead of closing it, was left out: it costs CPU and allocations on the slow path, only document updates merge, and the resync already recovers the document and presence.
 - **Still open:** a broadcast queues one envelope per peer per update, with no batching window, so one fast producer in a very large room costs O(N) queue appends per update. Batch updates within a short window if a workload shows that cost dominating.
 
+### yserve drops a client whose ping comes during a long write to it (open)
+
+- **What:** the server answers a WebSocket ping from its read loop, and the pong needs the connection's frame lock. coder/websocket gives up on the lock after 5 seconds, and the read error ends the connection, so a ping that arrives while the server spends more than 5 seconds writing one message to that client drops it. Browsers do not ping; the Go client does since 1.35.0, after half its `LivenessTimeout` without reading a byte, so it does not ping while a message to it is arriving. The window is a server write that starts as the ping goes out and takes more than 5 seconds.
+- **Fix when it matters:** answer pings through the connection's send queue (`AcceptOptions.OnPingReceived` returning false and queueing the pong).
+
 ### Server.Close leaves live connections open
 
 - **Where:** `server/server.go` `(*Server).Close`.
@@ -450,13 +455,13 @@
   - ygo takes an unseen client's state at clock 0, which y-protocols ignores. Kept so that ygo clients from before 1.31.0, which send their first state at clock 0, are not hidden from a newer server for a heartbeat.
   - ygo has no implicit `{}` state, so a client's first `SetLocalState` is reported added where y-protocols reports its first `setLocalState` updated (its `{}` was there).
 
-### Go client presence (resolved in 1.34.0, two differences open)
+### Go client presence (resolved in 1.34.0 and 1.35.0, one difference open)
 
 - **Was:** the `client` sent its awareness state once per change and never renewed it, so the server's sweep and every y-protocols peer removed an idle client 30 seconds after its last change. On a reconnect it sent the state at the clock the server had kept for the removal, which the server refused. It kept peers' states across a reconnect, so one that left in between stayed. A removal of itself (the server ending an older connection of it late) bumped its clock and sent nothing, though the entry above said the next heartbeat would carry it: there was none.
 - **Resolved by:** the client renews its state at half of `Options.AwarenessTimeout`, checking every tenth of it (at least every 100ms); sends it one clock up on every new connection; drops peers' states and their clocks when an open connection closes (`Awareness.ForgetRemote`), after synced turns false, as y-websocket does, and leaves them alone on a failed dial; and sends its state again at once when it reads a removal of itself while the state is set.
 - **Still different from y-websocket:**
   - The client does not sweep peers that went silent. y-protocols removes a remote state 30 seconds after its last update; the Go client relies on the server's removal broadcasts, which ygo's server and the y-websocket server send.
-  - The client has no liveness check of its own. y-websocket closes its socket after 30 seconds without a message (`messageReconnectTimeout`) and reconnects; the Go client notices a connection that died without a FIN or RST only when TCP does.
+- **Resolved in 1.35.0:** the liveness check. y-websocket closes its socket after 30 seconds without a message (`messageReconnectTimeout`) and reconnects; the Go client noticed a connection that died without a FIN or RST only when TCP did, and its dial had no bound. Now `Options.LivenessTimeout` (30 seconds) drops a connection on which nothing was read, no write made progress and a ping went unanswered, counting bytes on the TCP connection rather than whole messages, so a transfer slower than the timeout is not cut. Not on js/wasm.
 
 ### Resolved: server-driven timeout sweep + presence DoS hardening
 

@@ -14,6 +14,38 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.35.0] - 2026-11-10
+
+**Upgrade impact**:
+
+- **The `client` drops a dead connection and reconnects.** When nothing was read from the server for `LivenessTimeout` (30 seconds by default), nothing the client wrote made progress in that time, and a WebSocket ping got no pong for half of it, the client closes the connection and dials again, as y-websocket does after 30 seconds without a message. `OnError` gets `ErrServerSilent`. A dial is bounded by the same timeout. A negative `LivenessTimeout` turns the check off.
+- **An idle connection sees a ping** once the server has been silent for half the timeout (15 seconds). With an awareness state set, yserve and the y-websocket server echo the client's renewal every 15 seconds, so pings go out mostly from clients without a state. A server that answers no pings and sends nothing for 30 seconds is reconnected to each time; set `LivenessTimeout` negative for it.
+- **The client dials through a clone of `http.DefaultTransport`** whose connections it counts bytes on; proxy settings and TLS are the default transport's. If `http.DefaultTransport` was replaced by something that is not an `*http.Transport`, the client dials as before and the check is off. On js/wasm the check is off too: the browser's WebSocket has no ping.
+
+### Fixed
+
+- **A connection that died without a FIN or RST went unnoticed** until TCP gave up: a phone that changed networks, a NAT that dropped the mapping, a server that hung. The client stayed synced, edits went nowhere and peers looked online.
+- **A dial could wait for good** on a path that takes the TCP connection and forwards nothing.
+
+### Added
+
+- `client.Options.LivenessTimeout` and `client.ErrServerSilent`.
+
+### Tests
+
+- Through a proxy in front of `server`:
+  - a connection that goes silent is dropped after the timeout, `OnError` gets `ErrServerSilent`, and the client syncs again on a new one;
+  - an idle healthy connection gets pongs and is kept;
+  - 8 MiB coming in at 2 MiB/s with a 2-second timeout, and going out at 2 MiB/s with a 3-second one, are not cut;
+  - a dial through a path that forwards nothing fails after the timeout and is tried again;
+  - a negative timeout turns the check off;
+  - no client goroutine is left after `Close` with a ping out.
+- The same tests ran three times under `-race` in a Linux container limited to 2 CPUs.
+
+### Documentation
+
+- `docs/tech-debt.md`: the liveness part of "Go client presence" is resolved; new open entry "yserve drops a client whose ping comes during a long write to it".
+
 ## [1.34.0] - 2026-11-10
 
 **Upgrade impact**:
@@ -2179,6 +2211,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.35.0]: https://github.com/Deln0r/ygo/releases/tag/v1.35.0
 [1.34.0]: https://github.com/Deln0r/ygo/releases/tag/v1.34.0
 [1.33.0]: https://github.com/Deln0r/ygo/releases/tag/v1.33.0
 [1.32.0]: https://github.com/Deln0r/ygo/releases/tag/v1.32.0
