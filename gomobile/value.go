@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/types"
 )
 
@@ -27,7 +28,7 @@ func valueToJSON(v any) []byte {
 	case *types.Map, *types.Array, *types.Text:
 		return []byte("null")
 	}
-	b, err := json.Marshal(v)
+	b, err := json.Marshal(anyval.ForJSON(v))
 	if err != nil {
 		return []byte("null")
 	}

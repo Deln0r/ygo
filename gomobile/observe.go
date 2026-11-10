@@ -3,6 +3,7 @@ package gomobile
 import (
 	"encoding/json"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/types"
 )
 
@@ -105,7 +106,7 @@ func (a *Array) ObserveChanges(l ArrayChangeListener) {
 // marshalArrayDelta renders an array delta as Quill-style JSON, with
 // each insert op carrying a run of values.
 func marshalArrayDelta(delta []types.ArrayDeltaOp) []byte {
-	ops := make([]map[string]any, 0, len(delta))
+	ops := make([]any, 0, len(delta))
 	for _, op := range delta {
 		m := map[string]any{}
 		switch {
@@ -118,14 +119,14 @@ func marshalArrayDelta(delta []types.ArrayDeltaOp) []byte {
 		}
 		ops = append(ops, m)
 	}
-	b, _ := json.Marshal(ops)
+	b, _ := json.Marshal(anyval.ForJSON(ops))
 	return b
 }
 
 // marshalTextDelta renders a text delta in the standard Quill JSON
 // shape.
 func marshalTextDelta(delta []types.DeltaOp) []byte {
-	ops := make([]map[string]any, 0, len(delta))
+	ops := make([]any, 0, len(delta))
 	for _, op := range delta {
 		m := map[string]any{}
 		switch {
@@ -143,13 +144,13 @@ func marshalTextDelta(delta []types.DeltaOp) []byte {
 		}
 		ops = append(ops, m)
 	}
-	b, _ := json.Marshal(ops)
+	b, _ := json.Marshal(anyval.ForJSON(ops))
 	return b
 }
 
 // marshalMapKeys renders a map event's changed keys as JSON.
 func marshalMapKeys(keys map[string]types.KeyChange) []byte {
-	out := make(map[string]map[string]any, len(keys))
+	out := make(map[string]any, len(keys))
 	for k, c := range keys {
 		entry := map[string]any{"action": c.Action}
 		if c.OldValue != nil {
@@ -157,6 +158,7 @@ func marshalMapKeys(keys map[string]types.KeyChange) []byte {
 		}
 		out[k] = entry
 	}
-	b, _ := json.Marshal(out)
+	// ForJSON drops an undefined oldValue, as JSON.stringify does.
+	b, _ := json.Marshal(anyval.ForJSON(out))
 	return b
 }
