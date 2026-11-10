@@ -20,8 +20,10 @@ type liveness struct {
 
 // writeMark is how many bytes the kernel must take for a write to count as
 // progress. A dead path still takes small writes (a presence renewal, a
-// keystroke) into its send buffer, so they must not keep it alive; a large
-// write that the kernel takes piece by piece is a path that delivers.
+// keystroke) into its send buffer, so they must not keep it alive. It takes
+// large ones too until the buffer is full, which on Linux can be several
+// MiB: a client that keeps writing to a dead path is dropped only once the
+// kernel stops taking its bytes.
 const writeMark = 64 << 10
 
 func newLiveness(pongs *atomic.Int64) *liveness {

@@ -2,9 +2,12 @@ package client_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"sync"
@@ -309,13 +312,61 @@ func TestClient_DialBounded(t *testing.T) {
 	}
 }
 
-// A negative LivenessTimeout turns the check off.
+// A negative LivenessTimeout turns the check off: no session runs it, so
+// a frozen connection stays.
 func TestClient_LivenessCheckOff(t *testing.T) {
 	proxy, _ := liveServer(t, 0, 0)
-	_, ev := dialThrough(t, proxy.url(), -1, 83)
+	c, ev := dialThrough(t, proxy.url(), -1, 83)
+	if n := client.LiveChecks(c); n != 0 {
+		t.Errorf("%d sessions ran the check, want 0", n)
+	}
 	proxy.freeze()
 	time.Sleep(2 * time.Second)
 	noDrop(t, ev, "with the check off")
+}
+
+// A LivenessTimeout below a second is raised to one. At 50ms the check's
+// 100ms tick saw every pong as already stale and cut a healthy
+// connection every few ticks.
+func TestClient_LivenessTimeoutFloor(t *testing.T) {
+	proxy, _ := liveServer(t, 0, 0)
+	c, ev := dialThrough(t, proxy.url(), 50*time.Millisecond, 90)
+	time.Sleep(2500 * time.Millisecond)
+	noDrop(t, ev, "with a 50ms timeout on a healthy connection")
+	if client.LiveChecks(c) != 1 {
+		t.Errorf("%d sessions, want 1", client.LiveChecks(c))
+	}
+}
+
+// With a custom TLS dialer on http.DefaultTransport, the connection to a
+// wss URL is still counted. Go's Transport opens it with DialTLSContext,
+// bypassing DialContext, and the check saw nothing read and cut every
+// healthy session after the timeout.
+func TestClient_LivenessWithCustomTLSDialer(t *testing.T) {
+	srv := server.New(server.Options{OriginPatterns: []string{"*"}})
+	t.Cleanup(func() { _ = srv.Close(context.Background()) })
+	ts := httptest.NewTLSServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	dt := http.DefaultTransport.(*http.Transport)
+	saved := dt.Clone()
+	cfg := ts.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	dt.TLSClientConfig = cfg
+	dt.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d := &tls.Dialer{Config: cfg}
+		return d.DialContext(ctx, network, addr)
+	}
+	t.Cleanup(func() {
+		dt.TLSClientConfig = saved.TLSClientConfig
+		dt.DialTLSContext = saved.DialTLSContext
+	})
+
+	c, ev := dialThrough(t, "wss://"+strings.TrimPrefix(ts.URL, "https://"), time.Second, 91)
+	time.Sleep(3 * time.Second)
+	noDrop(t, ev, "over a custom TLS dialer")
+	if client.Pongs(c) < 1 || client.LiveChecks(c) != 1 {
+		t.Errorf("pongs %d, sessions %d; want pongs and one session", client.Pongs(c), client.LiveChecks(c))
+	}
 }
 
 // clientGoroutines counts the goroutines running client code.

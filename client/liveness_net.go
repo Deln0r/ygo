@@ -52,6 +52,46 @@ func (c *trackedConn) Write(p []byte) (int, error) {
 	return total, nil
 }
 
+// track makes every connection t opens a trackedConn, through whichever
+// dialers t has: a custom TLS dialer, when set, opens the connection for
+// https and for an https proxy without DialContext, and the deprecated
+// Dial and DialTLS are kept rather than replaced.
+func track(t *http.Transport, l *liveness) {
+	wrap := func(nc net.Conn, err error) (net.Conn, error) {
+		if err != nil {
+			return nil, err
+		}
+		return &trackedConn{Conn: nc, l: l}, nil
+	}
+	switch {
+	case t.DialContext != nil:
+		dial := t.DialContext
+		t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return wrap(dial(ctx, network, addr))
+		}
+	case t.Dial != nil: //nolint:staticcheck // the caller's deprecated dialer, kept
+		dial := t.Dial                                          //nolint:staticcheck
+		t.Dial = func(network, addr string) (net.Conn, error) { //nolint:staticcheck
+			return wrap(dial(network, addr))
+		}
+	default:
+		dial := (&net.Dialer{}).DialContext
+		t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return wrap(dial(ctx, network, addr))
+		}
+	}
+	if dial := t.DialTLSContext; dial != nil {
+		t.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return wrap(dial(ctx, network, addr))
+		}
+	}
+	if dial := t.DialTLS; dial != nil { //nolint:staticcheck
+		t.DialTLS = func(network, addr string) (net.Conn, error) { //nolint:staticcheck
+			return wrap(dial(network, addr))
+		}
+	}
+}
+
 // dial opens a session's connection. With the liveness check on, it is
 // bounded by LivenessTimeout and runs over a trackedConn, and the returned
 // liveness is non-nil.
@@ -66,22 +106,15 @@ func (c *Client) dial(ctx context.Context, url string) (*websocket.Conn, *livene
 	}
 	l := newLiveness(&c.pongs)
 	t := base.Clone()
-	dialTCP := t.DialContext
-	if dialTCP == nil {
-		dialTCP = (&net.Dialer{}).DialContext
-	}
-	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		nc, err := dialTCP(ctx, network, addr)
-		if err != nil {
-			return nil, err
-		}
-		return &trackedConn{Conn: nc, l: l}, nil
-	}
+	track(t, l)
+	c.liveChecks.Add(1)
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	conn, _, err := websocket.Dial(dctx, url, &websocket.DialOptions{HTTPClient: &http.Client{Transport: t}})
+	// The upgraded connection is the caller's now; anything left in the
+	// pool (a connection a redirect left behind) goes.
+	t.CloseIdleConnections()
 	if err != nil {
-		t.CloseIdleConnections()
 		return nil, nil, err
 	}
 	l.read()

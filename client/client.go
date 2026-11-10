@@ -97,17 +97,26 @@ type Options struct {
 	// connection and reconnects, as y-websocket does after 30 seconds
 	// without a message, once nothing came from the server for this long,
 	// nothing it wrote made progress, and a WebSocket ping sent after half
-	// of it got no pong. Progress is counted in bytes, so a transfer
-	// slower than the timeout is not cut. Pings go out only when the
-	// server is otherwise silent: with an awareness state set, yserve and
-	// the y-websocket server echo the client's own renewal every 15
-	// seconds. The dial is bounded by it too.
+	// of it got no pong. OnError then gets ErrServerSilent, or the read
+	// error when the ping itself could not be written for 5 seconds and
+	// the WebSocket library closed the connection first.
 	//
-	// Default 30s. A negative value turns the check off, unlike the other
-	// durations here, where a negative value means the default; so does
-	// building for js/wasm, where the browser's WebSocket has no ping. A
-	// server that answers no pings and sends nothing for this long is
-	// reconnected to each time.
+	// Progress is counted in bytes on the TCP connection, so a transfer
+	// slower than the timeout is not cut. On the write side it is the
+	// kernel taking bytes into the socket's send buffer, which a dead path
+	// does too until the buffer is full: a client that keeps writing is
+	// dropped only after that. Pings go out whenever nothing was read for
+	// half the timeout, in a quiet room about every 15 seconds.
+	//
+	// Default 30s; a shorter value below 1s is raised to 1s. A negative
+	// value turns the check off, unlike the other durations here, where a
+	// negative value means the default. With the check on, the dial is
+	// bounded by the timeout too. The check is also off on js/wasm, where
+	// the browser's WebSocket has no ping, and when http.DefaultTransport
+	// is not an *http.Transport: the client counts bytes on the
+	// connections of a clone of it, dialed with its dialers. A server that
+	// answers no pings and sends nothing for the timeout is reconnected to
+	// each time.
 	LivenessTimeout time.Duration
 
 	// LocalStore, when set, makes the client offline-first: on Connect
@@ -123,7 +132,7 @@ type Options struct {
 
 // ErrServerSilent is reported through OnError when the client dropped a
 // connection that stayed silent for LivenessTimeout.
-var ErrServerSilent = errors.New("client: no frame or pong from the server within LivenessTimeout")
+var ErrServerSilent = errors.New("client: nothing read, no write progress and no pong within LivenessTimeout")
 
 // Client is a live sync session for one document. Construct with New,
 // start with Connect, stop with Close. Safe for concurrent use.
@@ -158,12 +167,19 @@ type Client struct {
 	lastPersisted store.StateVector
 	persistCount  int
 
-	// pongs counts the liveness check's pings that got their pong.
-	pongs atomic.Int64
+	// pongs counts the liveness check's pings that got their pong;
+	// liveChecks the sessions dialed with the check on.
+	pongs      atomic.Int64
+	liveChecks atomic.Int64
 }
 
-// defaultLivenessTimeout is y-websocket's messageReconnectTimeout.
-const defaultLivenessTimeout = 30 * time.Second
+// defaultLivenessTimeout is y-websocket's messageReconnectTimeout. Below
+// minLivenessTimeout the check's 100ms tick is too coarse: a pong read
+// just after a tick is already half the timeout old at the next one.
+const (
+	defaultLivenessTimeout = 30 * time.Second
+	minLivenessTimeout     = time.Second
+)
 
 // New validates opts and returns an unconnected Client.
 func New(opts Options) (*Client, error) {
@@ -184,6 +200,9 @@ func New(opts Options) (*Client, error) {
 	}
 	if opts.LivenessTimeout == 0 {
 		opts.LivenessTimeout = defaultLivenessTimeout
+	}
+	if opts.LivenessTimeout > 0 && opts.LivenessTimeout < minLivenessTimeout {
+		opts.LivenessTimeout = minLivenessTimeout
 	}
 	d := opts.Doc
 	if d == nil {
