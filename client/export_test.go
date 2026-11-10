@@ -13,3 +13,11 @@ func StallCuts(c *Client) int64 { return c.stallCuts.Load() }
 
 // LivenessTimeoutOf reports the timeout the client runs with.
 func LivenessTimeoutOf(c *Client) time.Duration { return c.opts.LivenessTimeout }
+
+// SetDeniedBackoff sets the wait after a permission denial and returns
+// a func that restores it.
+func SetDeniedBackoff(d time.Duration) func() {
+	old := deniedBackoff
+	deniedBackoff = d
+	return func() { deniedBackoff = old }
+}

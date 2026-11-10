@@ -70,10 +70,10 @@ func main() {
 		URL: *url, DocName: *docName, Hocuspocus: true, Token: *token,
 		AwarenessTimeout: time.Duration(*awMS) * time.Millisecond,
 		MinBackoff:       100 * time.Millisecond, MaxBackoff: 500 * time.Millisecond,
-		OnSynced:         func(v bool) { emit(map[string]any{"ev": "synced", "v": v}) },
-		OnError:          func(err error) { emit(map[string]any{"ev": "error", "kind": kind(err), "msg": err.Error()}) },
-		OnAuthenticated:  func(scope string) { emit(map[string]any{"ev": "authenticated", "scope": scope}) },
-		OnStateless:      func(p string) { emit(map[string]any{"ev": "stateless", "payload": p}) },
+		OnSynced:        func(v bool) { emit(map[string]any{"ev": "synced", "v": v}) },
+		OnError:         func(err error) { emit(map[string]any{"ev": "error", "kind": kind(err), "msg": err.Error()}) },
+		OnAuthenticated: func(scope string) { emit(map[string]any{"ev": "authenticated", "scope": scope}) },
+		OnStateless:     func(p string) { emit(map[string]any{"ev": "stateless", "payload": p}) },
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
