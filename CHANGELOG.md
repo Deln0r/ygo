@@ -18,24 +18,35 @@ file.
 
 **Upgrade impact**:
 
-- **The `client` renews its presence.** While connected it sends its awareness state again once the state is half the awareness timeout old (15 seconds by default), as y-protocols does, and every new connection sends it one clock up. Each renewal fires the client's `Awareness().OnUpdate` with the local client as updated and origin `"local"`; `OnChange` does not fire, the state is the same. Code that treats every local `OnUpdate` as a user action sees one every 15 seconds.
-- **Peers' presence is dropped when the connection closes**, as y-websocket drops it: `OnChange` and `OnUpdate` report them removed and `States()` holds only the local client until the next handshake brings the peers online then. gomobile's `ObservePresence` sees the peers leave on a disconnect and come back after the reconnect.
+- **The `client` renews its presence.** While connected it sends its awareness state again once the state is half the awareness timeout old (15 seconds by default), as y-protocols does. Every new connection sends the state one clock up, and sends none when no state is set (it sent an empty or removed one). Each renewal and each connection fires the client's `Awareness().OnUpdate` with the local client as updated and origin `"local"`; `OnChange` does not fire, the state is the same. Code that treats every local `OnUpdate` as a user action sees one per connection and one every 15 seconds.
+- **Peers' presence is dropped when the connection closes**, as y-websocket drops it: after `OnSynced(false)`, `OnChange` and `OnUpdate` report the peers removed, and `States()` holds only the local client until the next handshake. gomobile's `ObservePresence` sees the peers leave on a disconnect and come back after the reconnect.
 
 ### Fixed
 
-- **An idle Go client disappeared from its room after 30 seconds.** It sent its presence once and never again, so the server's sweep and every y-protocols peer removed it while it was still connected. A JavaScript peer on y-websocket stopped seeing an idle Go client 33 seconds after it connected; it now sees it as long as it is connected.
+- **An idle Go client disappeared from its room after 30 seconds.** It sent its presence once and never again, so the server's sweep and every y-protocols peer removed it while it was still connected. A JavaScript peer on y-websocket, checking every 3 seconds, still saw an idle v1.33.0 client at 30 seconds and no longer at 33; it now sees it as long as it is connected.
 - **A Go client was invisible after a reconnect** until its state changed: the server keeps the clock of the state it removed when the connection dropped, and refused the same state at that clock.
+- **A Go client was invisible after the server noticed late that its old connection had died.** When a reconnect came first, the server removed the client's state as the old connection ended, at the clock the new connection had set, and peers took the removal. The client raised its clock against it and sent nothing until its state changed. It now sends the state again at once, as y-websocket does, so peers see it leave and come back.
 - **A peer that left while the client was offline stayed in its presence for good.** The server answers a reconnect with the states of the peers online, so one that left in between was never reported removed.
 
 ### Added
 
-- `client.Options.AwarenessTimeout`: how long peers keep the client's presence without hearing from it, 30 seconds by default. Set it to the server's timeout when that is shorter (`yserve -awareness-timeout`, `server.Options.AwarenessTimeout`); the client renews at half of it.
-- `Awareness.RenewLocalState(olderThan)` and `Awareness.ForgetRemote()`, which the client uses for the above.
+- `client.Options.AwarenessTimeout`: how long peers keep the client's presence without hearing from it, 30 seconds by default. Set it to the server's timeout when that is shorter (`yserve -awareness-timeout`, `server.Options.AwarenessTimeout`); the client renews at half of it, checking every tenth (at least every 100ms). Above 30 seconds JavaScript peers drop the client anyway: y-protocols keeps a silent client for 30 seconds.
+- `ygo.Awareness` methods `RenewLocalState(olderThan)` and `ForgetRemote()`, which the client uses for the above.
 
 ### Tests
 
-- Through `server`: an idle client stays visible to a peer for three times the server's awareness timeout; a client is visible again right after its connection drops and it reconnects; a peer that left while the client was offline is gone once it reconnects; a peer still online is back at once, without waiting for its next renewal.
-- `RenewLocalState` and `ForgetRemote` against their rules: the age threshold, no revival of a removed state, `OnUpdate` without `OnChange`, the local client kept, a remote state taken again at its old clock.
+- Through `server`:
+  - an idle client stays visible to a peer for three times the server's awareness timeout;
+  - a client is visible again right after its connection drops and it reconnects;
+  - a client whose old connection the server ends only after the reconnect (a proxy keeps the server's side open) is visible again right after the removal;
+  - a peer that left while the client was offline, with the reconnect held until the server has removed it, is gone once the client reconnects;
+  - a peer still online is back at once, without waiting for its next renewal, and was reported removed only after synced turned false;
+  - an `AwarenessTimeout` of 5 nanoseconds no longer panics the client.
+- `RenewLocalState` and `ForgetRemote` against their rules: the age threshold, no revival of a removed state, `OnUpdate` without `OnChange` on a renewal, both events on a forget, the local client kept, a remote state taken again at its old clock.
+
+### Documentation
+
+- `docs/tech-debt.md`, "Go client presence": the client still does not sweep peers that went silent and has no liveness check of its own; y-websocket does both.
 
 ## [1.33.0] - 2026-11-10
 
