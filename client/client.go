@@ -1,6 +1,7 @@
 // Package client is a Yjs sync provider over WebSocket: the Go
-// equivalent of y-websocket's WebsocketProvider, compatible with
-// yserve, Hocuspocus, and the reference y-websocket server.
+// equivalent of y-websocket's WebsocketProvider, for yserve and the
+// reference y-websocket server. It does not speak Hocuspocus's framing,
+// which prefixes every frame with the document name.
 //
 // A Client owns a live connection for one document: it runs the
 // y-protocols handshake (SyncStep1 / SyncStep2), broadcasts local

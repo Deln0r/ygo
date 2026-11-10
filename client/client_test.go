@@ -2,7 +2,6 @@ package client_test
 
 import (
 	"context"
-	"encoding/hex"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -253,15 +252,21 @@ func TestClient_LocalEditCarriesOnlyOwnChanges(t *testing.T) {
 // like any local edit, as a yjs client does: B bolds offline what A bolds
 // online; when B connects, both clean up the duplicate opening marker (the
 // lower client's, 271828182:0) and the server receives that deletion.
+//
+// Usually both clients send it as an update of its own (yjs 13.6.33
+// encodes it as 0001d689cf8101010001), but on a slow machine the deletion
+// can reach the server inside another update. The test used to require the
+// separate update: it failed in one of six CI attempts on 8 Nov 2026, and
+// in 5 of 150 runs in a Linux container limited to 0.25 CPU with -race and
+// coverage, where this version passed 150 of 150.
 func TestClient_ForwardsFormatCleanup(t *testing.T) {
-	const cleanup = "0001d689cf8101010001" // yjs 13.6.33: delete 271828182:0
 	var mu sync.Mutex
-	var applied []string
+	var applied [][]byte
 	srv := server.New(server.Options{
 		OriginPatterns: []string{"*"},
 		OnChange: func(_ string, update []byte) {
 			mu.Lock()
-			applied = append(applied, hex.EncodeToString(update))
+			applied = append(applied, append([]byte(nil), update...))
 			mu.Unlock()
 		},
 	})
@@ -302,7 +307,8 @@ func TestClient_ForwardsFormatCleanup(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, u := range applied {
-			if u == cleanup {
+			dec, _, err := encoding.DecodeUpdate(u)
+			if err == nil && dec.DeleteSet.Contains(271828182, 0) {
 				return true
 			}
 		}
