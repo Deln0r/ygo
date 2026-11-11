@@ -16,6 +16,8 @@ file.
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-11-11
+
 ### Changed
 
 - **Editing is many times faster.** On the real-world editing trace in BENCHMARKS.md (259,778 edits), on an Apple M3:
@@ -2317,6 +2319,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.38.0]: https://github.com/Deln0r/ygo/releases/tag/v1.38.0
 [1.37.0]: https://github.com/Deln0r/ygo/releases/tag/v1.37.0
 [1.36.0]: https://github.com/Deln0r/ygo/releases/tag/v1.36.0
 [1.35.0]: https://github.com/Deln0r/ygo/releases/tag/v1.35.0
