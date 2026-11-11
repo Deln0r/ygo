@@ -310,21 +310,6 @@ func TestServer_DocNameRouting_IsolatesDocs(t *testing.T) {
 	// Timeout error is the success case here.
 }
 
-func TestServer_EmptyDocName_Returns400(t *testing.T) {
-	wsURL, _ := startTestServer(t, server.Options{OriginPatterns: []string{"*"}})
-
-	// Empty path → empty docName → server should reject with 400.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, resp, err := websocket.Dial(ctx, wsURL+"/", nil)
-	if err == nil {
-		t.Error("dial succeeded; want failure due to empty docName")
-	}
-	if resp != nil && resp.StatusCode != 400 {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
 func TestServer_ConcurrentEdits_AllConverge(t *testing.T) {
 	// Stress: 5 clients each push 3 items concurrently. Server must
 	// fan everything out; every client's local doc must eventually
@@ -476,35 +461,21 @@ func TestServer_HocusAuth_AcceptsAndProceeds(t *testing.T) {
 	}
 }
 
-func TestServer_HocusStateless_BroadcastsAcrossClients(t *testing.T) {
-	var serverSeen []string
+func TestServer_StatelessDoesNotBroadcastToYWebsocket(t *testing.T) {
+	seen := make(chan string, 1)
 	wsURL, _ := startTestServer(t, server.Options{
-		OriginPatterns: []string{"*"},
-		OnStateless: func(_, payload string) {
-			serverSeen = append(serverSeen, payload)
-		},
+		OnStateless: func(_, payload string) { seen <- payload },
 	})
-
 	a := dialClient(t, wsURL, "rpc-doc", 9100)
 	defer a.close()
-	a.read(t) // initial SyncStep1
-
-	b := dialClient(t, wsURL, "rpc-doc", 9101)
-	defer b.close()
-	b.read(t)
-
+	a.read(t)
 	a.write(t, syncpkg.EncodeBroadcastStateless("ping-1"))
-	// Both clients should see the broadcast (self-included).
-	for label, c := range map[string]*wsClient{"A": a, "B": b} {
-		got := c.readUntil(t, func(f *syncpkg.Frame) bool {
-			return f.Type == syncpkg.MessageBroadcastStateless
-		})
-		if string(got.Payload) != "ping-1" {
-			t.Errorf("%s received %q, want ping-1", label, got.Payload)
-		}
+	if got := <-seen; got != "ping-1" {
+		t.Fatal(got)
 	}
-
-	if len(serverSeen) != 1 || serverSeen[0] != "ping-1" {
-		t.Errorf("server OnStateless saw %v, want [ping-1]", serverSeen)
+	// A sync reply is a FIFO barrier: no stateless frame may precede it.
+	a.write(t, syncpkg.EncodeSyncStep1([]byte{0}))
+	if f := a.read(t); f.Type != syncpkg.MessageSync || f.SyncSub != syncpkg.SyncStep2 {
+		t.Fatalf("unexpected frame: %+v", f)
 	}
 }

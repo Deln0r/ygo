@@ -1,5 +1,5 @@
 // Package server implements a WebSocket sync server for ygo documents
-// that speaks the y-websocket protocol.
+// that speaks the y-websocket and Hocuspocus protocols.
 //
 // The server exposes an http.Handler that adopters mount on their
 // own http.ServeMux at any path prefix. Per port-note §"Go
@@ -10,9 +10,9 @@
 // Wire format: y-websocket frames, a message type followed by its
 // payload (0=Sync, 1=Awareness, 3=QueryAwareness). The server also
 // handles Hocuspocus's message types (Auth, Stateless,
-// BroadcastStateless, Close, SyncStatus) on the same frames, but
-// Hocuspocus clients prefix every frame with the document name, which
-// this server does not parse, so they cannot connect.
+// BroadcastStateless, Close, SyncStatus). HocuspocusHandler serves
+// document-prefixed frames and multiple documents on one socket. Handler
+// also serves Hocuspocus when DocNameFn returns an empty name.
 //
 // Per-document state lives in a map keyed by docName (by default the
 // URL path below the mux pattern the handler is mounted on; see
@@ -84,21 +84,29 @@ type Options struct {
 	// AcceptOptions.
 	OriginPatterns []string
 
-	// OnAuthenticate handles Hocuspocus's Auth message type, carried on
-	// y-websocket frames without Hocuspocus's document-name prefix. No
-	// stock client sends it: y-websocket has no auth message, and
-	// @hocuspocus/provider cannot connect to this server. To check a
-	// stock client, inspect the upgrade request in OnConnect. When set,
-	// the server expects every client to send a MessageAuth(Token)
-	// envelope shortly after connecting; the callback receives the
-	// docName + token and returns nil to accept or error to deny.
-	// On denial the server emits AuthPermissionDenied + Close and
-	// closes the WS with code 4401 (CloseStatusUnauthorized).
-	//
-	// When nil (the bare y-websocket default), MessageAuth tokens
-	// are accepted silently — the server responds with
-	// AuthAuthenticated, so a client that waits for it can proceed.
+	// OnAuthenticate checks a Hocuspocus key's token before loading its
+	// document or admitting it to the room. A denial sends PermissionDenied
+	// and keeps the socket open for a retry. OnAuthenticateRequest takes
+	// precedence when set. Legacy Auth envelopes on y-websocket connections
+	// still use this hook; stock y-websocket clients must use OnConnect.
 	OnAuthenticate syncpkg.AuthHandler
+
+	// OnAuthenticateRequest checks a new Hocuspocus key's token with the
+	// upgrade request and returns its read-only permission. ReadOnly can
+	// additionally restrict it. Established keys keep their permission until
+	// closed; token refresh requires closing and re-opening the key.
+	// Like OnConnect, hooks run on the socket's read goroutine; keep them fast.
+	OnAuthenticateRequest func(r *http.Request, docName, token string) (readOnly bool, err error)
+
+	// IdleTimeout closes a Hocuspocus socket after this long without an
+	// inbound message. Zero or negative selects 60 seconds. It does not
+	// change y-websocket connections.
+	IdleTimeout time.Duration
+
+	// AuthTimeout is the absolute deadline for establishing the first
+	// Hocuspocus key, unaffected by incoming traffic. Zero or negative
+	// selects 60 seconds. After the first admission only IdleTimeout applies.
+	AuthTimeout time.Duration
 
 	// OnStateless handles Hocuspocus's Stateless and BroadcastStateless
 	// message types, on the same frames as OnAuthenticate.
@@ -108,7 +116,7 @@ type Options struct {
 	// read goroutine.
 	//
 	// MessageBroadcastStateless also fans out to other conns on
-	// the doc regardless of whether the callback is set.
+	// the doc's Hocuspocus keys regardless of whether the callback is set.
 	OnStateless syncpkg.StatelessHandler
 
 	// OnConnect, when set, is called once a connection has been admitted
@@ -119,11 +127,13 @@ type Options struct {
 	// TLS state, or remote address — request context that the token-only
 	// OnAuthenticate does not see. Returning a non-nil error rejects the
 	// connection: it is torn down and the WS is closed with
-	// StatusPolicyViolation, and OnDisconnect does NOT fire for it. A
+	// StatusPolicyViolation on y-websocket. Hocuspocus sends PermissionDenied
+	// for that key and keeps the socket. OnDisconnect does NOT fire for it. A
 	// panic inside OnConnect is also torn down cleanly (the room slot is
 	// released, no leak) and likewise does not fire OnDisconnect. This
 	// runs on the connection's serve goroutine (so it runs concurrently
-	// across connections); keep it fast.
+	// across connections); keep it fast. On Hocuspocus sessions it runs
+	// once per document key.
 	OnConnect func(connID, docName string, r *http.Request) error
 
 	// OnDisconnect, when set, is called when a connection that OnConnect
@@ -302,7 +312,8 @@ type Options struct {
 	// cap. A connection beyond the cap is rejected at the upgrade with
 	// websocket.StatusPolicyViolation; connections already in the room
 	// keep working. The newest socket is the one refused, so an
-	// established collaborator is never displaced by a flood.
+	// established collaborator is never displaced by a flood. Hocuspocus
+	// counts each key separately; a refused key closes its socket with 1013.
 	MaxConnsPerDoc int
 
 	// MaxDocs bounds the number of distinct documents the server holds
@@ -335,6 +346,8 @@ type Options struct {
 	// already established keep working and the newest socket is the one
 	// refused. The count is of admitted connections and drops as they
 	// depart, so the cap tracks live load, not lifetime connections.
+	// A Hocuspocus socket counts once, including before its first key is
+	// authenticated; its document keys do not consume additional slots.
 	MaxConns int
 
 	// DocIdleTimeout keeps a document resident in memory for this long after
@@ -583,7 +596,7 @@ type Stats struct {
 	// idle keep-warm is off.
 	IdleDocuments int
 	// Connections is the total number of live WebSocket connections
-	// across all resident documents.
+	// across all resident documents (Hocuspocus counts document keys).
 	Connections int
 	// Docs is the per-document breakdown, one entry per resident document,
 	// sorted by Name for a stable read. Documents is len(Docs) and
@@ -603,7 +616,8 @@ type Stats struct {
 type DocStat struct {
 	// Name is the docName of a resident document.
 	Name string
-	// Connections is the number of live WebSocket connections on it.
+	// Connections is the number of live document connections on it.
+	// Each Hocuspocus routing key counts separately, even on a shared socket.
 	Connections int
 	// QueuedMessages and QueuedBytes sum what is queued on the document's
 	// connections and not yet taken by their writers, replies included. A
@@ -633,7 +647,7 @@ func (s *Server) Stats() Stats {
 		ds.connsMu.RLock()
 		line.Connections = len(ds.conns)
 		for c := range ds.conns {
-			n, b := c.queue.backlog() // the queue lock is a leaf under connsMu
+			n, b := c.queue.backlogForRoute(c.route) // the queue lock is a leaf under connsMu
 			line.QueuedMessages += n
 			line.QueuedBytes += b
 		}
@@ -842,7 +856,7 @@ func patternPathPrefix(pattern string) string {
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	docName := s.opts.DocNameFn(r)
 	if docName == "" {
-		http.Error(w, "empty docName", http.StatusBadRequest)
+		s.serveHocuspocus(w, r)
 		return
 	}
 
@@ -1140,6 +1154,10 @@ func (b *bufferedApply) activate(live func([]byte)) {
 // (addConn takes connsMu) matches releaseConn's eviction and is not
 // inverted anywhere.
 func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
+	return s.admitDocument(ctx, docName, ws, nil, "")
+}
+
+func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string) (c *conn, state *docState, ok bool, err error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
 	// Global connection cap: refuse before creating or loading a room so a
@@ -1148,7 +1166,7 @@ func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Co
 	// under docsMu, so admissions serialize against the cap and can never
 	// overshoot it; concurrent releases only decrement totalConns, making
 	// this check at worst conservative, never permissive.
-	if lim := s.maxConns(); lim > 0 && int(s.totalConns.Load()) >= lim {
+	if lim := s.maxConns(); session == nil && lim > 0 && int(s.totalConns.Load()) >= lim {
 		return nil, nil, false, errServerConnsFull
 	}
 	state, err = s.getOrCreateDocLocked(ctx, docName)
@@ -1156,6 +1174,12 @@ func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Co
 		return nil, nil, false, err
 	}
 	c = s.newConn(state, ws)
+	if session != nil {
+		c.session = session
+		c.route = syncpkg.EncodeRoute(key)
+		c.queue = session.transport.queue
+		c.handler.Hocuspocus = true
+	}
 	if !state.addConn(c, s.maxConnsPerDoc()) {
 		return nil, state, false, nil
 	}
@@ -1163,7 +1187,9 @@ func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Co
 	// across the whole admission), so the idle sweep can never observe a
 	// stale idleSince alongside a live connection.
 	state.idleSince = time.Time{}
-	s.totalConns.Add(1)
+	if session == nil {
+		s.totalConns.Add(1)
+	}
 	return c, state, true, nil
 }
 
@@ -1183,17 +1209,21 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	// Stop the queue now: its backlog is dropped and a waiting reply fails.
 	// A cause chosen earlier (an overflow the writer is about to close with
 	// 1013, say) is kept; its owner still closes.
-	if c.queue != nil {
-		c.queue.terminate(causeReleased)
+	if c.session == nil {
+		if c.queue != nil {
+			c.queue.terminate(causeReleased)
+		}
+		defer c.finishTransport()
 	}
-	defer c.finishTransport()
 
 	// Drop the global connection count. releaseConn runs exactly once per
 	// admitted connection (serveWS defers it only past a successful
 	// admission, and the white-box callers release only admitConn results
 	// with ok==true), so this pairs one-to-one with the increment in
 	// admitConn and the count never drifts.
-	s.totalConns.Add(-1)
+	if c.session == nil {
+		s.totalConns.Add(-1)
+	}
 
 	tombstoned := c.handler.Disconnect()
 	if len(tombstoned) > 0 {
@@ -1320,6 +1350,14 @@ type conn struct {
 	handler  *syncpkg.Conn
 	queue    *sendQueue
 	idForLog string
+
+	// A Hocuspocus document shares its session's transport and queue.
+	// route and session are immutable before this conn enters its room.
+	session  *hocuspocusSession
+	route    []byte
+	sendMu   sync.Mutex
+	ready    bool // gates broadcasts before admission and after per-key CLOSE
+	accepted bool // OnConnect accepted; only the session read loop uses this
 }
 
 var connIDCounter atomic.Uint64
@@ -1342,6 +1380,7 @@ func (s *Server) newConn(state *docState, ws *websocket.Conn) *conn {
 	h.DocName = state.name
 	h.OnAuthenticate = s.opts.OnAuthenticate
 	h.OnStateless = s.opts.OnStateless
+	h.StatelessBroadcast = func(envelope []byte) { state.broadcastStateless(envelope) }
 	c.handler = h
 	return c
 }
@@ -1356,7 +1395,7 @@ func (c *conn) reply(envelope []byte) error {
 	if c.queue.done == nil {
 		return errConnClosing // no writer (a connection built in a white-box test)
 	}
-	result, err := c.queue.pushReply(envelope)
+	result, err := c.queue.pushReply(c.routed(envelope))
 	if err != nil {
 		return err
 	}
@@ -1367,7 +1406,14 @@ func (c *conn) reply(envelope []byte) error {
 // connection has fallen behind its bound, the append stops its queue
 // instead and the writer closes it with 1013; the overflow is counted once.
 func (c *conn) enqueue(envelope []byte) {
-	if c.queue.pushFanout(envelope) && c.server != nil {
+	if c.session != nil {
+		c.sendMu.Lock()
+		defer c.sendMu.Unlock()
+		if !c.ready {
+			return
+		}
+	}
+	if c.queue.pushFanout(c.routed(envelope)) && c.server != nil {
 		c.server.slowClientsClosed.Add(1)
 	}
 }
@@ -1744,12 +1790,18 @@ func closeReason(s string) string {
 // caller (serveWS) is responsible for cleanup via the deferred
 // releaseConn.
 func (c *conn) readLoop(ctx context.Context) {
+	first := true
 	for {
 		_, raw, err := c.ws.Read(ctx)
 		if err != nil {
 			return
 		}
 		frame, _, err := syncpkg.DecodeEnvelope(raw)
+		if first && (err != nil || (frame.Type != syncpkg.MessageSync && frame.Type != syncpkg.MessageAwareness)) && looksLikeHocuspocus(raw) {
+			c.closeFromServer(websocket.StatusProtocolError, "Hocuspocus client: connect to the Hocuspocus endpoint")
+			return
+		}
+		first = false
 		if err != nil {
 			// Malformed frame — close with a protocol-error reason.
 			c.closeFromServer(websocket.StatusProtocolError,

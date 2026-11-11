@@ -159,6 +159,28 @@ jobs:
         working-directory: testdata/e2e
         run: node y-websocket.mjs "$RUNNER_TEMP/yserve"
 
+  hocuspocus-server:
+    name: Hocuspocus providers against ygo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: build the server and hook fixture
+        run: |
+          go build -o "$RUNNER_TEMP/yserve" ./cmd/yserve
+          go build -o "$RUNNER_TEMP/hpserver" ./testdata/e2e/hpserver
+      - name: install the providers
+        working-directory: testdata/e2e
+        run: npm ci
+      - name: run the providers
+        working-directory: testdata/e2e
+        run: node hocuspocus-server.mjs "$RUNNER_TEMP/hpserver" "$RUNNER_TEMP/yserve"
+
   hocuspocus:
     name: Go client against Hocuspocus servers
     runs-on: ubuntu-latest

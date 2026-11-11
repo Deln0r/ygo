@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/Deln0r/ygo/internal/block"
+	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/lib0"
 	"github.com/Deln0r/ygo/internal/store"
 )
@@ -156,4 +157,61 @@ func EncodeSnapshotAsUpdateV1(bs *store.BlockStore, snap Snapshot) []byte {
 	}
 	buf = snap.DS.Encode(buf) // V1 delete set, descending client order
 	return buf
+}
+
+// UpdateAddsNothing reports whether applying a V1 update to d would change
+// nothing: every block lies within d's state vector and every deletion is
+// already in d's delete set. It is yjs snapshotContainsUpdate against the
+// document's current snapshot, which a Hocuspocus server uses to answer a
+// read-only client's SyncStep2 with SyncStatus 1 when it carries nothing
+// new.
+func UpdateAddsNothing(d *doc.Doc, update []byte) (bool, error) {
+	u, _, err := DecodeUpdate(update)
+	if err != nil {
+		return false, err
+	}
+	rtxn := d.ReadTxn()
+	defer rtxn.Close()
+	bs := rtxn.Store()
+	sv := bs.GetStateVector()
+	for client, blocks := range u.Blocks {
+		for _, b := range blocks {
+			clock, length := b.ID.Clock, b.Len
+			if b.Kind == WireBlockItem && b.Item != nil {
+				clock, length = b.Item.ID.Clock, b.Item.Len
+			}
+			if sv[client] < clock+length {
+				return false, nil
+			}
+		}
+	}
+	have := buildDeleteSetFromStore(bs, sv)
+	covered := true
+	u.DeleteSet.Iterate(func(client uint64, ranges []Range) {
+		for _, r := range ranges {
+			if !rangeCovered(have.ClientRanges(client), r) {
+				covered = false
+			}
+		}
+	})
+	return covered, nil
+}
+
+// rangeCovered reports whether r lies within the union of sorted,
+// non-overlapping ranges.
+func rangeCovered(ranges []Range, r Range) bool {
+	at := r.Start
+	for _, x := range ranges {
+		if x.End() <= at {
+			continue
+		}
+		if x.Start > at {
+			return false
+		}
+		at = x.End()
+		if at >= r.End() {
+			return true
+		}
+	}
+	return r.Length == 0
 }

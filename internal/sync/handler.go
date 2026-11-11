@@ -95,6 +95,20 @@ type Conn struct {
 	// starts; it is read only on the connection's own read goroutine.
 	ReadOnly bool
 
+	// Hocuspocus makes the connection answer as a Hocuspocus server:
+	// a client SyncStep1 gets SyncStep1 then SyncStep2, every client
+	// SyncStep2 and Update gets a SyncStatus, QueryAwareness and Ping
+	// get no reply, and Auth and CLOSE are left to the session that
+	// owns the socket (server.go). Frames reach the handler with their
+	// routing key already removed, and the transport adds it back.
+	Hocuspocus bool
+
+	// StatelessBroadcast sends a Stateless envelope to every Hocuspocus
+	// connection of the document. A client BroadcastStateless is relayed
+	// through it as Stateless, as Hocuspocus servers 2 and 3 do; nil
+	// relays nothing. y-websocket clients have no stateless messages.
+	StatelessBroadcast Broadcaster
+
 	// AuthFailed reports whether this conn was rejected by the
 	// AuthHandler. The transport layer should check after each
 	// HandleFrame call and tear down the WS with code 4401 when
@@ -171,13 +185,26 @@ func (c *Conn) HandleFrame(frame *Frame) error {
 	case MessageAwareness:
 		return c.handleAwareness(frame)
 	case MessageQueryAwareness:
+		if c.Hocuspocus {
+			// No Hocuspocus server answers it over a WebSocket.
+			return nil
+		}
 		return c.handleQueryAwareness()
 	case MessagePing:
+		if c.Hocuspocus {
+			// A Hocuspocus server never sends 0x0a.
+			return nil
+		}
 		return c.Send(EncodePong())
 	case MessagePong:
 		// Server doesn't send pings yet; an inbound Pong is a no-op.
 		return nil
 	case MessageAuth:
+		if c.Hocuspocus {
+			// The session answered this key's Auth before the key was
+			// established; a later one is ignored, as servers 2 and 3 do.
+			return nil
+		}
 		return c.handleAuth(frame)
 	case MessageStateless:
 		if c.OnStateless != nil {
@@ -185,11 +212,15 @@ func (c *Conn) HandleFrame(frame *Frame) error {
 		}
 		return nil
 	case MessageBroadcastStateless:
+		// Relayed as Stateless to the document's Hocuspocus
+		// connections, as Hocuspocus servers 2 and 3 do. No client
+		// handles type 6, so it is never sent.
 		if c.OnStateless != nil {
 			c.OnStateless(c.DocName, string(frame.Payload))
 		}
-		// Fan out the same envelope so other conns receive it.
-		c.Broadcast(EncodeBroadcastStateless(string(frame.Payload)))
+		if c.StatelessBroadcast != nil {
+			c.StatelessBroadcast(EncodeStateless(string(frame.Payload)))
+		}
 		return nil
 	case MessageClose:
 		// Client-initiated close announcement. We don't act on
@@ -254,10 +285,23 @@ func (c *Conn) handleSync(frame *Frame) error {
 		}
 		rtxn := c.Doc.ReadTxn()
 		diff := encoding.EncodeDiff(c.Doc, rtxn, remoteSV)
+		sv := encoding.EncodeStateVector(rtxn.Store().GetStateVector(), nil)
 		rtxn.Close()
+		if c.Hocuspocus {
+			// A Hocuspocus server never opens with SyncStep1: it sends
+			// its own in reply, before the SyncStep2, and the client's
+			// SyncStep2 reply to it is what clears the provider's first
+			// unsynced change.
+			if err := c.Send(EncodeSyncStep1(sv)); err != nil {
+				return err
+			}
+		}
 		return c.Send(EncodeSyncStep2(diff))
 
 	case SyncStep2, SyncUpdate:
+		if c.Hocuspocus {
+			return c.handleHocuspocusContent(frame)
+		}
 		// Peer is delivering content. A read-only connection may not
 		// mutate the shared document: drop the update entirely (no
 		// apply, no broadcast) so it reaches neither the Doc nor peers.
@@ -282,6 +326,30 @@ func (c *Conn) handleSync(frame *Frame) error {
 	default:
 		return fmt.Errorf("%w: %d", ErrUnknownSyncSubType, frame.SyncSub)
 	}
+}
+
+// handleHocuspocusContent is SyncStep2 and Update on a Hocuspocus
+// connection: apply, reply SyncStatus 1, broadcast, as Hocuspocus server
+// 4 orders them. A read-only connection gets SyncStatus 0, or 1 for a
+// SyncStep2 that adds nothing. An update that fails to apply gets
+// SyncStatus 1 and is not broadcast: y-protocols logs and carries on,
+// and on a shared socket an error would cut every document.
+func (c *Conn) handleHocuspocusContent(frame *Frame) error {
+	if c.ReadOnly {
+		ok := false
+		if frame.SyncSub == SyncStep2 {
+			ok, _ = encoding.UpdateAddsNothing(c.Doc, frame.Payload)
+		}
+		return c.Send(EncodeSyncStatus(ok))
+	}
+	if err := encoding.ApplyUpdate(c.Doc, frame.Payload); err != nil {
+		return c.Send(EncodeSyncStatus(true))
+	}
+	err := c.Send(EncodeSyncStatus(true))
+	// The update is already applied. Even if its acknowledgement fails,
+	// peers and persistence must receive it before this connection leaves.
+	c.Broadcast(EncodeSyncUpdate(frame.Payload))
+	return err
 }
 
 func (c *Conn) handleAwareness(frame *Frame) error {

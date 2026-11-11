@@ -14,6 +14,17 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+**Upgrade impact:** an empty document name now opens a Hocuspocus session instead of returning HTTP 400. `yserve -path-prefix /ws/` serves Hocuspocus at `/ws` and y-websocket documents below `/ws/`. Client BroadcastStateless messages are relayed as Stateless to Hocuspocus peers; y-websocket peers no longer receive type 6.
+
+### Added
+
+- Serve `@hocuspocus/provider` 2.15.3, 3.4.4 and 4.8.0 through `Server.HocuspocusHandler()`, or `Handler()` at an empty document name. A socket can carry several document keys, including provider 4 session-aware keys. Each key has its own admission, permission, awareness ownership and close lifecycle; replies and broadcasts retain the recipient's key.
+- `Options.OnAuthenticateRequest` checks each new key's token with the upgrade request and can grant read-only access. `OnAuthenticate` remains the fallback. Frames received before the token wait in a queue bounded across the socket by 1000 messages, 5 MiB and 100 pending keys. A refusal drops that key's queue and allows another token attempt on the same socket.
+- `Server.SendStateless` sends to a document's Hocuspocus peers. `IdleTimeout` and `AuthTimeout` default to 60 seconds; the latter is an absolute deadline for the first admitted key. `MaxConns` counts sockets, including ones awaiting authentication; per-document limits and `Stats.Connections` count keys. All keys share one bounded send queue and writer.
+- CI runs the stock providers against ygo for sync, offline edits, acknowledgements, read-only access, denied tokens, stateless messages, shared sockets, session-aware keys, y-websocket peers, presence renewal and yserve's endpoint routing.
+
 ## [1.36.0] - 2026-11-10
 
 **Upgrade impact**:

@@ -117,6 +117,7 @@ func main() {
 	handler := srv.Handler()
 	if trimmed != "/" {
 		mux := http.NewServeMux()
+		mux.Handle(trimmed, srv.HocuspocusHandler())
 		mux.Handle(trimmed+"/", srv.Handler())
 		handler = mux
 	}

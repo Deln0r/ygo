@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"sync"
 	"time"
@@ -203,4 +204,23 @@ func (q *sendQueue) backlog() (int, int64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.items), q.total
+}
+
+// backlogForRoute attributes a shared socket's queued frames to one key.
+// An empty route is a y-websocket connection with its own queue.
+func (q *sendQueue) backlogForRoute(route []byte) (int, int64) {
+	if len(route) == 0 || q == nil {
+		return q.backlog()
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var n int
+	var size int64
+	for _, it := range q.items {
+		if bytes.HasPrefix(it.env, route) {
+			n++
+			size += int64(len(it.env))
+		}
+	}
+	return n, size
 }
