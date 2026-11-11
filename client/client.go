@@ -503,7 +503,7 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 
 	var hp *hpSession
 	if c.opts.Hocuspocus {
-		hp = &hpSession{answered: make(chan struct{})}
+		hp = &hpSession{}
 	}
 	c.mu.Lock()
 	c.conn = conn
@@ -548,7 +548,8 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 	}
 
 	writeErr := make(chan error, 1)
-	go func() { writeErr <- c.writePump(sessCtx, hp) }()
+	hs := newHandshake()
+	go func() { writeErr <- c.writePump(sessCtx, hp, hs) }()
 	var silent chan bool
 	if live != nil {
 		// The check counts from here: the handshake (a TokenFunc call in
@@ -559,7 +560,7 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 		go func() { silent <- c.watch(sessCtx, conn, live) }()
 	}
 
-	readErr := c.readPump(sessCtx, conn, live, hp)
+	readErr := c.readPump(sessCtx, conn, live, hp, hs)
 	sessCancel()
 	<-writeErr
 	wasSilent := silent != nil && <-silent
@@ -579,14 +580,14 @@ func (c *Client) session(ctx context.Context) (opened bool, err error) {
 // readPump applies inbound frames until the connection drops. conn is
 // passed explicitly (not read from c.conn) so the read path never
 // touches the lock-guarded field without the lock.
-func (c *Client) readPump(ctx context.Context, conn *websocket.Conn, live *liveness, hp *hpSession) error {
+func (c *Client) readPump(ctx context.Context, conn *websocket.Conn, live *liveness, hp *hpSession, hs *handshake) error {
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
 			return fmt.Errorf("client: read: %w", err)
 		}
 		live.startFrame()
-		c.handleFrame(raw, hp)
+		c.handleFrame(raw, hp, hs)
 		live.endFrame()
 	}
 }
@@ -594,7 +595,7 @@ func (c *Client) readPump(ctx context.Context, conn *websocket.Conn, live *liven
 // handleFrame applies one frame the read loop read. In Hocuspocus mode
 // the frame starts with its routing key; one for another document is
 // dropped.
-func (c *Client) handleFrame(raw []byte, hp *hpSession) {
+func (c *Client) handleFrame(raw []byte, hp *hpSession, hs *handshake) {
 	if hp != nil {
 		key, rest, err := syncpkg.DecodeRoute(raw)
 		if err != nil || key != c.opts.DocName {
@@ -611,7 +612,7 @@ func (c *Client) handleFrame(raw []byte, hp *hpSession) {
 	}
 	switch frame.Type {
 	case syncpkg.MessageSync, syncpkg.MessageSyncReply:
-		if err := c.handleSync(frame, hp); err != nil && c.opts.OnError != nil {
+		if err := c.handleSync(frame, hs); err != nil && c.opts.OnError != nil {
 			c.opts.OnError(err)
 		}
 	case syncpkg.MessageAwareness:
@@ -636,7 +637,7 @@ func (c *Client) handleFrame(raw []byte, hp *hpSession) {
 }
 
 // handleSync dispatches one sync sub-message.
-func (c *Client) handleSync(frame *syncpkg.Frame, hp *hpSession) error {
+func (c *Client) handleSync(frame *syncpkg.Frame, hs *handshake) error {
 	switch frame.SyncSub {
 	case syncpkg.SyncStep1:
 		// Server announces its state vector; reply with the diff and
@@ -653,9 +654,7 @@ func (c *Client) handleSync(frame *syncpkg.Frame, hp *hpSession) error {
 			return err
 		}
 		c.raiseLastSent(localSV)
-		if hp != nil {
-			hp.answer()
-		}
+		hs.finish()
 		return nil
 	case syncpkg.SyncStep2, syncpkg.SyncUpdate:
 		if len(frame.Payload) == 0 {
@@ -665,6 +664,9 @@ func (c *Client) handleSync(frame *syncpkg.Frame, hp *hpSession) error {
 			return err
 		}
 		if frame.SyncSub == syncpkg.SyncStep2 {
+			// A server that sends no SyncStep1 has no reply to carry this
+			// client's edits; they go as an update now.
+			hs.finish()
 			c.setSynced(true)
 		}
 		return nil
@@ -753,21 +755,18 @@ func (c *Client) raiseLastSent(sv store.StateVector) {
 // timeout (at least every 100ms), as y-protocols does, so the server and
 // peers keep an idle client's presence.
 //
-// In Hocuspocus mode it holds local edits back until the server's
-// SyncStep1 is answered, since that reply carries them, as the provider
-// sends them; it skips an update with nothing in it, which a server
-// confirms with a SyncStatus all the same; and it sends a QueryAwareness
-// when it has sent nothing for half the awareness timeout: Hocuspocus 4
-// closes a connection it has heard nothing from for its timeout, and
-// counts no ping, while every server ignores QueryAwareness.
-func (c *Client) writePump(ctx context.Context, hp *hpSession) error {
+// It holds local edits back until the handshake has carried them (see
+// handshake), so edits made offline go up once, as y-websocket's and
+// Hocuspocus's providers send them; and it skips an update with nothing in
+// it. In Hocuspocus mode it also sends a QueryAwareness when it has sent
+// nothing for half the awareness timeout: Hocuspocus 4 closes a connection
+// it has heard nothing from for its timeout, and counts no ping, while
+// every server ignores QueryAwareness.
+func (c *Client) writePump(ctx context.Context, hp *hpSession, hs *handshake) error {
 	renew := time.NewTicker(max(c.opts.AwarenessTimeout/10, 100*time.Millisecond))
 	defer renew.Stop()
-	docCh := c.dirtyDoc
-	var answered chan struct{}
-	if hp != nil {
-		docCh, answered = nil, hp.answered
-	}
+	var docCh chan struct{}
+	answered := hs.done
 	for {
 		select {
 		case <-ctx.Done():
@@ -790,7 +789,7 @@ func (c *Client) writePump(ctx context.Context, hp *hpSession) error {
 			diff := encoding.EncodeDiff(c.doc, rtxn, since)
 			localSV := cloneSV(rtxn.Store().GetStateVector())
 			rtxn.Close()
-			if hp != nil && isEmptyUpdate(diff) {
+			if isEmptyUpdate(diff) {
 				continue
 			}
 			if hp != nil {
@@ -838,6 +837,21 @@ func (c *Client) write(envelope []byte) error {
 	}
 	return conn.Write(ctx, websocket.MessageBinary, envelope)
 }
+
+// handshake holds a session's local edits back until the server's
+// SyncStep1 is answered: that reply carries everything the server lacks,
+// edits made offline included, and an update sent before it would carry
+// them a second time. A server that sends no SyncStep1 releases them with
+// its SyncStep2 instead. yserve and the y-websocket server send SyncStep1
+// as a connection opens; Hocuspocus servers in reply to the client's.
+type handshake struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func newHandshake() *handshake { return &handshake{done: make(chan struct{})} }
+
+func (h *handshake) finish() { h.once.Do(func() { close(h.done) }) }
 
 // isEmptyUpdate reports whether a V1 update holds no structs and no
 // deletions (00 00).
