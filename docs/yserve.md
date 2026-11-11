@@ -5,10 +5,9 @@ yserve is a self-hosted Yjs sync backend in one binary. It speaks the
 (checked with y-websocket 2.1 and 3.1). SQLite persistence and periodic
 document versioning are built in.
 
-**`@hocuspocus/provider` does not work with yserve.** Hocuspocus starts
-every frame with the document name, which yserve does not parse. (The Go
-client speaks Hocuspocus to Hocuspocus servers with
-`client.Options.Hocuspocus`.) See [Limits](#limits) before deploying.
+Hocuspocus server support is on `main` (unreleased). Providers 2.15.3,
+3.4.4 and 4.8.0 connect to the base URL, with the document name in their
+configuration. See [Coming from Hocuspocus](#coming-from-hocuspocus).
 
 **No Node. No Redis. No CGO.** Pure Go from the WebSocket accept loop
 down to the SQLite pages (via `modernc.org/sqlite`), which is why the
@@ -48,8 +47,10 @@ as `-path-prefix`, so that with `-path-prefix /ws/`
 
 ## Limits
 
-- **Hocuspocus.** `@hocuspocus/provider` (checked with 2.15, 3.4 and
-  4.8) cannot connect: its frames start with the document name.
+- **Hocuspocus.** Token refresh on an established key, server-initiated
+  token requests and Redis cluster opcodes are not implemented. Close and
+  reopen a key to change its token or scope. The Go backplane interface
+  provides document and presence relaying between ygo instances.
 - **Message size.** A client message larger than `-read-limit` (4 MiB
   by default) closes the connection with 1009, and the client
   reconnects and resends it in a loop. The first sync of a large
@@ -95,14 +96,12 @@ _ = store.RestoreVersion(ctx, "my-document", infos[0].ID)   // roll back
 
 ## Protocol coverage
 
-yserve speaks the `y-websocket` protocol: Sync (Step1 / Step2 / Update)
-and Awareness, plus QueryAwareness. It also implements Auth, Stateless,
-BroadcastStateless, Close and SyncStatus with Hocuspocus's message
-numbers, on the same frames and without Hocuspocus's document-name
-prefix, so no stock client sends them. `server.Options.OnAuthenticate`
-and `OnStateless` hook those messages. To authenticate a stock client,
-check the upgrade request in `OnConnect`
-(see [embedding](#embedding-in-your-own-go-backend)).
+yserve serves y-websocket Sync, Awareness and QueryAwareness, and
+Hocuspocus document-prefixed Sync, Awareness, Auth, Stateless, Close and
+SyncStatus frames. Both protocols can edit the same document. Hocuspocus
+keys are authenticated before the document is loaded; an unknown or denied
+key cannot receive the room's broadcasts. For y-websocket clients, check
+the upgrade request with `OnConnect`.
 
 The CRDT engine underneath is byte-for-byte wire-compatible with
 `yjs@13.6.33`, apart from a few Any values, verified by the cross-language fixture suite in CI (the count lives in README.md, where a CI check keeps it honest)
@@ -120,10 +119,50 @@ via the `persist` API.
 
 ## Coming from Hocuspocus
 
-Not a drop-in today: a Hocuspocus deployment has to move its clients to
-`y-websocket` first. Server-side extensions differ as well: Hocuspocus
-extensions are JavaScript, and yserve's equivalents are Go callbacks
-plus the `persist.Store` interface for custom storage backends.
+Point the provider at the base URL, without appending the document name:
+
+```js
+import * as Y from 'yjs'
+import { HocuspocusProvider } from '@hocuspocus/provider'
+
+const provider = new HocuspocusProvider({
+  url: 'ws://localhost:8080',
+  name: 'my-document',
+  document: new Y.Doc(),
+})
+```
+
+With `-path-prefix /ws/`, use `ws://localhost:8080/ws`. Providers strip
+trailing slashes. When embedding the server, mount
+`srv.HocuspocusHandler()` on an exact path such as `/collab`, and
+`srv.Handler()` on `/collab/` for y-websocket documents.
+
+Use `Options.OnAuthenticateRequest(r, docName, token)` to check a token
+with request headers or cookies and return its read-only permission.
+`OnAuthenticate(docName, token)` is the fallback; `ReadOnly` can impose
+an additional restriction. These hooks run once for each newly admitted
+key, as do `OnConnect` and `OnDisconnect`. A denied token gets
+PermissionDenied, drops the key's pending frames, and leaves the socket
+open for another attempt. With neither auth hook, a key can sync without
+a token, including provider 2's no-token mode.
+
+Multiple keys share one socket and send queue. `MaxConns` counts sockets,
+including those with no admitted keys; `MaxConnsPerDoc` and
+`Stats.Connections` count document keys. Pre-authentication buffering is
+limited to 1000 messages, 5 MiB and 100 pending keys across the socket;
+exceeding a limit closes it with 4205. `AuthTimeout` gives the socket
+60 seconds to admit its first key, regardless of inbound traffic.
+`IdleTimeout` closes a silent socket after 60 seconds with 4408. Both
+are configurable through `server.Options`.
+
+`Server.SendStateless(docName, payload)` broadcasts to the document's
+Hocuspocus peers. A provider's CLOSE removes only its key; a socket error
+or send-queue overflow disconnects all its keys. Provider 4's
+`sessionAwareness` keys share document content while retaining their
+individual routing keys and permissions.
+
+Hocuspocus extensions are JavaScript; port them to Go callbacks and the
+`persist.Store` interface when moving the server.
 
 ## Embedding in your own Go backend
 

@@ -367,11 +367,12 @@
 
 ## Sync protocol / WebSocket server
 
-### Hocuspocus framing (client resolved in 1.36.0, server open)
+### Hocuspocus framing (client resolved in 1.36.0, server resolved on main)
 
 - **What:** `@hocuspocus/provider` (2.15, 3.4, 4.8) cannot sync with the ygo server, and before 1.36.0 the Go client could not sync with `@hocuspocus/server` 4.8. Every Hocuspocus frame starts with `varString(documentName)` before the message type; ygo's frames start with the message type, as y-websocket's do. Found on 8 Nov 2026 by running the real clients: the two entries below were marked resolved against fixtures built without the document name, so they held only for y-websocket-style frames.
 - **Resolved for the client in 1.36.0:** `client.Options.Hocuspocus`: the routing key on every frame, Auth with the sub-types and scope `@hocuspocus/common` uses (the numbers in `internal/sync` were in another order, which no client uses), the SyncStatus bookkeeping (`Client.Unsynced`), CLOSE both ways, stateless messages, and a QueryAwareness keepalive for server 4's idle timeout, which counts no client ping. The CI job `hocuspocus` runs it against servers 4.8, 3.4 and 2.15 next to the provider of each version.
-- **Still open, the server:** yserve parses no routing key. Fix needs: reading the document name in front of every frame (the first frame decides between the two framings: y-websocket always opens with Sync step 1, type 0, and a document name is never empty), the Auth handshake providers wait for, several documents over one socket, and a CI job with the real providers.
+- **Server resolved on main:** `Server.HocuspocusHandler()` and the empty-name path of `Handler()` serve document-prefixed frames. Per-key authentication, bounded pre-auth queues, shared transport, SyncStatus, read-only scopes, per-key CLOSE and session-aware routing are covered by server tests. CI runs providers 2.15.3, 3.4.4 and 4.8.0 against the server, including shared rooms with y-websocket clients.
+- **Still open:** `onTokenSync` refresh on an established key, server-initiated token requests and Redis cluster opcodes. Token changes require closing and reopening the key.
 
 ### The y-websocket client sends offline edits twice on reconnect (open)
 
@@ -387,7 +388,8 @@
   - `server/server.go` exposes `Options.OnAuthenticate` and `Options.OnStateless`. The readLoop checks `AuthFailed` after each HandleFrame and tears down the WS with `CloseStatusUnauthorized` (4401) when set.
   - 7 unit tests in `internal/sync/hocuspocus_test.go` plus 3 E2E tests in `server/server_test.go` (deny → 4401 close, accept → Authenticated reply, broadcast-stateless fans out across two clients).
 - **Connection-level read-only (resolved):** `server.Options.ReadOnly func(docName, r) bool` marks a connection read-only; the sync handler then drops inbound document mutations (SyncStep2 / SyncUpdate: no apply, no broadcast) while still serving reads (SyncStep1) and still accepting awareness. Enforced in `internal/sync/handler.go` via `Conn.ReadOnly`.
-- **Remaining gaps:** finer-grained scoping tied to the auth token specifically (per-document / per-field permissions decided inside `OnAuthenticate` rather than from the request) is still absent; the connection-level `Options.ReadOnly` predicate covers the common viewer-vs-editor case. Add the token-scoped model when an adopter asks.
+- **Token-scoped permissions resolved on main:** `OnAuthenticateRequest` grants a Hocuspocus key read-only access from its token and request. Per-field permissions remain outside the sync protocol.
+- **Correction:** the original extension and fixture tests below used unprefixed frames. They did not establish compatibility with stock providers. The current provider CI job tests that path; legacy y-websocket Auth retains its original connection-close behavior.
 
 ### Cross-language y-websocket / Hocuspocus fixture (resolved)
 

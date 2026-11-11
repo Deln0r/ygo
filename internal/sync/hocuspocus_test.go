@@ -122,22 +122,28 @@ func TestHocus_Stateless_CallbackInvoked(t *testing.T) {
 	}
 }
 
-func TestHocus_BroadcastStateless_FansOut(t *testing.T) {
+func TestHocus_BroadcastStateless_RelayedAsStateless(t *testing.T) {
+	// A client type 6 is relayed as type 5 to the document's Hocuspocus
+	// connections, as Hocuspocus servers 2 and 3 do; no client handles
+	// type 6, so it never goes out, and y-websocket peers get nothing.
 	conn, tr := newHocusConn(t, "doc-A")
+	var relayed [][]byte
+	conn.StatelessBroadcast = func(env []byte) { relayed = append(relayed, env) }
 
 	wire := syncpkg.EncodeBroadcastStateless("hello-everyone")
 	frame, _, _ := syncpkg.DecodeEnvelope(wire)
 	if err := conn.HandleFrame(frame); err != nil {
 		t.Fatal(err)
 	}
-	if len(tr.Broadcast) != 1 {
-		t.Fatalf("Broadcast count = %d, want 1", len(tr.Broadcast))
+	if len(tr.Broadcast) != 0 {
+		t.Fatalf("Broadcast count = %d, want 0", len(tr.Broadcast))
 	}
-	echoed, _, _ := syncpkg.DecodeEnvelope(tr.Broadcast[0])
-	if echoed.Type != syncpkg.MessageBroadcastStateless ||
-		string(echoed.Payload) != "hello-everyone" {
-		t.Errorf("broadcast = %d/%q, want BroadcastStateless/hello-everyone",
-			echoed.Type, echoed.Payload)
+	if len(relayed) != 1 {
+		t.Fatalf("stateless relays = %d, want 1", len(relayed))
+	}
+	echoed, _, _ := syncpkg.DecodeEnvelope(relayed[0])
+	if echoed.Type != syncpkg.MessageStateless || string(echoed.Payload) != "hello-everyone" {
+		t.Errorf("relayed = %d/%q, want Stateless/hello-everyone", echoed.Type, echoed.Payload)
 	}
 }
 
