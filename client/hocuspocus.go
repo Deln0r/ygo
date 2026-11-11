@@ -46,13 +46,9 @@ var afterSendClose func()
 
 // hpSession is one connection's Hocuspocus state.
 type hpSession struct {
-	answered     chan struct{} // closed once the server's SyncStep1 is answered
-	answeredOnce sync.Once
-	mu           sync.Mutex
-	err          error // what ended the session, from the server's frames
+	mu  sync.Mutex
+	err error // what ended the session, from the server's frames
 }
-
-func (s *hpSession) answer() { s.answeredOnce.Do(func() { close(s.answered) }) }
 
 func (s *hpSession) fail(err error) {
 	s.mu.Lock()
