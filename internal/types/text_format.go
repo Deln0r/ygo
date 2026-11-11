@@ -172,7 +172,7 @@ func integrateContent(txn *doc.TransactionMut, branch *block.Branch, left, right
 		Flags:       block.FlagCountable,
 	}
 	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
+	if dropped := item.IntegrateTracked(txn); dropped {
 		txn.Delete(item)
 	}
 	return item
@@ -745,7 +745,7 @@ func buildFormatMarker(txn *doc.TransactionMut, left, right *block.Item, parentB
 		// false for KindFormat).
 	}
 	txn.Store().PushBlock(marker)
-	if dropped := marker.Integrate(txn, 0); dropped {
+	if dropped := marker.IntegrateTracked(txn); dropped {
 		txn.Delete(marker)
 	}
 	return marker

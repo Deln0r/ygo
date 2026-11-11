@@ -87,6 +87,19 @@ type IntegrateContext interface {
 //   - Weak-link (info.IsLinked) bookkeeping is skipped.
 //   - Format-marker integration is a no-op (matches yrs).
 func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
+	return i.integrate(ctx, offset, false)
+}
+
+// IntegrateTracked integrates a local insert whose caller keeps the
+// parent's search markers in step itself (MarkerList.ShiftAfter at the
+// index it inserted at), so the parent's markers are not dropped. yjs
+// keeps them the same way: its type API updates them on a local insert
+// and only a remote transaction or an undo step resets them.
+func (i *Item) IntegrateTracked(ctx IntegrateContext) bool {
+	return i.integrate(ctx, 0, true)
+}
+
+func (i *Item) integrate(ctx IntegrateContext, offset uint64, trackedMarkers bool) bool {
 	if offset > 0 {
 		// TODO: port the offset > 0 path (block.rs:569-583). Used
 		// when Update.integrate is applying a partial item; not
@@ -277,15 +290,11 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 		return true
 	}
 
-	// Positional inserts may have shifted user-facing indices in
-	// ways the per-branch search-marker cache can't describe (this
-	// path is taken by both local API mutations AND remote ApplyUpdate
-	// integrations; the API side has already-correct ShiftAfter
-	// hooks in Array.InsertRange / Text.Insert, but the apply side
-	// has no idea which markers to shift). Invalidate the cache; the
-	// API-side caller refills it with a single marker after Integrate
-	// returns, so within-txn locality (the B4 workload) still wins.
-	if i.ParentSub == nil {
+	// A positional insert shifts user-facing indices. A caller of
+	// IntegrateTracked shifts the markers itself; on every other path
+	// (an update, an undo step) the index of the insert is unknown here,
+	// so the cache is dropped.
+	if i.ParentSub == nil && !trackedMarkers {
 		parent.Markers.Invalidate()
 	}
 	return false
