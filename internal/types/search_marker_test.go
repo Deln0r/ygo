@@ -43,15 +43,15 @@ func checkMarkers(br *block.Branch) error {
 // each of its positions comes from a walk from the start. Both must end
 // up byte for byte the same.
 type markerPair struct {
-	t          *testing.T
-	seed       uint64
-	docs       [2]*doc.Doc
-	txns       [2]*doc.TransactionMut
-	branch     [2]*block.Branch
-	undo       [2]*undo.UndoManager
-	remote     *doc.Doc
-	name       string
-	ops        int
+	t      *testing.T
+	seed   uint64
+	docs   [2]*doc.Doc
+	txns   [2]*doc.TransactionMut
+	branch [2]*block.Branch
+	undo   [2]*undo.UndoManager
+	remote *doc.Doc
+	name   string
+	ops    int
 }
 
 func newMarkerPair(t *testing.T, seed uint64, name string) *markerPair {

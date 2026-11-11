@@ -129,7 +129,9 @@ func (l *ClientBlockList) SquashFrom(startIdx int) int {
 			l.list[w] = CellOfGC(prev.GC.Start, cur.GC.End)
 		default:
 			w++
-			l.list[w] = cur
+			if w != r {
+				l.list[w] = cur
+			}
 		}
 	}
 	removed := len(l.list) - (w + 1)
