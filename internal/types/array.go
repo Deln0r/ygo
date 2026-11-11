@@ -138,7 +138,7 @@ func (a *Array) insertBetween(txn *doc.TransactionMut, idx uint64, left, right *
 	}
 
 	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
+	if dropped := item.IntegrateTracked(txn); dropped {
 		txn.Delete(item)
 		return
 	}
@@ -351,30 +351,43 @@ func findInsertPosition(branch *block.Branch, txn *doc.TransactionMut, idx uint6
 	return lastSeen, nil
 }
 
-// startFromMarker picks the best starting point for a position
-// walk: either the nearest marker (if it's closer to idx than
-// branch.Start) or branch.Start itself. Returns the starting Item
-// and its known starting index.
-//
-// Backward walks (target idx < marker.Index) are skipped — the
-// shared types' walk loops are forward-only (cur = cur.Right).
-// Reverse-direction walking would need a separate Left-traversal
-// path that the current callers don't have; an opportunistic
-// future enhancement.
+// startFromMarker picks the starting point for a forward position walk
+// to idx: an item and the number of live countable units before it,
+// which is at most idx. It starts from the marker nearest idx. A marker
+// at or before idx is returned as it is. From a marker past idx it walks
+// left to the live countable item that starts at or before idx, as yjs
+// findMarker does, when that is closer than idx itself; otherwise the
+// walk starts at branch.Start (nil, 0).
 func startFromMarker(branch *block.Branch, idx uint64) (*block.Item, uint64) {
 	if branch.Markers == nil {
 		return nil, 0
 	}
 	mk := branch.Markers.Nearest(idx)
-	if mk == nil || mk.Item == nil {
+	if mk == nil || mk.Item == nil || mk.Index == 0 {
 		return nil, 0
 	}
-	// Forward-only: marker.Index must be <= idx and closer than 0.
-	if mk.Index > idx || mk.Index == 0 {
+	if mk.Index <= idx {
+		branch.Markers.Touch(mk)
+		return mk.Item, mk.Index
+	}
+	if mk.Index-idx >= idx {
 		return nil, 0
+	}
+	p, pidx := mk.Item, mk.Index
+	for pidx > idx {
+		p = p.Left
+		if p == nil {
+			return nil, 0
+		}
+		if !p.IsDeleted() && p.IsCountable() {
+			if p.Len > pidx {
+				return nil, 0
+			}
+			pidx -= p.Len
+		}
 	}
 	branch.Markers.Touch(mk)
-	return mk.Item, mk.Index
+	return p, pidx
 }
 
 // rememberMarker records the (item, idx) pair so the next call
@@ -492,7 +505,10 @@ func (a *Array) insertNested(txn *doc.TransactionMut, idx uint64, inner *block.B
 	}
 
 	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
+	if dropped := item.IntegrateTracked(txn); dropped {
 		txn.Delete(item)
+		return
 	}
+	a.branch.Markers.ShiftAfter(idx, item.Len)
+	rememberMarker(a.branch, item, idx)
 }

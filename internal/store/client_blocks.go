@@ -3,6 +3,8 @@ package store
 import (
 	"fmt"
 	"sort"
+
+	"github.com/Deln0r/ygo/internal/block"
 )
 
 // ClientBlockList is the dense, clock-ordered list of every block
@@ -107,38 +109,46 @@ func (l *ClientBlockList) SquashFrom(startIdx int) int {
 	if startIdx < 1 {
 		startIdx = 1
 	}
-	removed := 0
-	for i := startIdx; i >= 1 && i < len(l.list); {
-		prev := l.list[i-1]
-		cur := l.list[i]
+	if startIdx >= len(l.list) {
+		return 0
+	}
+	// One pass: w is the last kept cell, and every cell after it either
+	// merges into it or is kept next to it.
+	w := startIdx - 1
+	for r := startIdx; r < len(l.list); r++ {
+		prev, cur := l.list[w], l.list[r]
 		switch {
 		case prev.Kind == CellKindItem && cur.Kind == CellKindItem &&
-			prev.Item != nil && cur.Item != nil &&
-			prev.Item.TrySquash(cur.Item):
-			// cur merged into prev; its Item is now detached from the
-			// list. Any search marker pointing at the absorbed item is
-			// stale, so invalidate the branch's marker cache. This is
-			// cheap and does not regress positional walks: after squash
-			// the branch holds far fewer items, so a marker-less walk is
-			// already O(items).
-			if br := prev.Item.Parent.Branch; br != nil && br.Markers != nil {
-				br.Markers.Invalidate()
-			}
-			l.list = append(l.list[:i], l.list[i+1:]...)
-			removed++
+			prev.Item != nil && cur.Item != nil && squashItems(prev.Item, cur.Item):
+			// cur merged into prev and left the linked list.
 		case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
 			// Collapse two adjacent garbage-collected runs into one,
 			// matching yjs's merge of contiguous GC structs. This is the
 			// run that forms when a deleted shared type's children are
 			// each replaced with a GC cell (see ReplaceWithGC).
-			l.list[i-1] = CellOfGC(prev.GC.Start, cur.GC.End)
-			l.list = append(l.list[:i], l.list[i+1:]...)
-			removed++
+			l.list[w] = CellOfGC(prev.GC.Start, cur.GC.End)
 		default:
-			i++
+			w++
+			l.list[w] = cur
 		}
 	}
+	removed := len(l.list) - (w + 1)
+	clear(l.list[w+1:])
+	l.list = l.list[:w+1]
 	return removed
+}
+
+// squashItems merges other into its left neighbour i (Item.TrySquash)
+// and moves the search markers that pointed at other onto i.
+func squashItems(i, other *block.Item) bool {
+	before := i.Len
+	if !i.TrySquash(other) {
+		return false
+	}
+	if br := i.Parent.Branch; br != nil && br.Markers != nil {
+		br.Markers.Absorbed(other, i, before)
+	}
+	return true
 }
 
 // MergeWithLefts merges the cell at pos into its left neighbour, and the
@@ -150,10 +160,7 @@ func (l *ClientBlockList) MergeWithLefts(pos int) int {
 		prev, cur := l.list[i-1], l.list[i]
 		switch {
 		case prev.Kind == CellKindItem && cur.Kind == CellKindItem &&
-			prev.Item != nil && cur.Item != nil && prev.Item.TrySquash(cur.Item):
-			if br := prev.Item.Parent.Branch; br != nil && br.Markers != nil {
-				br.Markers.Invalidate()
-			}
+			prev.Item != nil && cur.Item != nil && squashItems(prev.Item, cur.Item):
 		case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
 			l.list[i-1] = CellOfGC(prev.GC.Start, cur.GC.End)
 		default:
