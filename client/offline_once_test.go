@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/Deln0r/ygo/client"
+	"github.com/Deln0r/ygo/internal/awareness"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
@@ -30,6 +31,8 @@ type fakeYWS struct {
 	reject atomic.Bool
 	dials  atomic.Int32
 	url    string
+	// greeting, when set, is sent after the SyncStep1 at every connect.
+	greeting []byte
 }
 
 func newFakeYWS(t *testing.T) *fakeYWS {
@@ -57,6 +60,9 @@ func (f *fakeYWS) serve(w http.ResponseWriter, r *http.Request) {
 	sv := encoding.EncodeStateVector(rtxn.Store().GetStateVector(), nil)
 	rtxn.Close()
 	_ = conn.Write(ctx, websocket.MessageBinary, syncpkg.EncodeSyncStep1(sv))
+	if f.greeting != nil {
+		_ = conn.Write(ctx, websocket.MessageBinary, f.greeting)
+	}
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
@@ -156,4 +162,32 @@ func TestClient_OfflineEditsGoUpOnce(t *testing.T) {
 	m.Set(txn, "k2", "live")
 	txn.Commit()
 	waitFor(t, "the live edit", func() bool { _, u := f.counts(); return u == 1 })
+}
+
+// A peer the client has not heard from for AwarenessTimeout is dropped, as
+// y-protocols drops it, even when the server never sends its removal (a
+// server that does not sweep, or a removal lost on the way). Before, it
+// stayed until the connection closed.
+func TestClient_SilentPeerDropped(t *testing.T) {
+	f := newFakeYWS(t)
+	peer := awareness.New(55)
+	peer.SetLocalState([]byte(`{"user":"gone"}`))
+	f.greeting = syncpkg.EncodeAwareness(peer.Encode(nil))
+	c, err := client.New(client.Options{
+		URL: f.url, DocName: "room", AwarenessTimeout: time.Second,
+		Doc: doc.NewDocWithOptions(doc.Options{ClientID: 98}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	waitFor(t, "the peer's presence", func() bool { return c.Awareness().States()[55] != nil })
+	start := time.Now()
+	waitFor(t, "the silent peer dropped", func() bool { return c.Awareness().States()[55] == nil })
+	if d := time.Since(start); d < 800*time.Millisecond {
+		t.Errorf("dropped after %v, before the timeout", d)
+	}
 }

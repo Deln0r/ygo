@@ -118,9 +118,10 @@ type Options struct {
 	MaxBackoff time.Duration
 
 	// AwarenessTimeout is how long peers keep this client's presence
-	// without hearing from it. The client renews its state at half of
-	// this, checking every tenth of it (at least every 100ms), as
-	// y-protocols does. Default 30s, the y-protocols value. Set it to the
+	// without hearing from it, and how long this client keeps a peer's.
+	// The client renews its state at half of this, checking every tenth
+	// of it (at least every 100ms), and drops peers silent for all of it,
+	// as y-protocols does. Default 30s, the y-protocols value. Set it to the
 	// server's timeout when that is shorter. Do not set it above 30s when
 	// JavaScript peers are in the room: y-protocols times out a client it
 	// has not heard from for 30 seconds, whatever the server does.
@@ -777,6 +778,10 @@ func (c *Client) writePump(ctx context.Context, hp *hpSession, hs *handshake) er
 			if c.awareness.RenewLocalState(c.opts.AwarenessTimeout / 2) {
 				c.sendAwareness()
 			}
+			// Peers not heard from for the timeout are dropped, as
+			// y-protocols drops them, whether or not the server sends their
+			// removal.
+			c.awareness.SweepOutdated(c.opts.AwarenessTimeout)
 			if hp != nil && time.Since(c.base)-time.Duration(c.lastWrite.Load()) >= c.opts.AwarenessTimeout/2 {
 				_ = c.write(syncpkg.EncodeQueryAwareness())
 			}
