@@ -203,6 +203,14 @@ func (m *MarkerList) Invalidate() {
 	m.markers = m.markers[:0]
 }
 
+// Snapshot returns a copy of the markers, for tests and debugging.
+func (m *MarkerList) Snapshot() []SearchMarker {
+	if m == nil {
+		return nil
+	}
+	return append([]SearchMarker(nil), m.markers...)
+}
+
 // Len returns the current marker count — useful only for tests
 // and debug observability.
 func (m *MarkerList) Len() int {
