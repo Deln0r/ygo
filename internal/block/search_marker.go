@@ -15,15 +15,14 @@ package block
 // (held by TransactionMut). Read-only access from a read txn is
 // safe as long as no concurrent writer holds the same Branch.
 type SearchMarker struct {
-	// Item is the linked-list node this marker points at. May be
-	// a tombstone (in which case Index is the position immediately
-	// after the tombstone run that includes Item — slightly stale
-	// markers still resolve correctly because the search walks
-	// forward from the marker and counts live items).
+	// Item is the linked-list node this marker points at: a live
+	// item, a tombstone or a live uncountable one (a format marker).
 	Item *Item
 
-	// Index is the user-facing index where Item starts in document
-	// order (countable, non-deleted items only).
+	// Index is the number of live countable units before Item in
+	// document order. Lookups trust it exactly, so every edit that
+	// moves it updates it (ShiftAfter, ShrinkAfter, Absorbed) or drops
+	// the markers (Invalidate).
 	Index uint64
 
 	// Timestamp is a monotonic clock value bumped on Touch / Add;
@@ -57,7 +56,7 @@ func NewMarkerList() *MarkerList {
 //
 // Returned pointer aliases internal state; callers must NOT retain
 // it past the next list mutation (Add / Touch / ShiftAfter /
-// ShrinkAfter).
+// ShrinkAfter / Absorbed / Invalidate).
 func (m *MarkerList) Nearest(target uint64) *SearchMarker {
 	if m == nil || len(m.markers) == 0 {
 		return nil
@@ -114,45 +113,87 @@ func (m *MarkerList) Add(item *Item, index uint64) {
 	m.markers[oldestIdx] = SearchMarker{Item: item, Index: index, Timestamp: m.clock}
 }
 
-// ShiftAfter is called after an Insert at insertIdx with length
-// insertLen. Markers whose Index is strictly greater than
-// insertIdx shift right by insertLen (their items now appear
-// `insertLen` positions later). Markers at exactly insertIdx and
-// before are unaffected — the newly-inserted item lives at
-// insertIdx but did not displace anything before it.
+// ShiftAfter is called after insertLen countable units went in at
+// insertIdx. An item past the insert moves right by insertLen. A marker
+// whose Index is greater than insertIdx is past it, and so is a live
+// countable item that started at insertIdx: content at insertIdx is
+// always placed before the content that was there. A tombstone or an
+// uncountable item at insertIdx may sit on either side of the new item,
+// so its marker is dropped. Markers before insertIdx are unaffected.
 func (m *MarkerList) ShiftAfter(insertIdx, insertLen uint64) {
-	if m == nil || insertLen == 0 {
+	if m == nil || insertLen == 0 || len(m.markers) == 0 {
 		return
 	}
-	for i := range m.markers {
-		if m.markers[i].Index > insertIdx {
-			m.markers[i].Index += insertLen
+	out := m.markers[:0]
+	for _, mk := range m.markers {
+		switch {
+		case mk.Index > insertIdx:
+			mk.Index += insertLen
+		case mk.Index == insertIdx:
+			if mk.Item.IsDeleted() || !mk.Item.IsCountable() {
+				continue
+			}
+			mk.Index += insertLen
 		}
+		out = append(out, mk)
 	}
+	m.markers = out
 }
 
 // ShrinkAfter is called after a Delete at [delIdx, delIdx+delLen).
-// Markers whose Index falls inside the deleted range are dropped
-// (their items may now point at tombstones for which we can't
-// reliably regenerate a position without re-walking). Markers
-// strictly after the range shift left by delLen. Markers strictly
-// before are unaffected.
+// Markers at or after the range end shift left by delLen. A marker
+// inside the range now points at a deleted item, or at an uncountable
+// one, with exactly the live units before delIdx in front of it, so it
+// moves to delIdx and stays usable. Markers at or before delIdx are
+// unaffected.
 func (m *MarkerList) ShrinkAfter(delIdx, delLen uint64) {
 	if m == nil || delLen == 0 || len(m.markers) == 0 {
 		return
 	}
 	delEnd := delIdx + delLen
-	out := m.markers[:0]
-	for _, mk := range m.markers {
+	for i := range m.markers {
+		mk := &m.markers[i]
 		switch {
-		case mk.Index < delIdx:
-			out = append(out, mk)
 		case mk.Index >= delEnd:
 			mk.Index -= delLen
-			out = append(out, mk)
-		default:
-			// inside [delIdx, delEnd) — drop
+		case mk.Index > delIdx:
+			mk.Index = delIdx
 		}
+	}
+}
+
+// Absorbed is called after a commit-time squash merged from into its
+// left neighbour into, which was intoLen units long before the merge.
+// A marker on from moves to into: from started intoLen countable units
+// after into when into is live and countable, and at into's index when
+// into is a tombstone (a squash only joins items in the same deleted
+// state).
+func (m *MarkerList) Absorbed(from, into *Item, intoLen uint64) {
+	if m == nil {
+		return
+	}
+	shift := uint64(0)
+	if !into.IsDeleted() && into.IsCountable() {
+		shift = intoLen
+	}
+	intoMarked := false
+	for _, mk := range m.markers {
+		if mk.Item == into {
+			intoMarked = true
+			break
+		}
+	}
+	out := m.markers[:0]
+	for _, mk := range m.markers {
+		if mk.Item == from {
+			// into already has a marker, with the same index.
+			if intoMarked || mk.Index < shift {
+				continue
+			}
+			mk.Item = into
+			mk.Index -= shift
+		}
+		out = append(out, mk)
 	}
 	m.markers = out
 }
@@ -167,6 +208,14 @@ func (m *MarkerList) Invalidate() {
 		return
 	}
 	m.markers = m.markers[:0]
+}
+
+// Snapshot returns a copy of the markers, for tests and debugging.
+func (m *MarkerList) Snapshot() []SearchMarker {
+	if m == nil {
+		return nil
+	}
+	return append([]SearchMarker(nil), m.markers...)
 }
 
 // Len returns the current marker count — useful only for tests

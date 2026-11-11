@@ -85,8 +85,24 @@ type IntegrateContext interface {
 //   - Move integration recursion is skipped.
 //   - Subdoc registration (ContentDoc) is skipped.
 //   - Weak-link (info.IsLinked) bookkeeping is skipped.
-//   - Format-marker integration is a no-op (matches yrs).
+//   - Format-marker integration only flags the parent as formatted
+//     (HasFormatting).
 func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
+	return i.integrate(ctx, offset, false)
+}
+
+// IntegrateTracked integrates a local insert whose caller keeps the
+// parent's search markers in step itself (MarkerList.ShiftAfter at the
+// index it inserted at), so the parent's markers are not dropped. yjs
+// keeps them the same way on a local insert: its type API updates them,
+// and a remote transaction or an undo step resets them. (yjs also stops
+// using them for a type once a format item integrates into it; ygo
+// keeps them, since Text.Delete still looks up positions from them.)
+func (i *Item) IntegrateTracked(ctx IntegrateContext) bool {
+	return i.integrate(ctx, 0, true)
+}
+
+func (i *Item) integrate(ctx IntegrateContext, offset uint64, trackedMarkers bool) bool {
 	if offset > 0 {
 		// TODO: port the offset > 0 path (block.rs:569-583). Used
 		// when Update.integrate is applying a partial item; not
@@ -277,15 +293,11 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 		return true
 	}
 
-	// Positional inserts may have shifted user-facing indices in
-	// ways the per-branch search-marker cache can't describe (this
-	// path is taken by both local API mutations AND remote ApplyUpdate
-	// integrations; the API side has already-correct ShiftAfter
-	// hooks in Array.InsertRange / Text.Insert, but the apply side
-	// has no idea which markers to shift). Invalidate the cache; the
-	// API-side caller refills it with a single marker after Integrate
-	// returns, so within-txn locality (the B4 workload) still wins.
-	if i.ParentSub == nil {
+	// A positional insert shifts user-facing indices. A caller of
+	// IntegrateTracked shifts the markers itself; on every other path
+	// (an update, an undo step) the index of the insert is unknown here,
+	// so the cache is dropped.
+	if i.ParentSub == nil && !trackedMarkers {
 		parent.Markers.Invalidate()
 	}
 	return false

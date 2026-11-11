@@ -43,8 +43,9 @@ func (a *Array) Len() uint64 { return a.branch.BlockLen }
 // Insert inserts a single value at idx. Convenience for
 // InsertRange with a one-element slice.
 //
-// idx must be in [0, Len]; out-of-range inserts append at the end
-// (matching JS Y.Array.insert tolerant behaviour).
+// idx should be in [0, Len]. A larger idx appends the value after the
+// last item of the list, deleted or not, as Push does; yjs throws
+// instead.
 func (a *Array) Insert(txn *doc.TransactionMut, idx uint64, value any) {
 	a.InsertRange(txn, idx, []any{value})
 }
@@ -103,8 +104,10 @@ func validValues(values []any) []any {
 }
 
 // insertBetween integrates values as one item between left and right,
-// at user index idx (for the search markers).
+// at user index idx (for the search markers). An idx past the end is
+// recorded as Len, where the item lands.
 func (a *Array) insertBetween(txn *doc.TransactionMut, idx uint64, left, right *block.Item, values []any) {
+	idx = min(idx, a.Len())
 	values = validValues(values)
 	var origin, rightOrigin *block.ID
 	if left != nil {
@@ -138,7 +141,7 @@ func (a *Array) insertBetween(txn *doc.TransactionMut, idx uint64, left, right *
 	}
 
 	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
+	if dropped := item.IntegrateTracked(txn); dropped {
 		txn.Delete(item)
 		return
 	}
@@ -351,30 +354,43 @@ func findInsertPosition(branch *block.Branch, txn *doc.TransactionMut, idx uint6
 	return lastSeen, nil
 }
 
-// startFromMarker picks the best starting point for a position
-// walk: either the nearest marker (if it's closer to idx than
-// branch.Start) or branch.Start itself. Returns the starting Item
-// and its known starting index.
-//
-// Backward walks (target idx < marker.Index) are skipped — the
-// shared types' walk loops are forward-only (cur = cur.Right).
-// Reverse-direction walking would need a separate Left-traversal
-// path that the current callers don't have; an opportunistic
-// future enhancement.
+// startFromMarker picks the starting point for a forward position walk
+// to idx: an item and the number of live countable units before it,
+// which is at most idx. It starts from the marker nearest idx. A marker
+// at or before idx is returned as it is. From a marker past idx it walks
+// left to the live countable item that starts at or before idx, as yjs
+// findMarker does, when that is closer than idx itself; otherwise the
+// walk starts at branch.Start (nil, 0).
 func startFromMarker(branch *block.Branch, idx uint64) (*block.Item, uint64) {
 	if branch.Markers == nil {
 		return nil, 0
 	}
 	mk := branch.Markers.Nearest(idx)
-	if mk == nil || mk.Item == nil {
+	if mk == nil || mk.Item == nil || mk.Index == 0 {
 		return nil, 0
 	}
-	// Forward-only: marker.Index must be <= idx and closer than 0.
-	if mk.Index > idx || mk.Index == 0 {
+	if mk.Index <= idx {
+		branch.Markers.Touch(mk)
+		return mk.Item, mk.Index
+	}
+	if mk.Index-idx >= idx {
 		return nil, 0
+	}
+	p, pidx := mk.Item, mk.Index
+	for pidx > idx {
+		p = p.Left
+		if p == nil {
+			return nil, 0
+		}
+		if !p.IsDeleted() && p.IsCountable() {
+			if p.Len > pidx {
+				return nil, 0
+			}
+			pidx -= p.Len
+		}
 	}
 	branch.Markers.Touch(mk)
-	return mk.Item, mk.Index
+	return p, pidx
 }
 
 // rememberMarker records the (item, idx) pair so the next call
@@ -433,7 +449,7 @@ func extractValueAt(c block.Content, offset uint64) any {
 // InsertMap inserts a freshly-constructed nested Map at idx and
 // returns the wrapper. Per docs/yrs-port-notes/nested-types.md §6.
 //
-// Like InsertRange, idx is clamped to [0, Len]; the new Map element
+// Like InsertRange, an idx past Len appends; the new Map element
 // occupies one slot (Len contribution = 1).
 func (a *Array) InsertMap(txn *doc.TransactionMut, idx uint64) *Map {
 	inner := &block.Branch{
@@ -465,6 +481,7 @@ func (a *Array) InsertText(txn *doc.TransactionMut, idx uint64) *Text {
 // to the Item.
 func (a *Array) insertNested(txn *doc.TransactionMut, idx uint64, inner *block.Branch) {
 	left, right := findInsertPosition(a.branch, txn, idx)
+	idx = min(idx, a.Len())
 
 	var origin, rightOrigin *block.ID
 	if left != nil {
@@ -492,7 +509,10 @@ func (a *Array) insertNested(txn *doc.TransactionMut, idx uint64, inner *block.B
 	}
 
 	txn.Store().PushBlock(item)
-	if dropped := item.Integrate(txn, 0); dropped {
+	if dropped := item.IntegrateTracked(txn); dropped {
 		txn.Delete(item)
+		return
 	}
+	a.branch.Markers.ShiftAfter(idx, item.Len)
+	rememberMarker(a.branch, item, idx)
 }
