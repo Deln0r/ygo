@@ -276,7 +276,7 @@ If you run a `y-websocket` deployment and want to move the server side to Go (no
 
 ## Benchmarks
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the full table and a comparison with reearth/ygo. B4 (259,778-edit real-world LaTeX paper trace) on one Apple M3, measured on 2026-11-11 with ygo 1.38.0 on Go 1.26.3 and yjs 13.6.33 on Node 26.6, all edits in one transaction with client ID 1, fastest of three interleaved runs:
+See [BENCHMARKS.md](BENCHMARKS.md) for the full table and a same-machine comparison with [reearth/ygo](https://github.com/reearth/ygo) v1.55.0, another Go port. B4 (259,778-edit real-world LaTeX paper trace) on one Apple M3, measured on 2026-11-11 with ygo 1.38.0 on Go 1.26.3 and yjs 13.6.33 on Node 26.6, all edits in one transaction with client ID 1, fastest of three interleaved runs:
 
 | Metric | Ygo | yjs |
 |---|---|---|
