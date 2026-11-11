@@ -1440,7 +1440,7 @@ func (c *conn) writeLoop() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		err := c.ws.Write(ctx, websocket.MessageBinary, it.env)
+		err := writeMessage(ctx, c.ws, it.env)
 		cancel()
 		if err != nil {
 			// The cause goes in before the reply's caller learns of the
@@ -1455,6 +1455,36 @@ func (c *conn) writeLoop() {
 			return
 		}
 	}
+}
+
+// writeChunk is the largest frame writeMessage writes. The read loop
+// answers a ping with a pong that needs the connection's frame lock, and
+// coder/websocket gives up on the lock after 5 seconds and ends the read;
+// a message written as one frame holds the lock for the whole message, so
+// a large one to a slow client cut that client off whenever it pinged.
+const writeChunk = 32 << 10
+
+// writeMessage writes one binary message, a large one as a fragmented
+// message of writeChunk frames, between which a pong can go out (RFC 6455
+// allows control frames between fragments; every client reassembles
+// them).
+func writeMessage(ctx context.Context, ws *websocket.Conn, msg []byte) error {
+	if len(msg) <= writeChunk {
+		return ws.Write(ctx, websocket.MessageBinary, msg)
+	}
+	w, err := ws.Writer(ctx, websocket.MessageBinary)
+	if err != nil {
+		return err
+	}
+	for len(msg) > 0 {
+		n := min(len(msg), writeChunk)
+		if _, err := w.Write(msg[:n]); err != nil {
+			_ = w.Close()
+			return err
+		}
+		msg = msg[n:]
+	}
+	return w.Close()
 }
 
 // closeForCause sends the close the writer owns for cause. A write deadline
