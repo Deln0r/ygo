@@ -24,8 +24,8 @@ func TestNewDoc_ClientIDFitsIn53Bits(t *testing.T) {
 
 func TestNewDoc_DistinctClientIDs(t *testing.T) {
 	// Probabilistic: 100 fresh docs should produce 100 distinct
-	// 53-bit IDs. The collision probability for 100 draws from a
-	// 2^53 space is ~5.5e-13, far below test-flake threshold.
+	// 32-bit IDs. The collision probability for 100 draws from a
+	// 2^32 space is ~1.2e-6, far below test-flake threshold.
 	const n = 100
 	seen := make(map[uint64]struct{}, n)
 	for i := 0; i < n; i++ {

@@ -271,7 +271,8 @@ func (d *Doc) MissingSV() []byte {
 // Awareness presence layer. Independent of any Doc; the local
 // clientID is passed at construction. Embedders typically pair
 // an Awareness with a Doc and use d.ClientID() as the awareness
-// clientID.
+// clientID; the awareness keeps it when the doc later takes a new
+// one (Doc.ClientID).
 //
 // All state is exchanged as raw JSON bytes. Mobile UIs that need
 // typed access (cursor positions, user names) JSON-parse on the

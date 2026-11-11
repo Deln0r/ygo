@@ -78,8 +78,9 @@ type Undefined = block.Undefined
 // is JSON, it is written as a number and every reader gets a float64.
 type BigInt = block.BigInt
 
-// MaxClientID is the upper bound on Doc.ClientID values
-// (2^53 - 1, matching JS Yjs's safe-integer range).
+// MaxClientID is the upper bound on Doc.ClientID values (2^53 - 1,
+// matching JS Yjs's safe-integer range): every ID on the wire fits.
+// Generated IDs are 32-bit, as yjs draws them.
 const MaxClientID = doc.MaxClientID
 
 // Shared-type wrappers — re-exported from internal/types.
@@ -335,8 +336,8 @@ func CreateAbsolutePositionFromRelativePosition(d *Doc, rpos RelativePosition) (
 type Awareness = awareness.Awareness
 
 // NewAwareness returns a fresh Awareness for the given local
-// clientID. Use d.ClientID() to keep the awareness layer in sync
-// with the doc.
+// clientID, typically d.ClientID(). The awareness keeps that ID when
+// the doc later takes a new one (Doc.ClientID), as y-protocols does.
 func NewAwareness(clientID uint64) *Awareness { return awareness.New(clientID) }
 
 // DefaultAwarenessTimeout is the y-protocols convention for stale

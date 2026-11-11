@@ -20,8 +20,9 @@
 //
 // Awareness is independent of doc.Doc. The local clientID is
 // passed at construction time; no doc.Doc reference is required.
-// Embedders that already have a Doc typically use d.ClientID() to
-// keep the two layers in sync.
+// Embedders that already have a Doc typically pass d.ClientID(). The
+// awareness keeps that ID when the doc later takes a new one, as
+// y-protocols Awareness binds doc.clientID once.
 package awareness
 
 import (

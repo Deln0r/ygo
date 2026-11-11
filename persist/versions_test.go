@@ -201,3 +201,24 @@ func TestSaveVersion_EmptyStateRejected(t *testing.T) {
 		t.Errorf("err = %v, want ErrEmptyUpdate", err)
 	}
 }
+
+// LoadVersion with a fixed ClientID that the version's state wrote under
+// gives the loaded doc a new random ID, as LoadDoc does.
+func TestLoadVersion_FixedClientIDInTheStateIsReplaced(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 7, "k", "v")); err != nil {
+		t.Fatal(err)
+	}
+	id, err := persist.SaveVersion(ctx, s, "doc", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := persist.LoadVersion(ctx, s, "doc", id, doc.Options{ClientID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ClientID() == 7 {
+		t.Fatal("the loaded version kept client ID 7, which its state wrote under")
+	}
+}
