@@ -23,7 +23,7 @@ The list CRDT used is **YATA** (Yet Another Transformation Approach). Conflict-f
 ID = (clientID: u64-ish, clock: u32-ish)
 ```
 
-- **clientID**: a random per-session integer. In JS this is a 53-bit safe integer (IEEE-754 mantissa) [INTERNALS]. **Porting trap**: in Go this is typically `uint64`, but on the wire JS encodes it as a varint, so any number that fits 53 bits round-trips. Do not silently truncate to 32 bits.
+- **clientID**: a random per-session integer. yjs 13 and 14 draw it as a uint32 (`generateNewClientId = random.uint32`), and switch to a new one when a remote transaction advances their own (`cleanupTransactions`). On the wire it is a varint, and any value that fits 53 bits (the JS safe-integer range) round-trips. **Porting trap**: generated IDs are 32-bit, decoded ones are not: do not truncate decoded IDs to 32 bits.
 - **clock**: a Lamport-style counter, **incremented per inserted element**, not per Item [INTERNALS]. A single Item that contains the 3-character string `"abc"` occupies clock range `[c, c+3)`; the next insertion gets clock `c+3` [Sypytkowski].
 - **Deletions do not advance clock** [INTERNALS]. They are handled state-based via the delete set (see §8).
 - Clock starts at 0 per (doc, clientID) pair on the first insert [INTERNALS].

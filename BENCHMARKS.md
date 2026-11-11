@@ -170,20 +170,24 @@ trace, client ID 1, all edits in one transaction, as
 
 Closer to real use: a random client ID, a transaction per edit, an
 update handler attached. Ranges over the runs; reearth/ygo ran once.
+ygo's sizes are from 1.39.0, which draws 32-bit client IDs as yjs
+does; 1.38.0's 53-bit IDs gave 354,850-376,756 bytes of V1 and
+7,572,366-8,196,294 bytes of updates.
 
 | Metric            |                 ygo |   reearth/ygo |       yjs |
 |-------------------|--------------------:|--------------:|----------:|
 | Apply edits       |           2.1-2.4 s |         289 s | 1.07-1.15 s |
-| Doc size V1       |     354,850-376,756 |     3,354,087 |   311,038 |
-| Doc size V2       |     159,933-159,935 |             - |   159,929 |
-| Bytes of updates  | 7,572,366-8,196,294 | 1,427,198,095 | 6,324,510 |
+| Doc size V1       |             311,038 |     3,354,087 |   311,038 |
+| Doc size V2       |             159,929 |             - |   159,929 |
+| Bytes of updates  |           6,324,510 | 1,427,198,095 | 6,324,510 |
 
 - With all edits in one transaction ygo takes 0.7 times yjs's time
   and reearth/ygo 5.4 times ygo's; with a transaction per edit ygo
   takes about twice yjs's time.
-- With equal client IDs ygo and yjs produce documents of identical
-  size in both formats. ygo's random client IDs are 53-bit and yjs
-  13's are 32-bit, which is what makes ygo's V1 and updates larger.
+- ygo and yjs produce documents and updates of identical size, with
+  equal client IDs and with random ones: both draw 32-bit IDs. A
+  random ID below 2^28 (1 draw in 16) takes 4 bytes on the wire
+  instead of 5, so its document and updates come out smaller.
 - reearth/ygo's V1 document holds 83,262 structs, against 10,971 for
   ygo and yjs, and each of its per-edit updates carries the
   document's whole delete set.

@@ -16,6 +16,21 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact**:
+
+- **Generated client IDs are 32-bit**, drawn from [1, 2^32-1] as yjs 13 and 14 draw them; they were 53-bit. Updates and V1 documents get smaller and match yjs: on the B4 trace with a transaction per edit, 6,324,510 bytes of updates instead of up to 8,196,294 and a 311,038-byte V1 document instead of up to 376,756. IDs up to 2^53-1 still encode and decode everywhere.
+- **A document takes a new random client ID when an update made elsewhere advances its own**, as yjs does: another replica uses the same ID, or the document's own history was loaded into a doc with that ID (`persist.LoadDoc`, `persist.LoadVersion` or the client's local store with a fixed `ClientID`, `gomobile.NewDocWithClientID` and then saved state). `Doc.ClientID()` returns the new ID from the update handlers of that update on; its observers and after-transaction handlers still see the old one. Presence keeps the ID it was created with, as in y-protocols, and gomobile `Client.ClientID()` now returns that presence key (it returned the document's ID, the same value until the document changes it). A test that fixes an ID and applies updates written under it sees the ID change, and its later edits go under the new one.
+
+### Fixed
+
+- **Two replicas with the same client ID diverged for good.** Each wrote items with the same IDs, skipped the other's as already known, and the two documents never converged. The replica that receives an update written under its ID now takes a new one, so the edits after that converge. Edits made under the shared ID before then can still differ, as in yjs.
+
+### Tests
+
+- A document that applies an update written under its ID takes a new one, on every path (V1, V2, with origin, stored bytes, `persist.LoadDoc`, the client's local store), after its observers and before its update handlers; a subdocument takes its own, and its parent keeps its ID. The ID stays without another writer: local edits, updates from other clients, the document's own data applied back, undo and redo. Blocks under the ID that wait for a dependency change it when they integrate. `ClientID()` is read during changes under the race detector.
+- Two `client.Client`s started with one ID converge on edits both make after the first exchange; on 1.38.0 they diverge. A gomobile client's `ClientID()` stays its presence key after the document changes its ID.
+- 7 controls, each failing these tests.
+
 ## [1.38.0] - 2026-11-11
 
 ### Changed

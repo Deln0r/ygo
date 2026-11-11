@@ -39,6 +39,12 @@
   We handle only the `KindDeleted` case (set FlagDeleted) and skip the rest.
 - **When to address:** Move post-MVP; Subdoc post-MVP; Weak post-MVP.
 
+### Subdocuments get their own client ID
+
+- **Where:** `Doc.Subdoc` (`internal/doc/doc.go`) builds the handle with `NewDocWithOptions`, so a subdocument draws its own random client ID.
+- **What:** yjs gives a subdocument added in a transaction its parent's ID (`subdoc.clientID = doc.clientID` in `cleanupTransactions`). Both are valid: IDs stay unique per replica, and each subdocument takes a new ID on its own when an update writes under it. They differ only where a test compares subdocument bytes made with fixed IDs.
+- **When to address:** if an adopter needs a subdocument's edits under the parent's ID.
+
 ### TransactionMut.changedTypes drops the parent_sub dimension
 
 - **Where:** `internal/doc/transaction.go` `TransactionMut.AddChangedType` and `changedTypes` field.
@@ -637,7 +643,7 @@ The following are flagged in `docs/yrs-port-notes/block.md` § "Open questions" 
 
 1. **`BlockRange::last_id` off-by-one wart in yrs** (`clock + len` vs `Item::last_id`'s `clock + len - 1`). Affects skip blocks / delete set encoding; verify against Yjs wire format when porting the encoder.
 2. **`ITEM_FLAG_MARKED` "not used atm"** — kept as a constant for bit-position equivalence with future Yjs versions; before declaring it dead, grep yrs for usage.
-3. **`small-client` feature in yrs** (32-bit ClientID) — we target 53-bit ClientIDs always; ignore this code path.
+3. **`small-client` feature in yrs** (32-bit ClientID) — we accept 53-bit ClientIDs on the wire and generate 32-bit ones (as yjs); ignore this code path.
 4. **`Item::PartialEq` semantics** — Go `EqualByID` matches by ID only, mirroring how yrs's derived equality reduces through `ItemPtr::PartialEq`. If full structural equality (content + flags + neighbours) is needed for tests, add a separate `EqualDeep` helper rather than overloading `EqualByID`.
 5. **Format-attribute integration is a stub in yrs** (`@todo searchmarker`). For rich text we may need to consult upstream Yjs directly rather than trust yrs's path.
 

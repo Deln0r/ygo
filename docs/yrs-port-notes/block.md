@@ -13,7 +13,7 @@ pub struct ClientID(CID);
 // CID = std::num::NonZeroU64 (default) or u32 (feature = "small-client").
 // Default form stores `value | (u64::MAX << 53)` so the upper 11 bits are tag-set
 // to keep the NonZeroU64 niche; .get() masks them back off.
-// Yjs requires client IDs fit in 53 bits (JS-safe integer).
+// Yjs requires client IDs fit in 53 bits (JS-safe integer); it generates 32-bit ones.
 ```
 
 ### `ID` (`block.rs:162-178`)
@@ -403,7 +403,7 @@ This layer references but does not own:
 1. **`BlockRange::last_id` off-by-one.** `BlockRange::last_id() = ID(client, clock + len)` while `Item::last_id() = ID(client, clock + len - 1)`. The `BlockRange` form is used in encoded skip blocks and the delete set. Need to verify against Yjs whether the wire form is inclusive `clock + len - 1` or exclusive `clock + len` for skip lengths — pretty sure yrs's `BlockRange::last_id` is just wrong in name and only used in places that don't care, but flag it for the implementer.
 2. **Surrogate-pair split.** yrs has a commented-out block (`block.rs:1940-1948`) that *would* replace split halves of a UTF-16 surrogate pair with U+FFFD. Yjs does this. We should port the Yjs behaviour, not the yrs no-op, or risk producing invalid strings on text splits at surrogate boundaries.
 3. **`ITEM_FLAG_MARKED` and `ITEM_FLAG_KEEP` "not used atm" comments.** The `KEEP` flag is in fact used (UndoManager via `redo`/`keep`/GC gating). The `MARKED` flag really does appear unused — search the rest of the codebase before asserting that.
-4. **`small-client` feature.** When `feature = "small-client"` is on, `ClientID` is 32-bit and the `NonZeroU64` niche trick is disabled. Yjs always uses 53-bit. We should target 53-bit (use `uint64` in Go with a constructor that asserts the high 11 bits are zero). Can ignore the `small-client` path entirely.
+4. **`small-client` feature.** When `feature = "small-client"` is on, `ClientID` is 32-bit and the `NonZeroU64` niche trick is disabled. Yjs generates 32-bit IDs and accepts any up to 53 bits on the wire. ygo stores `uint64`, accepts up to 53 bits and, since 1.39.0, generates 32-bit ones as yjs does. Can ignore the `small-client` path entirely.
 5. **`info()` byte bit 4 (`0b0001_0000`).** Currently never set on the wire (the content-type ref-number nibble only goes up to 11 = `0b1011`, so bit 4 is masked out). If a future yrs/yjs version starts using bit 4 for a flag, our decoder must not silently drop it.
 6. **`Item::PartialEq`.** Derived via `#[derive(PartialEq)]` on a struct that includes raw `ItemPtr` fields. `ItemPtr::PartialEq` is overridden to compare by id only, so `Item` equality also reduces to id-based equality through neighbour pointers. Document that Go `Item.Equal(other)` should compare ID + content + flags + neighbour IDs (not pointer identity), to avoid surprises in tests.
 7. **`BlockCell::PartialEq` for `Block` only checks `id`.** Anywhere the codebase relies on cell equality is implicitly id-based. Worth grepping consumer sites before committing to the same Go semantics.
