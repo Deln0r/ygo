@@ -20,7 +20,8 @@ file.
 
 - An empty document name now opens a Hocuspocus session instead of returning HTTP 400. `yserve -path-prefix /ws/` serves Hocuspocus at `/ws` and y-websocket documents below `/ws/`. Client BroadcastStateless messages are relayed as Stateless to Hocuspocus peers; y-websocket peers no longer receive type 6.
 - **The server writes messages over 32 KiB as fragmented messages** of 32 KiB frames. Every WebSocket client reassembles them; one that reads frames itself sees continuation frames.
-- **The `client` drops a peer it has not heard from for `AwarenessTimeout`** (30 seconds by default), as y-protocols does. A peer that renews its presence, as every y-protocols client does every 15 seconds, is not affected.
+- **`server.Options.WriteTimeout` bounds how long a write makes no progress**, not the whole message: each fragment restarts it. A message waiting in a connection's queue counts its wait from the end of that connection's last own reply (its initial sync) when that is later than its queuing.
+- **The `client` drops a peer it has not heard from for the new `Options.PeerTimeout`** (30 seconds by default, y-protocols' value), as y-protocols does. A peer that renews its presence, as every y-protocols client does every 15 seconds, is not affected; a negative value keeps the old behaviour.
 
 ### Added
 
@@ -31,19 +32,25 @@ file.
 
 ### Fixed
 
-- **The server dropped a client whose ping came while it wrote a long message to that client.** The pong needs the frame lock, which a message written as one frame held for the whole write; after 5 seconds the read loop gave up and ended the connection. The Go client pings since 1.35.0, so a large document on a slow link could cut it off.
-- **The y-websocket `client` sent edits made offline twice on reconnect**, as an update and again in the reply to the server's SyncStep1. Both modes now hold local edits until that reply has carried them, and send no empty update.
+- **The server dropped a client whose ping came while it wrote a long message to that client.** The pong needs the frame lock, which a message written as one frame held for the whole write; after 5 seconds the read loop gave up and ended the connection. The Go client pings only after half its `LivenessTimeout` with nothing read, so the window was a ping already out when a long write began.
+- **A slow client could never get a large document.** `WriteTimeout` (10 seconds by default) bounded the whole message, so an initial sync that took longer was cut, and the client reconnected and was sent it again; in a room with edits going on, the edits queued behind the initial sync counted as the client falling behind and closed it with 1013. A client on a 1 MiB/s link now gets a 6 MiB document with a 2-second `WriteTimeout` while a peer edits every 300 ms.
+- **The y-websocket `client` sent edits made offline twice on reconnect**, as an update and again in the reply to the server's SyncStep1. Both modes now hold local edits until that reply has carried them (or, for a server that sends no SyncStep1, until its SyncStep2), and send no empty update.
 - **The `client` kept a silent peer's presence** until the connection closed when the server never sent its removal.
+
+### Added
+
+- `client.Options.PeerTimeout`.
 
 ### Dependencies
 
-- `modernc.org/sqlite` 1.61.1.
+- `modernc.org/sqlite` 1.61.1 (Dependabot).
 
 ### Tests
 
-- A client reading 8 MiB at 1 MiB/s pings in the middle of the server's write and gets its pong, and the whole message arrives.
-- An edit made between two sessions goes up in one frame; a live edit still goes out as an update.
-- A peer silent for `AwarenessTimeout` is dropped, not before.
+- A client reading 8 MiB at 1 MiB/s pings a megabyte into the server's write and gets its pong, and the whole message arrives.
+- A client on a 1 MiB/s link joins a room with a 6 MiB document while a peer edits every 300 ms, with a 2-second `WriteTimeout`, and gets the document and the edits after it; without either half of the fix it is cut.
+- An edit made between two sessions goes up in one frame and no update is sent besides; the v1.36.0 client fails it 10 runs out of 10. A live edit still goes out as an update.
+- A peer silent for `PeerTimeout` is dropped, not before.
 
 ## [1.36.0] - 2026-11-10
 

@@ -91,18 +91,21 @@ func (f *fakeYWS) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// counts returns how many SyncStep2 and Update frames from the client
-// carried something (not the empty 00 00).
+// counts returns how many SyncStep2 frames from the client carried
+// something (not the empty 00 00), and how many Update frames it sent at
+// all: an empty update is one the client must not send either.
 func (f *fakeYWS) counts() (step2, updates int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, fr := range f.frames {
-		if fr.Type != syncpkg.MessageSync || len(fr.Payload) == 2 && fr.Payload[0] == 0 && fr.Payload[1] == 0 {
+		if fr.Type != syncpkg.MessageSync {
 			continue
 		}
 		switch fr.SyncSub {
 		case syncpkg.SyncStep2:
-			step2++
+			if !(len(fr.Payload) == 2 && fr.Payload[0] == 0 && fr.Payload[1] == 0) {
+				step2++
+			}
 		case syncpkg.SyncUpdate:
 			updates++
 		}
@@ -164,7 +167,7 @@ func TestClient_OfflineEditsGoUpOnce(t *testing.T) {
 	waitFor(t, "the live edit", func() bool { _, u := f.counts(); return u == 1 })
 }
 
-// A peer the client has not heard from for AwarenessTimeout is dropped, as
+// A peer the client has not heard from for PeerTimeout is dropped, as
 // y-protocols drops it, even when the server never sends its removal (a
 // server that does not sweep, or a removal lost on the way). Before, it
 // stayed until the connection closed.
@@ -174,7 +177,7 @@ func TestClient_SilentPeerDropped(t *testing.T) {
 	peer.SetLocalState([]byte(`{"user":"gone"}`))
 	f.greeting = syncpkg.EncodeAwareness(peer.Encode(nil))
 	c, err := client.New(client.Options{
-		URL: f.url, DocName: "room", AwarenessTimeout: time.Second,
+		URL: f.url, DocName: "room", PeerTimeout: time.Second,
 		Doc: doc.NewDocWithOptions(doc.Options{ClientID: 98}),
 	})
 	if err != nil {

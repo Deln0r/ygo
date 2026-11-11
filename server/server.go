@@ -259,15 +259,20 @@ type Options struct {
 	// (e.g. 128 << 20 for 128 MiB). Set to -1 for unlimited.
 	ReadLimit int64
 
-	// WriteTimeout bounds one write to one peer, done by that connection's
-	// own writer goroutine: a peer that has stopped reading (full TCP send
-	// buffer, half-open) is closed once a write to it has waited this long,
-	// and nobody else waits meanwhile. It also bounds how long a message may
-	// wait in a connection's send queue before the writer takes it: one that
-	// has waited longer means the client has fallen behind its room, and the
-	// connection is closed with websocket.StatusTryAgainLater (1013, reason
-	// "send queue stalled") so the client reconnects and resyncs. Zero
-	// selects a safe default (10s).
+	// WriteTimeout bounds how long a write to one peer may make no
+	// progress, done by that connection's own writer goroutine: a peer that
+	// has stopped reading (full TCP send buffer, half-open) is closed once
+	// a write to it has moved nothing for this long, and nobody else waits
+	// meanwhile. A large message goes out in 32 KiB fragments, each of which
+	// restarts the clock, so a slow but steady client is not cut however
+	// long the whole message takes. It also bounds how long a message may
+	// wait in a connection's send queue before the writer takes it, counted
+	// from when it was queued or from the end of the connection's last own
+	// reply (its initial sync) if that is later: one that has waited longer
+	// means the client has fallen behind its room, and the connection is
+	// closed with websocket.StatusTryAgainLater (1013, reason "send queue
+	// stalled") so the client reconnects and resyncs. Zero selects a safe
+	// default (10s).
 	WriteTimeout time.Duration
 
 	// MaxSendQueue bounds the messages queued to one connection on behalf of
@@ -1439,9 +1444,10 @@ func (c *conn) writeLoop() {
 			c.closeForCause(cause)
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		err := writeMessage(ctx, c.ws, it.env)
-		cancel()
+		err := writeMessage(c.ws, it.env, timeout)
+		if it.result != nil {
+			c.queue.replied()
+		}
 		if err != nil {
 			// The cause goes in before the reply's caller learns of the
 			// error, so the read loop it wakes cannot choose its own close.
@@ -1467,8 +1473,14 @@ const writeChunk = 32 << 10
 // writeMessage writes one binary message, a large one as a fragmented
 // message of writeChunk frames, between which a pong can go out (RFC 6455
 // allows control frames between fragments; every client reassembles
-// them).
-func writeMessage(ctx context.Context, ws *websocket.Conn, msg []byte) error {
+// them). It fails once a frame has made no progress for timeout: a client
+// that takes a large message slowly but steadily is not cut, however long
+// the whole message takes.
+func writeMessage(ws *websocket.Conn, msg []byte, timeout time.Duration) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stall := time.AfterFunc(timeout, cancel)
+	defer stall.Stop()
 	if len(msg) <= writeChunk {
 		return ws.Write(ctx, websocket.MessageBinary, msg)
 	}
@@ -1482,6 +1494,7 @@ func writeMessage(ctx context.Context, ws *websocket.Conn, msg []byte) error {
 			_ = w.Close()
 			return err
 		}
+		stall.Reset(timeout)
 		msg = msg[n:]
 	}
 	return w.Close()
