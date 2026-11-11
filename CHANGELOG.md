@@ -16,6 +16,33 @@ file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Editing is many times faster.** On the real-world editing trace in BENCHMARKS.md (259,778 edits), on an Apple M3:
+  - all edits in one transaction: 20.6 s, now 0.87 s (yjs 1.22 s and reearth/ygo 4.79 s on the same machine);
+  - a transaction per edit with an update handler: 23.1 s, now 2.1 s (yjs 1.10 s);
+  - encoding the document as a V2 update: 7.5 ms, now 0.8 ms.
+
+  Documents and updates are byte for byte the same, and observers get the same events. There were five causes:
+  - Position lookups start from cached positions (search markers). Every insert emptied the cache, a deletion at the cached place dropped it, and every commit emptied it again, so after a Backspace the next lookup walked from the start of the document. The cache now follows local inserts, deletions and commit-time merging, and a lookup steps back from a cached position past its target, as yjs's does. Remote updates and undo steps still empty it.
+  - Each commit built the change event of every changed type, whether anything observed it or not, and a text's event walks the whole text. An event is now built when it is first given to an observer, as yjs computes a delta only when it is read. An observer that edits through the transaction being committed, which was never supported, can now see its edit in a later event of the same commit.
+  - Commit-time merging removed each merged item from a client's list on its own, moving the rest of the list every time. The list is now compacted in one pass.
+  - The V2 encoder built its string column by appending each piece to the whole column so far.
+  - A deletion from a text that never had formatting walked the deleted items after it looking for format markers to clean up.
+
+### Fixed
+
+- **An `Array` insert after an insert past the end could land one place early.** An insert at an index past `Len` appends, but the cached position kept the index asked for. The next insert past the end then landed before the previous value instead of after it, and a later insert near the end could land before the last element. The cache now records where the value went. `XmlFragment` and `XmlElement` children were affected the same way.
+
+### Dependencies
+
+- `modernc.org/sqlite` 1.62.0 (Dependabot).
+
+### Tests
+
+- Random edits on two documents of one client, one with the position cache and one without, compared after every edit (each cached position against a walk from the start) and byte for byte at every commit: typing, Backspace, cursor moves, pastes, cuts, embeds, formatting, inserts past the end, nested types, remote edits (half of them concurrent with local ones), undo and redo. 13 controls each fail these tests.
+- A deep observer added by a shallow observer during a commit gets the events of the types delivered before, a text's delta included.
+
 ## [1.37.0] - 2026-11-11
 
 **Upgrade impact**:

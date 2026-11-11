@@ -51,8 +51,8 @@ only (encode/parse paths unaffected by markers).
 
 The B4 result is the headline — 8× speedup on the canonical
 real-world workload. (Historical snapshot of the markers change
-in isolation; current main measures ~20.3 s on B4, see the
-B4 table and notes below.) Random-insert workloads improved 30-35%
+in isolation; ygo 1.38.0 measures 0.85 s on B4, see the B4 table
+and notes below.) Random-insert workloads improved 30-35%
 because the per-edit walk distance drops from O(N) to O(local
 delta from previous edit). Prepend-only workloads show small
 regressions (a few hundred ns/op) attributable to the marker
@@ -60,7 +60,7 @@ bookkeeping overhead — prepends keep idx=0 so markers never get
 populated and the cost is pure overhead. Absolute numbers tiny;
 acceptable trade-off given the B4 win.
 
-## Baseline (Apple M3, Go 1.26.3, `-benchtime=3x`, post-search-marker build)
+## Baseline (Apple M3, Go 1.26.3, `-benchtime=3x`, ygo 1.38.0)
 
 All times in ms (1 ms = 1,000,000 ns); doc sizes in bytes. B4 uses
 client ID 1, which keeps V1 small: see the same-machine comparison
@@ -70,41 +70,41 @@ below for a random client ID.
 
 | ID    | Workload                              |    ops (ms) |  V1 doc |  V2 doc | enc V1 (ms) | enc V2 (ms) | parse V1 (ms) | parse V2 (ms) |
 |-------|---------------------------------------|------------:|--------:|--------:|------------:|------------:|--------------:|--------------:|
-| B1.1  | Append N chars sequentially           |       13.43 |   6,013 |   6,026 |       0.003 |       0.009 |          0.01 |          0.01 |
-| B1.2  | Single insert of N-char string        |        0.06 |   6,013 |   6,026 |       0.001 |       0.006 |         0.007 |         0.020 |
-| B1.3  | Prepend N chars one-at-a-time         |        0.75 |  35,880 |   6,036 |        0.09 |        0.34 |          1.21 |          1.23 |
-| B1.4  | Insert N chars at random positions    |       44.02 |  52,753 |  29,486 |        0.12 |        0.43 |          2.16 |          2.37 |
-| B1.5  | Insert N words at random positions    |       93.03 | 138,396 | 102,408 |        0.41 |        5.73 |          3.98 |          3.72 |
-| B1.6  | Insert N chars then delete all        |       11.16 |      18 |      29 |       0.001 |       0.002 |         0.003 |         0.004 |
-| B1.7  | Mixed insert/delete at random         |       45.85 |  38,686 |  20,505 |        0.12 |        0.36 |          1.64 |          1.54 |
-| B1.8  | Append N numbers to Array             |      113.84 |  47,816 |  17,970 |        0.12 |        0.14 |          1.42 |          1.84 |
-| B1.9  | Single insert of N-number Array       |        0.04 |  17,949 |  17,960 |        0.03 |        0.03 |         0.071 |         0.077 |
-| B1.10 | Prepend N numbers                     |        0.67 |  47,816 |  17,970 |        0.11 |        0.13 |          1.42 |          1.54 |
-| B1.11 | Insert N numbers at random positions  |       37.55 |  64,692 |  41,461 |        0.13 |        0.23 |          2.35 |          2.40 |
+| B1.1  | Append N chars sequentially           |        8.80 |   6,013 |   6,026 |       0.005 |       0.008 |         0.011 |         0.013 |
+| B1.2  | Single insert of N-char string        |        0.01 |   6,013 |   6,026 |       0.001 |       0.006 |         0.008 |         0.010 |
+| B1.3  | Prepend N chars one-at-a-time         |        0.59 |  35,880 |   6,036 |        0.11 |        0.19 |          1.06 |          0.97 |
+| B1.4  | Insert N chars at random positions    |        4.46 |  52,753 |  29,486 |        0.13 |        0.33 |          2.54 |          2.69 |
+| B1.5  | Insert N words at random positions    |       14.39 | 138,387 | 102,403 |        0.39 |        0.77 |          4.38 |          4.38 |
+| B1.6  | Insert N chars then delete all        |        3.42 |       0 |       0 |       0.001 |       0.002 |         0.004 |         0.005 |
+| B1.7  | Mixed insert/delete at random         |        3.98 |  35,106 |  18,315 |        0.12 |        0.19 |          1.97 |          2.09 |
+| B1.8  | Append N numbers to Array             |        3.09 |  17,949 |  17,960 |       0.034 |       0.033 |         0.089 |         0.079 |
+| B1.9  | Single insert of N-number Array       |        0.04 |  17,949 |  17,960 |       0.033 |       0.033 |         0.066 |         0.074 |
+| B1.10 | Prepend N numbers                     |        0.84 |  47,816 |  17,970 |        0.14 |        0.14 |          1.08 |          1.05 |
+| B1.11 | Insert N numbers at random positions  |        4.66 |  64,684 |  41,462 |        0.15 |        0.27 |          2.86 |          2.73 |
 
 ### B2 — Two-client concurrent workloads (N₂ = 3,000 ops per peer)
 
 | ID   | Workload                                       |    ops (ms) |  V1 doc |  V2 doc | parse V1 (ms) | parse V2 (ms) |
 |------|------------------------------------------------|------------:|--------:|--------:|--------------:|--------------:|
-| B2.1 | Concurrently insert at index 0 (worst-case)    |      732.57 |  35,758 |   6,059 |        761.64 |        757.47 |
-| B2.2 | Concurrently insert at random positions        |       38.61 |  51,879 |  28,860 |          8.32 |          8.38 |
-| B2.3 | Concurrently insert words at random positions  |       74.74 | 133,117 |  99,042 |          7.29 |          7.04 |
-| B2.4 | Concurrently insert + delete                   |       26.30 |  33,258 |  14,985 |          1.84 |          1.86 |
+| B2.1 | Concurrently insert at index 0 (worst-case)    |      721.74 |  35,758 |   6,059 |          1.14 |          1.13 |
+| B2.2 | Concurrently insert at random positions        |       13.88 |  51,856 |  28,864 |          2.82 |          2.81 |
+| B2.3 | Concurrently insert words at random positions  |       19.33 | 133,109 |  99,040 |          4.16 |          4.30 |
+| B2.4 | Concurrently insert + delete                   |        6.29 |  33,258 |  14,985 |          1.82 |          6.82 |
 
 ### B3 — Many-client high-conflict (N₃ = 489 clients)
 
 | ID   | Workload                              |    ops (ms) | V1 doc | V2 doc | parse V1 (ms) | parse V2 (ms) |
 |------|---------------------------------------|------------:|-------:|-------:|--------------:|--------------:|
-| B3.1 | 489 clients set Number in shared Map  |        1.00 |  8,142 |  6,694 |          0.29 |          0.30 |
-| B3.2 | 489 clients set Object in shared Map  |        3.80 | 12,118 | 10,670 |          0.84 |          0.70 |
-| B3.3 | 489 clients set String in shared Map  |        1.03 | 11,030 |  9,582 |          0.28 |          0.30 |
-| B3.4 | 489 clients insert into shared Array  |      133.60 |  7,329 |  5,400 |          0.26 |          0.31 |
+| B3.1 | 489 clients set Number in shared Map  |        6.81 |  8,142 |  6,694 |          0.31 |          0.33 |
+| B3.2 | 489 clients set Object in shared Map  |        6.93 | 12,118 | 10,670 |          0.50 |          0.43 |
+| B3.3 | 489 clients set String in shared Map  |        7.59 | 11,030 |  9,582 |          0.37 |          0.40 |
+| B3.4 | 489 clients insert into shared Array  |      173.87 |  7,329 |  5,400 |          0.29 |          0.26 |
 
 ### B4 — Real-world LaTeX paper trace (259,778 edits, 104k-char final document)
 
 | ID | Workload                          |    ops (ms) |    V1 doc |   V2 doc | enc V1 (ms) | enc V2 (ms) | parse V1 (ms) | parse V2 (ms) |
 |----|-----------------------------------|------------:|----------:|---------:|------------:|------------:|--------------:|--------------:|
-| B4 | Real-world editing trace          |   20,259.0  |   223,414 |  159,921 |        0.62 |       10.5  |          4.4  |          4.5  |
+| B4 | Real-world editing trace          |       852.3 |   223,414 |  159,921 |        0.59 |        0.97 |          4.43 |          4.45 |
 
 ## Notes & observations
 
@@ -129,12 +129,10 @@ below for a random client ID.
   unchanged. Choose V2 for persistence and large-document sync; V1 is
   now a reasonable default for live sync traffic.
 
-- **V2 encode time can be higher than V1** on word-heavy or
-  string-column-heavy workloads (B1.5: 5.93 vs 0.33 ms; B4: 10.5 vs
-  0.6 ms) because of `StringEncoder` UTF-16 length computation and
-  per-key staging. V1 just emits varstrings inline. Workloads with
-  many small distinct strings (each going through the column key
-  table) pay this most.
+- **V2 encode takes about twice V1's time** (B1.5: 0.77 vs 0.39 ms;
+  B4: 0.97 vs 0.59 ms). Until 1.38.0 it was 10-20 times V1's on
+  string-heavy documents, because the encoder built its string column
+  by appending each piece to the whole column so far.
 
 - **B2.1 is the YATA concurrent-tie-break worst case** — two peers
   both inserting at index 0 means every block has to compare against
@@ -147,43 +145,48 @@ below for a random client ID.
   single Map.Set — only one block per merge, so the integrate cost
   stays sub-linear in client count.
 
-- **B4 op-throughput** is ~0.078 ms / edit (259,778 ops / 20.3 s).
+- **B4 op-throughput** is ~0.0033 ms / edit (259,778 ops / 0.85 s).
   The history: ~0.32 ms / edit pre-search-markers, ~0.041 ms / edit
-  with markers, about twice that since commit-time squash + GC
-  landed. A transaction per edit takes 22.9 s against 20.3 s for one
-  transaction, so commit-time work is not the main cost.
+  with markers, about 0.08 ms / edit from commit-time squash + GC
+  (which emptied the marker cache on every insert and commit) until
+  1.38.0. A transaction per edit with an update handler takes 2.1 s
+  against 0.87 s for one transaction (same-machine comparison below):
+  the per-transaction work (commit, the update) is now most of it.
 
-## Same-machine comparison with yjs
+## Same-machine comparison with yjs and reearth/ygo
 
-B4 on one Apple M3, measured on 8 Nov 2026: ygo v1.31.0 on Go 1.26.3,
-yjs 13.6.33 on Node 26.6. Same trace, client ID 1, all edits in one
-transaction, as `BenchmarkB4_RealWorldTrace` does. Fastest of the
-rounds for encode and parse.
+B4 on one Apple M3, measured on 11 Nov 2026: ygo 1.38.0 and
+reearth/ygo v1.55.0 on Go 1.26.3, yjs 13.6.33 on Node 26.6. Same
+trace, client ID 1, all edits in one transaction, as
+`BenchmarkB4_RealWorldTrace` does. Fastest of three interleaved runs.
 
-| Metric        |           ygo |           yjs |
-|---------------|--------------:|--------------:|
-| Apply edits   |   20.3-21.4 s |     1.0-1.3 s |
-| Encode V1     |       0.81 ms |        2.4 ms |
-| Encode V2     |        7.5 ms |        1.7 ms |
-| Parse V1      |        4.6 ms |        5.6 ms |
-| Parse V2      |        4.8 ms |        4.6 ms |
-| Doc size V1   | 223,414 bytes | 223,414 bytes |
-| Doc size V2   | 159,921 bytes | 159,921 bytes |
+| Metric        |           ygo |   reearth/ygo |           yjs |
+|---------------|--------------:|--------------:|--------------:|
+| Apply edits   |        0.88 s |        4.79 s |        1.22 s |
+| Encode V1     |       0.55 ms |        7.4 ms |        1.7 ms |
+| Encode V2     |       0.94 ms |        7.5 ms |        1.6 ms |
+| Doc size V1   | 223,414 bytes | 913,202 bytes | 223,414 bytes |
+| Doc size V2   | 159,921 bytes | 161,722 bytes | 159,921 bytes |
 
 Closer to real use: a random client ID, a transaction per edit, an
-update handler attached.
+update handler attached. Ranges over the runs; reearth/ygo ran once.
 
-| Metric            |           ygo |           yjs |
-|-------------------|--------------:|--------------:|
-| Apply edits       |        23.4 s |        1.02 s |
-| Doc size V1       | 376,756 bytes | 311,038 bytes |
-| Doc size V2       | 159,935 bytes | 159,929 bytes |
-| Bytes of updates  |     8,196,294 |     6,324,510 |
+| Metric            |                 ygo |   reearth/ygo |       yjs |
+|-------------------|--------------------:|--------------:|----------:|
+| Apply edits       |           2.1-2.4 s |         289 s | 1.07-1.15 s |
+| Doc size V1       |     354,850-376,756 |     3,354,087 |   311,038 |
+| Doc size V2       |     159,933-159,935 |             - |   159,929 |
+| Bytes of updates  | 7,572,366-8,196,294 | 1,427,198,095 | 6,324,510 |
 
-- Applying edits is about 20× slower than yjs on the same machine.
-- With equal client IDs the two produce documents of identical size
-  in both formats. ygo's random client IDs are 53-bit and yjs 13's
-  are 32-bit, which is what makes V1 and the updates larger.
+- With all edits in one transaction ygo takes 0.7 times yjs's time
+  and reearth/ygo 5.4 times ygo's; with a transaction per edit ygo
+  takes about twice yjs's time.
+- With equal client IDs ygo and yjs produce documents of identical
+  size in both formats. ygo's random client IDs are 53-bit and yjs
+  13's are 32-bit, which is what makes ygo's V1 and updates larger.
+- reearth/ygo's V1 document holds 83,262 structs, against 10,971 for
+  ygo and yjs, and each of its per-edit updates carries the
+  document's whole delete set.
 
 `dmonad/crdt-benchmarks` publishes yjs and ywasm results from other
 hardware (Intel i5-8400, Node 20.5). Its document sizes are V2.

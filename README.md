@@ -192,7 +192,7 @@ defer unsub()
 - **Hocuspocus extensions.** Token refresh on an established server key (`onTokenSync`), server-initiated token requests and Redis cluster opcodes are not implemented. Close and reopen a key to change its token or scope; see [server setup](docs/yserve.md#coming-from-hocuspocus).
 - **Message size.** The server reads client messages up to 4 MiB by default. A larger one (the first sync of a larger document) closes the connection with 1009, and the client reconnects and resends it in a loop. Raise `ReadLimit` (`yserve -read-limit`) above your largest document.
 - **Any values.** An object with more than one key comes back with its keys sorted, and a format attribute set to undefined comes back as null; see [Strings and values](#strings-and-values).
-- **Speed.** Applying edits is about 20× slower than yjs on the same machine. See [Benchmarks](#benchmarks).
+- **Speed with a transaction per edit.** Applying edits one transaction each takes about twice yjs's time on the same machine; with all edits in one transaction ygo is faster than yjs. See [Benchmarks](#benchmarks).
 
 ### Status by layer
 
@@ -238,7 +238,7 @@ defer unsub()
 2. **Idiomatic Go API.** Callbacks for events, explicit transactions, `error` returns.
 3. **Pure Go.** No CGO. `gomobile bind` works for iOS and Android.
 4. **Pluggable persistence** with `modernc.org/sqlite` reference implementation.
-5. **Performance within 2× of [yrs](https://github.com/y-crdt/y-crdt)** on `dmonad/crdt-benchmarks` B1-B4. Not verified: no run against native yrs exists, and on B4 ygo is about 20× slower than yjs on the same machine. See [Benchmarks](#benchmarks).
+5. **Performance within 2× of [yrs](https://github.com/y-crdt/y-crdt)** on `dmonad/crdt-benchmarks` B1-B4. Not verified: no run against native yrs exists. On B4, ygo takes 0.7 times yjs's time with all edits in one transaction and about twice with a transaction per edit, on the same machine. See [Benchmarks](#benchmarks).
 
 ## Non-goals
 
@@ -276,21 +276,19 @@ If you run a `y-websocket` deployment and want to move the server side to Go (no
 
 ## Benchmarks
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the full table. B4 (259,778-edit real-world LaTeX paper trace) on one Apple M3, measured on 2026-11-08 with ygo v1.31.0 on Go 1.26.3 and yjs 13.6.33 on Node 26.6, all edits in one transaction with client ID 1:
+See [BENCHMARKS.md](BENCHMARKS.md) for the full table and a comparison with reearth/ygo. B4 (259,778-edit real-world LaTeX paper trace) on one Apple M3, measured on 2026-11-11 with ygo 1.38.0 on Go 1.26.3 and yjs 13.6.33 on Node 26.6, all edits in one transaction with client ID 1, fastest of three interleaved runs:
 
 | Metric | Ygo | yjs |
 |---|---|---|
-| Apply all edits | 20.3-21.4 s | 1.0-1.3 s |
+| Apply all edits | 0.88 s | 1.22 s |
 | Encoded doc size, V1 | 223 KB | 223 KB |
 | Encoded doc size, V2 | 160 KB | 160 KB |
-| Encode V1 / V2 | 0.8 ms / 7.5 ms | 2.4 ms / 1.7 ms |
-| Parse V1 / V2 | 4.6 ms / 4.8 ms | 5.6 ms / 4.6 ms |
+| Encode V1 / V2 | 0.55 ms / 0.94 ms | 1.7 ms / 1.6 ms |
 
 **How to read this:**
 
-- **Applying edits is where ygo is behind:** about 20× slower than yjs on the same machine. A transaction per edit with a random client ID and an update handler, which is closer to real use, takes 23.4 s against 1.0 s.
-- **Document sizes match yjs** when the client IDs match. With a random client ID, ygo's V1 document is 377 KB and yjs's 311 KB, because ygo's random IDs are 53-bit and yjs 13's are 32-bit. V2 stays at 160 KB for both.
-- **Encode and parse** are in the same range as yjs, except V2 encode, which is about 4× slower.
+- **All edits in one transaction** take 0.7 times yjs's time. **A transaction per edit** with a random client ID and an update handler, which is closer to real use, takes 2.1-2.4 s against 1.1 s.
+- **Document sizes match yjs** when the client IDs match. With a random client ID, ygo's V1 document is 355-377 KB and yjs's 311 KB, because ygo's random IDs are 53-bit and yjs 13's are 32-bit. V2 stays at 160 KB for both.
 
 No head-to-head run against native yrs exists.
 
