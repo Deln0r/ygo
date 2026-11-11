@@ -1,6 +1,9 @@
 package lib0
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // Run-length-encoded (RLE) and diff-RLE primitives matching the
 // stateful encoders in lib0's encoding.js (RleEncoder,
@@ -461,11 +464,10 @@ func (e *StringEncoder) Write(s string) {
 func (e *StringEncoder) Bytes() []byte {
 	e.sarr = append(e.sarr, e.s)
 	e.s = ""
-	var concat string
-	for _, chunk := range e.sarr {
-		concat += chunk
-	}
-	buf := WriteVarString(nil, concat)
+	// One join: adding the chunks one by one copied the growing string
+	// each time, quadratic in the column's size (8 ms of the B4
+	// document's 8.5 ms V2 encode).
+	buf := WriteVarString(nil, strings.Join(e.sarr, ""))
 	return append(buf, e.lens.Bytes()...)
 }
 
