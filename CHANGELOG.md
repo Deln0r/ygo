@@ -20,7 +20,7 @@ file.
 
 - An empty document name now opens a Hocuspocus session instead of returning HTTP 400. `yserve -path-prefix /ws/` serves Hocuspocus at `/ws` and y-websocket documents below `/ws/`. Client BroadcastStateless messages are relayed as Stateless to Hocuspocus peers; y-websocket peers no longer receive type 6.
 - **The server writes messages over 32 KiB as fragmented messages** of 32 KiB frames. Every WebSocket client reassembles them; one that reads frames itself sees continuation frames.
-- **`server.Options.WriteTimeout` bounds how long a write makes no progress**, not the whole message: each fragment restarts it. A message waiting in a connection's queue counts its wait from the end of that connection's last own reply (its initial sync) when that is later than its queuing.
+- **`server.Options.WriteTimeout` bounds each 32 KiB fragment of a write**, not the whole message: each fragment restarts it, so a client is cut only when a fragment does not go out in time (3.2 KiB/s at the 10-second default). A message waiting in a connection's queue counts its wait from the end of the last reply written to that connection (its initial sync, a presence snapshot, a Hocuspocus SyncStatus) when that is later than its queuing, so a broadcast can wait up to about twice `WriteTimeout` before the connection is closed with 1013.
 - **The `client` drops a peer it has not heard from for the new `Options.PeerTimeout`** (30 seconds by default, y-protocols' value), as y-protocols does. A peer that renews its presence, as every y-protocols client does every 15 seconds, is not affected; a negative value keeps the old behaviour.
 
 ### Added
@@ -28,18 +28,17 @@ file.
 - Serve `@hocuspocus/provider` 2.15.3, 3.4.4 and 4.8.0 through `Server.HocuspocusHandler()`, or `Handler()` at an empty document name. A socket can carry several document keys, including provider 4 session-aware keys. Each key has its own admission, permission, awareness ownership and close lifecycle; replies and broadcasts retain the recipient's key.
 - `Options.OnAuthenticateRequest` checks each new key's token with the upgrade request and can grant read-only access. `OnAuthenticate` remains the fallback. Frames received before the token wait in a queue bounded across the socket by 1000 messages, 5 MiB and 100 pending keys. A refusal drops that key's queue and allows another token attempt on the same socket.
 - `Server.SendStateless` sends to a document's Hocuspocus peers. `IdleTimeout` and `AuthTimeout` default to 60 seconds; the latter is an absolute deadline for the first admitted key. `MaxConns` counts sockets, including ones awaiting authentication; per-document limits and `Stats.Connections` count keys. All keys share one bounded send queue and writer.
+- `client.Options.PeerTimeout`: how long the client keeps a peer's presence without hearing from it (see Upgrade impact).
 - CI runs the stock providers against ygo for sync, offline edits, acknowledgements, read-only access, denied tokens, stateless messages, shared sockets, session-aware keys, y-websocket peers, presence renewal and yserve's endpoint routing.
 
 ### Fixed
 
 - **The server dropped a client whose ping came while it wrote a long message to that client.** The pong needs the frame lock, which a message written as one frame held for the whole write; after 5 seconds the read loop gave up and ended the connection. The Go client pings only after half its `LivenessTimeout` with nothing read, so the window was a ping already out when a long write began.
-- **A slow client could never get a large document.** `WriteTimeout` (10 seconds by default) bounded the whole message, so an initial sync that took longer was cut, and the client reconnected and was sent it again; in a room with edits going on, the edits queued behind the initial sync counted as the client falling behind and closed it with 1013. A client on a 1 MiB/s link now gets a 6 MiB document with a 2-second `WriteTimeout` while a peer edits every 300 ms.
+- **A slow client could never get a large document.** `WriteTimeout` (10 seconds by default) bounded the whole message, so an initial sync that took longer was cut, and the client reconnected and was sent it again; in a room with edits going on, the edits queued behind the initial sync counted as the client falling behind and closed it with 1013. A client on a 1 MiB/s link now gets a 6 MiB document with a 2-second `WriteTimeout` while a peer edits every 300 ms. A large update from a peer is still fan-out: if the edits queued behind it wait too long, the slow client is closed with 1013 and gets the content as its initial sync when it reconnects.
 - **The y-websocket `client` sent edits made offline twice on reconnect**, as an update and again in the reply to the server's SyncStep1. Both modes now hold local edits until that reply has carried them (or, for a server that sends no SyncStep1, until its SyncStep2), and send no empty update.
 - **The `client` kept a silent peer's presence** until the connection closed when the server never sent its removal.
+- **A Hocuspocus provider with a one-character document name and a long token, connected to a y-websocket endpoint, was closed with 1011** and an awareness decode error instead of the hint to connect to the Hocuspocus endpoint: its first frame reads as an awareness update that fails to apply.
 
-### Added
-
-- `client.Options.PeerTimeout`.
 
 ### Dependencies
 
@@ -51,6 +50,7 @@ file.
 - A client on a 1 MiB/s link joins a room with a 6 MiB document while a peer edits every 300 ms, with a 2-second `WriteTimeout`, and gets the document and the edits after it; without either half of the fix it is cut.
 - An edit made between two sessions goes up in one frame and no update is sent besides; the v1.36.0 client fails it 10 runs out of 10. A live edit still goes out as an update.
 - A peer silent for `PeerTimeout` is dropped, not before.
+- A client that falls behind while it keeps asking for the room's presence, so that replies are written to it all along, is still closed with 1013 "send queue stalled".
 
 ## [1.36.0] - 2026-11-10
 

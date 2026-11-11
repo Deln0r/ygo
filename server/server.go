@@ -259,20 +259,23 @@ type Options struct {
 	// (e.g. 128 << 20 for 128 MiB). Set to -1 for unlimited.
 	ReadLimit int64
 
-	// WriteTimeout bounds how long a write to one peer may make no
-	// progress, done by that connection's own writer goroutine: a peer that
-	// has stopped reading (full TCP send buffer, half-open) is closed once
-	// a write to it has moved nothing for this long, and nobody else waits
-	// meanwhile. A large message goes out in 32 KiB fragments, each of which
-	// restarts the clock, so a slow but steady client is not cut however
-	// long the whole message takes. It also bounds how long a message may
-	// wait in a connection's send queue before the writer takes it, counted
-	// from when it was queued or from the end of the connection's last own
-	// reply (its initial sync) if that is later: one that has waited longer
-	// means the client has fallen behind its room, and the connection is
-	// closed with websocket.StatusTryAgainLater (1013, reason "send queue
-	// stalled") so the client reconnects and resyncs. Zero selects a safe
-	// default (10s).
+	// WriteTimeout bounds how long one frame of a write to one peer may
+	// take, done by that connection's own writer goroutine: a peer that has
+	// stopped reading (full TCP send buffer, half-open) is closed once a
+	// frame to it has not gone out for this long (after the socket buffers
+	// fill), and nobody else waits meanwhile. A large message goes out in
+	// 32 KiB fragments, each of which restarts the clock, so a client is not
+	// cut however long the whole message takes as long as each fragment
+	// goes out in time (3.2 KiB/s at the default). It also bounds how long
+	// a message may wait in a connection's send queue before the writer
+	// takes it, counted from when it was queued or, if later, from the end
+	// of the last reply written to that connection (its initial sync, a
+	// presence snapshot, a Hocuspocus SyncStatus): one that has waited
+	// longer means the client has fallen behind its room, and the
+	// connection is closed with websocket.StatusTryAgainLater (1013, reason
+	// "send queue stalled") so the client reconnects and resyncs. A
+	// broadcast can so wait up to about twice WriteTimeout plus the write
+	// of the reply before it. Zero selects a safe default (10s).
 	WriteTimeout time.Duration
 
 	// MaxSendQueue bounds the messages queued to one connection on behalf of
@@ -1839,11 +1842,12 @@ func (c *conn) readLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		frame, _, err := syncpkg.DecodeEnvelope(raw)
+		frame, tail, err := syncpkg.DecodeEnvelope(raw)
 		if first && (err != nil || (frame.Type != syncpkg.MessageSync && frame.Type != syncpkg.MessageAwareness)) && looksLikeHocuspocus(raw) {
 			c.closeFromServer(websocket.StatusProtocolError, "Hocuspocus client: connect to the Hocuspocus endpoint")
 			return
 		}
+		wasFirst := first
 		first = false
 		if err != nil {
 			// Malformed frame — close with a protocol-error reason.
@@ -1852,6 +1856,14 @@ func (c *conn) readLoop(ctx context.Context) {
 			return
 		}
 		if err := c.handler.HandleFrame(frame); err != nil {
+			// A provider with a one-byte document name starts its Auth
+			// with 0x01, which can decode as an awareness frame that then
+			// fails to apply, with bytes left after it. A y-websocket
+			// message is one envelope and leaves none.
+			if wasFirst && len(tail) > 0 && looksLikeHocuspocus(raw) {
+				c.closeFromServer(websocket.StatusProtocolError, "Hocuspocus client: connect to the Hocuspocus endpoint")
+				return
+			}
 			// Application-layer errors (apply failure, encode
 			// failure) close the connection — the doc state is
 			// preserved for the next reconnect. A reply that failed

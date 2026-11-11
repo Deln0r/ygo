@@ -33,6 +33,9 @@ type fakeYWS struct {
 	url    string
 	// greeting, when set, is sent after the SyncStep1 at every connect.
 	greeting []byte
+	// step1Delay holds the SyncStep1 at connect back, as a slow link or a
+	// busy server does; the client's frames wait to be read meanwhile.
+	step1Delay time.Duration
 }
 
 func newFakeYWS(t *testing.T) *fakeYWS {
@@ -56,6 +59,7 @@ func (f *fakeYWS) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(-1)
 	ctx := r.Context()
+	time.Sleep(f.step1Delay)
 	rtxn := f.doc.ReadTxn()
 	sv := encoding.EncodeStateVector(rtxn.Store().GetStateVector(), nil)
 	rtxn.Close()
@@ -118,9 +122,12 @@ func (f *fakeYWS) counts() (step2, updates int) {
 // sent them as an update right after the client's SyncStep1 as well, and
 // the reply, computed against the server's state from before that update,
 // carried them again. The edit is made while the client is trying to
-// connect, so a flush is queued, as between two sessions.
+// connect, so a flush is queued, as between two sessions. The server's
+// SyncStep1 comes 200 ms after the connection opens, so a client that does
+// not hold the edit sends it as an update first.
 func TestClient_OfflineEditsGoUpOnce(t *testing.T) {
 	f := newFakeYWS(t)
+	f.step1Delay = 200 * time.Millisecond
 	f.reject.Store(true)
 	d := doc.NewDocWithOptions(doc.Options{ClientID: 97})
 	m := types.NewMap(d.Branch("settings"))

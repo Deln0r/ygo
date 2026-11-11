@@ -129,8 +129,10 @@ type Options struct {
 	// PeerTimeout is how long the client keeps a peer's presence without
 	// hearing from it, whether or not the server sends its removal, as
 	// y-protocols drops a remote state after outdatedTimeout. Default 30s,
-	// that value; peers renew every 15 seconds. A negative value keeps
-	// peers until the server removes them or the connection closes.
+	// that value; peers renew every 15 seconds. It is checked when the
+	// client checks its own renewal, so a silent peer goes up to a tenth of
+	// AwarenessTimeout (at least 100ms) after PeerTimeout. A negative value
+	// keeps peers until the server removes them or the connection closes.
 	PeerTimeout time.Duration
 
 	// LivenessTimeout bounds how long a connection that died without a

@@ -115,6 +115,20 @@ try {
     b.map.set('survives', true)
     await waitFor(() => !b.p.hasUnsyncedChanges, `hp${v}: other document survives close`)
   }
+  // Messages over the server's 32 KiB fragment: a late joiner reassembles a
+  // fragmented SyncStep2, then fragmented live updates go both ways.
+  for (const v of [2, 3, 4]) {
+    const name = `large-${v}`
+    const d = new Y.Doc(); d.getMap('m').set('big', 'x'.repeat(3 << 20))
+    const a = await provider(v, base + '/collab', name, 'ok', { document: d })
+    await waitFor(() => synced(a) && !a.p.hasUnsyncedChanges, `hp${v}: 3 MiB document up`, 20000)
+    const b = await provider(v, base + '/collab', name)
+    await waitFor(() => synced(b) && b.map.get('big')?.length === 3 << 20, `hp${v}: late joiner gets the 3 MiB document in fragments`, 20000)
+    a.map.set('big2', 'y'.repeat(1 << 20))
+    await waitFor(() => b.map.get('big2')?.length === 1 << 20, `hp${v}: 1 MiB live update in fragments`, 20000)
+    b.map.set('back', 'z'.repeat(200 << 10))
+    await waitFor(() => a.map.get('back')?.length === 200 << 10 && !b.p.hasUnsyncedChanges, `hp${v}: 200 KiB update back, acknowledged`, 20000)
+  }
   const noAuth = await start(true)
   const noToken = await provider(2, noAuth, 'no-token', null)
   await waitFor(() => synced(noToken), 'hp2: no token without an auth hook')

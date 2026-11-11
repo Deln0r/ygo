@@ -486,6 +486,76 @@ func TestServer_StalledClientClosed(t *testing.T) {
 	waitFor(t, 5*time.Second, func() bool { return srv.Stats().SlowClientsClosed == 1 })
 }
 
+// A client that falls behind is closed even while it keeps getting
+// replies. A written reply restarts the age of the updates queued before
+// it, but the client's next reply waits behind them, so the gap between
+// replies grows with the backlog until an update has waited longer than
+// WriteTimeout. Here the slow client reads one message per 100 ms, asks
+// for the room's presence every 100 ms, and a peer sends an update every
+// 50 ms.
+func TestServer_StalledClientClosedWhileRepliesFlow(t *testing.T) {
+	l, srv := startPipeServer(t, server.Options{OriginPatterns: []string{"*"}, WriteTimeout: time.Second})
+
+	slow := dialPipe(t, l, "room", 3)
+	defer slow.close()
+	slow.read(t)
+	writer := dialPipe(t, l, "room", 1)
+	defer writer.close()
+	writer.read(t)
+	drain(writer)
+
+	stop := make(chan struct{})
+	defer close(stop)
+	every := func(d time.Duration, send func(i int) error) {
+		go func() {
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				case <-time.After(d):
+				}
+				if send(i) != nil {
+					return
+				}
+			}
+		}()
+	}
+	every(50*time.Millisecond, func(i int) error {
+		return writer.conn.Write(writer.ctx, websocket.MessageBinary, pushEnvelope(writer, fmt.Sprint(i)))
+	})
+	every(100*time.Millisecond, func(int) error {
+		return slow.conn.Write(slow.ctx, websocket.MessageBinary, syncpkg.EncodeQueryAwareness())
+	})
+
+	replies, updates := 0, 0
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("slow client still open after %d replies and %d updates", replies, updates)
+		}
+		time.Sleep(100 * time.Millisecond)
+		_, raw, err := slow.conn.Read(slow.ctx)
+		if err != nil {
+			var ce websocket.CloseError
+			if !errors.As(err, &ce) || ce.Code != websocket.StatusTryAgainLater || ce.Reason != "send queue stalled" {
+				t.Fatalf("slow client ended with %v after %d replies and %d updates, want 1013 \"send queue stalled\"", err, replies, updates)
+			}
+			break
+		}
+		if f, _, err := syncpkg.DecodeEnvelope(raw); err == nil && f.Type == syncpkg.MessageAwareness {
+			replies++
+		} else {
+			updates++
+		}
+	}
+	// The case under test is replies written while the client falls
+	// behind, not a stall before the first one.
+	if replies < 2 {
+		t.Fatalf("slow client got %d replies before the close, want at least 2", replies)
+	}
+	waitFor(t, 5*time.Second, func() bool { return srv.Stats().SlowClientsClosed == 1 })
+}
+
 // An overflow while the connection's read loop waits for one of its replies
 // keeps the overflow's 1013: the reply fails, and neither the read loop's
 // 1011 (a failed SyncStep2) nor the auth denial's 4401 competes with it.

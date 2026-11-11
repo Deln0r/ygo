@@ -452,16 +452,20 @@ func TestHocuspocusMountsAndMisrouting(t *testing.T) {
 		})
 	}
 	url, _ := startTestServer(t, server.Options{})
-	for n := 1; n <= 12; n++ {
-		c := hpDial(t, url+"/wrong")
-		// Drain the y-websocket server's initial SyncStep1.
-		if _, _, err := c.ws.Read(c.ctx); err != nil {
-			t.Fatal(err)
-		}
-		c.send(t, strings.Repeat("d", n), syncpkg.EncodeAuthToken("ok"))
-		_, _, err := c.ws.Read(c.ctx)
-		if websocket.CloseStatus(err) != 1002 || !strings.Contains(err.Error(), "Hocuspocus endpoint") {
-			t.Fatalf("length %d: %v", n, err)
+	// A one-byte name followed by a long token (a JWT) reads as an awareness
+	// frame that decodes and then fails to apply.
+	for _, token := range []string{"ok", strings.Repeat("t", 300)} {
+		for n := 1; n <= 12; n++ {
+			c := hpDial(t, url+"/wrong")
+			// Drain the y-websocket server's initial SyncStep1.
+			if _, _, err := c.ws.Read(c.ctx); err != nil {
+				t.Fatal(err)
+			}
+			c.send(t, strings.Repeat("d", n), syncpkg.EncodeAuthToken(token))
+			_, _, err := c.ws.Read(c.ctx)
+			if websocket.CloseStatus(err) != 1002 || !strings.Contains(err.Error(), "Hocuspocus endpoint") {
+				t.Fatalf("length %d, token of %d bytes: %v", n, len(token), err)
+			}
 		}
 	}
 	c := hpDial(t, url)
