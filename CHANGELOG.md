@@ -14,6 +14,29 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.36.1] - 2026-11-11
+
+**Upgrade impact**:
+
+- **The server writes messages over 32 KiB as fragmented messages** of 32 KiB frames. Every WebSocket client reassembles them; one that reads frames itself sees continuation frames.
+- **The `client` drops a peer it has not heard from for `AwarenessTimeout`** (30 seconds by default), as y-protocols does. A peer that renews its presence, as every y-protocols client does every 15 seconds, is not affected.
+
+### Fixed
+
+- **The server dropped a client whose ping came while it wrote a long message to that client.** The pong needs the frame lock, which a message written as one frame held for the whole write; after 5 seconds the read loop gave up and ended the connection. The Go client pings since 1.35.0, so a large document on a slow link could cut it off.
+- **The y-websocket `client` sent edits made offline twice on reconnect**, as an update and again in the reply to the server's SyncStep1. Both modes now hold local edits until that reply has carried them, and send no empty update.
+- **The `client` kept a silent peer's presence** until the connection closed when the server never sent its removal.
+
+### Dependencies
+
+- `modernc.org/sqlite` 1.61.1.
+
+### Tests
+
+- A client reading 8 MiB at 1 MiB/s pings in the middle of the server's write and gets its pong, and the whole message arrives.
+- An edit made between two sessions goes up in one frame; a live edit still goes out as an update.
+- A peer silent for `AwarenessTimeout` is dropped, not before.
+
 ## [1.36.0] - 2026-11-10
 
 **Upgrade impact**:
@@ -2250,6 +2273,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.36.1]: https://github.com/Deln0r/ygo/releases/tag/v1.36.1
 [1.36.0]: https://github.com/Deln0r/ygo/releases/tag/v1.36.0
 [1.35.0]: https://github.com/Deln0r/ygo/releases/tag/v1.35.0
 [1.34.0]: https://github.com/Deln0r/ygo/releases/tag/v1.34.0
