@@ -60,14 +60,21 @@ type sendQueue struct {
 	maxAge   time.Duration // how long an envelope may wait to be taken
 	now      func() time.Time
 
-	mu     sync.Mutex
-	items  []sendItem // items[0] is the next envelope the writer takes
-	fanout int        // fan-out envelopes in items
-	bytes  int64      // their bytes
-	total  int64      // bytes of every item in items, replies included
-	cause  closeCause
-	wake   chan struct{} // one slot: an append or a terminal cause
-	done   chan struct{} // closed when the writer exits; nil if it never started
+	mu    sync.Mutex
+	items []sendItem // items[0] is the next envelope the writer takes
+	// lastReply is when the writer last finished writing a reply. An
+	// envelope's wait counts from it, not from its own queuing, when it is
+	// later: fan-out that queued while the writer sent the connection's own
+	// reply (the initial sync of a large document, to a slow client) waited
+	// on the client receiving, not on it falling behind its room. Fan-out
+	// queued behind other fan-out still ages from its queuing.
+	lastReply time.Time
+	fanout    int   // fan-out envelopes in items
+	bytes     int64 // their bytes
+	total     int64 // bytes of every item in items, replies included
+	cause     closeCause
+	wake      chan struct{} // one slot: an append or a terminal cause
+	done      chan struct{} // closed when the writer exits; nil if it never started
 }
 
 func newSendQueue(maxLen int, maxBytes int64, maxAge time.Duration) *sendQueue {
@@ -139,7 +146,7 @@ func (q *sendQueue) take() (sendItem, closeCause) {
 			return sendItem{}, cause
 		}
 		if len(q.items) > 0 {
-			if q.now().Sub(q.items[0].queued) > q.maxAge {
+			if q.now().Sub(later(q.items[0].queued, q.lastReply)) > q.maxAge {
 				q.terminateLocked(causeQueueStalled)
 				q.mu.Unlock()
 				return sendItem{}, causeQueueStalled
@@ -161,6 +168,20 @@ func (q *sendQueue) take() (sendItem, closeCause) {
 		q.mu.Unlock()
 		<-q.wake
 	}
+}
+
+// replied records that the writer finished writing a reply.
+func (q *sendQueue) replied() {
+	q.mu.Lock()
+	q.lastReply = q.now()
+	q.mu.Unlock()
+}
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // terminate sets the terminal cause unless one is already set, and reports
