@@ -103,7 +103,7 @@ func (f *fakeYWS) counts() (step2, updates int) {
 		}
 		switch fr.SyncSub {
 		case syncpkg.SyncStep2:
-			if !(len(fr.Payload) == 2 && fr.Payload[0] == 0 && fr.Payload[1] == 0) {
+			if len(fr.Payload) != 2 || fr.Payload[0] != 0 || fr.Payload[1] != 0 {
 				step2++
 			}
 		case syncpkg.SyncUpdate:
