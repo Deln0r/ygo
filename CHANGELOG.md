@@ -16,7 +16,11 @@ file.
 
 ## [Unreleased]
 
-**Upgrade impact:** an empty document name now opens a Hocuspocus session instead of returning HTTP 400. `yserve -path-prefix /ws/` serves Hocuspocus at `/ws` and y-websocket documents below `/ws/`. Client BroadcastStateless messages are relayed as Stateless to Hocuspocus peers; y-websocket peers no longer receive type 6.
+**Upgrade impact**:
+
+- An empty document name now opens a Hocuspocus session instead of returning HTTP 400. `yserve -path-prefix /ws/` serves Hocuspocus at `/ws` and y-websocket documents below `/ws/`. Client BroadcastStateless messages are relayed as Stateless to Hocuspocus peers; y-websocket peers no longer receive type 6.
+- **The server writes messages over 32 KiB as fragmented messages** of 32 KiB frames. Every WebSocket client reassembles them; one that reads frames itself sees continuation frames.
+- **The `client` drops a peer it has not heard from for `AwarenessTimeout`** (30 seconds by default), as y-protocols does. A peer that renews its presence, as every y-protocols client does every 15 seconds, is not affected.
 
 ### Added
 
@@ -24,6 +28,22 @@ file.
 - `Options.OnAuthenticateRequest` checks each new key's token with the upgrade request and can grant read-only access. `OnAuthenticate` remains the fallback. Frames received before the token wait in a queue bounded across the socket by 1000 messages, 5 MiB and 100 pending keys. A refusal drops that key's queue and allows another token attempt on the same socket.
 - `Server.SendStateless` sends to a document's Hocuspocus peers. `IdleTimeout` and `AuthTimeout` default to 60 seconds; the latter is an absolute deadline for the first admitted key. `MaxConns` counts sockets, including ones awaiting authentication; per-document limits and `Stats.Connections` count keys. All keys share one bounded send queue and writer.
 - CI runs the stock providers against ygo for sync, offline edits, acknowledgements, read-only access, denied tokens, stateless messages, shared sockets, session-aware keys, y-websocket peers, presence renewal and yserve's endpoint routing.
+
+### Fixed
+
+- **The server dropped a client whose ping came while it wrote a long message to that client.** The pong needs the frame lock, which a message written as one frame held for the whole write; after 5 seconds the read loop gave up and ended the connection. The Go client pings since 1.35.0, so a large document on a slow link could cut it off.
+- **The y-websocket `client` sent edits made offline twice on reconnect**, as an update and again in the reply to the server's SyncStep1. Both modes now hold local edits until that reply has carried them, and send no empty update.
+- **The `client` kept a silent peer's presence** until the connection closed when the server never sent its removal.
+
+### Dependencies
+
+- `modernc.org/sqlite` 1.61.1.
+
+### Tests
+
+- A client reading 8 MiB at 1 MiB/s pings in the middle of the server's write and gets its pong, and the whole message arrives.
+- An edit made between two sessions goes up in one frame; a live edit still goes out as an update.
+- A peer silent for `AwarenessTimeout` is dropped, not before.
 
 ## [1.36.0] - 2026-11-10
 
