@@ -16,6 +16,8 @@ file.
 
 ## [Unreleased]
 
+## [1.37.0] - 2026-11-11
+
 **Upgrade impact**:
 
 - An empty document name now opens a Hocuspocus session instead of returning HTTP 400. `yserve -path-prefix /ws/` serves Hocuspocus at `/ws` and y-websocket documents below `/ws/`. Client BroadcastStateless messages are relayed as Stateless to Hocuspocus peers; y-websocket peers no longer receive type 6.
@@ -2288,6 +2290,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.37.0]: https://github.com/Deln0r/ygo/releases/tag/v1.37.0
 [1.36.0]: https://github.com/Deln0r/ygo/releases/tag/v1.36.0
 [1.35.0]: https://github.com/Deln0r/ygo/releases/tag/v1.35.0
 [1.34.0]: https://github.com/Deln0r/ygo/releases/tag/v1.34.0
