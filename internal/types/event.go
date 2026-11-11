@@ -55,7 +55,10 @@ func (e *MapEvent) KeysChanged() []string {
 // updates applied via ApplyUpdate.
 //
 // Mirrors yjs ymap.observe. The callback runs while the doc write
-// lock is held; it must not start a new transaction on the same doc.
+// lock is held; it must not start a new transaction on the same doc,
+// and must not edit through the transaction being committed: the
+// commit's events are built when first given out, so a later one may
+// show such an edit.
 func (m *Map) Observe(fn func(*MapEvent)) func() {
 	adapter := func(ev any) {
 		if e, ok := ev.(*MapEvent); ok {
@@ -69,6 +72,7 @@ func (m *Map) Observe(fn func(*MapEvent)) func() {
 // this map OR any shared type nested under it, with the list of events
 // (each carrying its Path relative to this map). Returns an
 // unsubscribe function. Mirrors yjs ymap.observeDeep.
+// The callback runs under the same rules as Observe.
 func (m *Map) ObserveDeep(fn func([]any)) func() {
 	return observeDeep(m.branch, fn)
 }
@@ -84,18 +88,25 @@ func dispatchEvents(t *doc.TransactionMut) {
 	// Events per type, for the type itself and each of its ancestors, in
 	// the order the types were first reached: yjs changedParentTypes. An
 	// event is recorded here before its shallow observers run, as yjs
-	// callTypeObservers does.
+	// callTypeObservers does. An event is built the first time an
+	// observer is given it, and not at all when nobody observes its type
+	// or an ancestor deeply, as yjs computes an event's delta only when
+	// it is read: building a text's delta walks the whole text. A
+	// callback cannot open a write transaction while the commit holds the
+	// lock, and editing through the committing transaction is not
+	// supported (Observe), so an event built later is the event built
+	// now.
 	var parents []*block.Branch
-	under := map[*block.Branch][]any{}
+	under := map[*block.Branch][]func() any{}
 
 	for _, br := range t.ChangedTypes() {
 		// A type deleted later in this transaction fires nothing.
 		if br.Item != nil && br.Item.IsDeleted() {
 			continue
 		}
-		var ev any
+		var build func() any
 		if keys := t.ChangedKeys(br); len(keys) > 0 {
-			ev = buildMapEvent(t, br, keys)
+			build = func() any { return buildMapEvent(t, br, keys) }
 		} else if t.PositionalChanged(br) {
 			// Positional change: Text (tagged TypeRefText by NewText) or
 			// XmlText, whose Observe takes a TextEvent too, vs Array (the
@@ -103,21 +114,28 @@ func dispatchEvents(t *doc.TransactionMut) {
 			// zero, so we cannot rely on it for arrays; the Text tag is the
 			// one reliable discriminator.
 			if br.TypeRef == block.TypeRefText || br.TypeRef == block.TypeRefXmlText {
-				ev = &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br)}
+				build = func() any { return &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br)} }
 			} else {
-				ev = &ArrayEvent{Target: &Array{branch: br}, Delta: buildPositionalDelta(t, br)}
+				build = func() any { return &ArrayEvent{Target: &Array{branch: br}, Delta: buildPositionalDelta(t, br)} }
 			}
 		}
-		if ev == nil {
+		if build == nil {
 			continue
+		}
+		var ev any
+		get := func() any {
+			if ev == nil {
+				ev = build()
+			}
+			return ev
 		}
 		for anc := br; anc != nil; anc = ancestorBranch(anc) {
 			if _, seen := under[anc]; !seen {
 				parents = append(parents, anc)
 			}
-			under[anc] = append(under[anc], ev)
+			under[anc] = append(under[anc], get)
 		}
-		br.CallObservers(ev)
+		br.CallObserversWith(get)
 	}
 
 	// Deep observers run after every shallow one, each once, with the
@@ -142,7 +160,8 @@ func dispatchEvents(t *doc.TransactionMut) {
 			depth int
 		}
 		batch := make([]pathed, 0, len(under[anc]))
-		for _, ev := range under[anc] {
+		for _, get := range under[anc] {
+			ev := get()
 			target := eventBranch(ev)
 			if target == nil || (target.Item != nil && target.Item.IsDeleted()) {
 				continue
@@ -355,7 +374,10 @@ type ArrayEvent struct {
 // unsubscribe function. Fires on local edits and remote updates.
 //
 // Mirrors yjs yarray.observe. The callback runs while the doc write
-// lock is held; it must not start a new transaction on the same doc.
+// lock is held; it must not start a new transaction on the same doc,
+// and must not edit through the transaction being committed: the
+// commit's events are built when first given out, so a later one may
+// show such an edit.
 func (a *Array) Observe(fn func(*ArrayEvent)) func() {
 	adapter := func(ev any) {
 		if e, ok := ev.(*ArrayEvent); ok {
@@ -426,6 +448,7 @@ func buildPositionalDelta(t *doc.TransactionMut, br *block.Branch) []ArrayDeltaO
 // this array OR any shared type nested under it, with the list of
 // events (each carrying its Path relative to this array). Returns an
 // unsubscribe function. Mirrors yjs yarray.observeDeep.
+// The callback runs under the same rules as Observe.
 func (a *Array) ObserveDeep(fn func([]any)) func() {
 	return observeDeep(a.branch, fn)
 }
@@ -448,7 +471,10 @@ type TextEvent struct {
 // remote updates.
 //
 // Mirrors yjs ytext.observe. The callback runs while the doc write
-// lock is held; it must not start a new transaction on the same doc.
+// lock is held; it must not start a new transaction on the same doc,
+// and must not edit through the transaction being committed: the
+// commit's events are built when first given out, so a later one may
+// show such an edit.
 func (t *Text) Observe(fn func(*TextEvent)) func() {
 	adapter := func(ev any) {
 		if e, ok := ev.(*TextEvent); ok {

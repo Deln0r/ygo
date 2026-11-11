@@ -202,3 +202,45 @@ func TestObserveDeep_RegisteredDuringDeliveryStartsNextTransaction(t *testing.T)
 		t.Errorf("calls = %q, want %q (yjs 13.6.33)", calls, want)
 	}
 }
+
+// A deep observer that a shallow observer adds during a commit gets that
+// commit's events, the ones of types delivered before the adding one
+// included, and a text's event carries its delta: an event nobody
+// observed yet is built when it is first given out, not dropped.
+func TestObserveDeep_AddedByShallowObserverGetsEarlierEvents(t *testing.T) {
+	d := ygo.NewDoc()
+	root := ygo.NewMap(d, "root")
+	txn := d.WriteTxn()
+	text := root.SetText(txn, "text")
+	inner := root.SetMap(txn, "inner")
+	txn.Commit()
+
+	var got []any
+	added := false
+	inner.Observe(func(*ygo.MapEvent) {
+		if !added {
+			added = true
+			root.ObserveDeep(func(evs []any) { got = evs })
+		}
+	})
+	txn = d.WriteTxn()
+	if err := text.Insert(txn, 0, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	inner.Set(txn, "k", int64(1))
+	txn.Commit()
+
+	if len(got) != 2 {
+		t.Fatalf("deep observer got %d events, want 2", len(got))
+	}
+	te, ok := got[0].(*ygo.TextEvent)
+	if !ok {
+		t.Fatalf("first event is %T, want the text's", got[0])
+	}
+	if fmt.Sprint(te.Delta) != fmt.Sprint([]ygo.DeltaOp{{Insert: "hi"}}) {
+		t.Fatalf("text delta %v, want one insert of \"hi\"", te.Delta)
+	}
+	if _, ok := got[1].(*ygo.MapEvent); !ok {
+		t.Fatalf("second event is %T, want the inner map's", got[1])
+	}
+}
