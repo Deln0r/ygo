@@ -119,6 +119,14 @@ func (b *Branch) CallObservers(ev any) {
 	b.observers.call(func(fn func(any)) { fn(ev) })
 }
 
+// CallObserversWith delivers the event get returns to b's observers, as
+// CallObservers does, and calls get only once there is an observer to
+// deliver to, so an event nobody observes is never built. get must
+// return the same event on every call.
+func (b *Branch) CallObserversWith(get func() any) {
+	b.observers.call(func(fn func(any)) { fn(get()) })
+}
+
 // CallDeepObservers delivers events to b's deep observers (yjs
 // callEventHandlerListeners on type._dEH).
 func (b *Branch) CallDeepObservers(events []any) {

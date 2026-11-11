@@ -84,18 +84,24 @@ func dispatchEvents(t *doc.TransactionMut) {
 	// Events per type, for the type itself and each of its ancestors, in
 	// the order the types were first reached: yjs changedParentTypes. An
 	// event is recorded here before its shallow observers run, as yjs
-	// callTypeObservers does.
+	// callTypeObservers does. An event is built the first time an
+	// observer is given it, and not at all when nobody observes its type
+	// or an ancestor deeply, as yjs computes an event's delta only when
+	// it is read: building a text's delta walks the whole text. Nothing
+	// changes the transaction while its events are delivered (a callback
+	// cannot open a write transaction then), so an event built later is
+	// the event built now.
 	var parents []*block.Branch
-	under := map[*block.Branch][]any{}
+	under := map[*block.Branch][]func() any{}
 
 	for _, br := range t.ChangedTypes() {
 		// A type deleted later in this transaction fires nothing.
 		if br.Item != nil && br.Item.IsDeleted() {
 			continue
 		}
-		var ev any
+		var build func() any
 		if keys := t.ChangedKeys(br); len(keys) > 0 {
-			ev = buildMapEvent(t, br, keys)
+			build = func() any { return buildMapEvent(t, br, keys) }
 		} else if t.PositionalChanged(br) {
 			// Positional change: Text (tagged TypeRefText by NewText) or
 			// XmlText, whose Observe takes a TextEvent too, vs Array (the
@@ -103,21 +109,28 @@ func dispatchEvents(t *doc.TransactionMut) {
 			// zero, so we cannot rely on it for arrays; the Text tag is the
 			// one reliable discriminator.
 			if br.TypeRef == block.TypeRefText || br.TypeRef == block.TypeRefXmlText {
-				ev = &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br)}
+				build = func() any { return &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br)} }
 			} else {
-				ev = &ArrayEvent{Target: &Array{branch: br}, Delta: buildPositionalDelta(t, br)}
+				build = func() any { return &ArrayEvent{Target: &Array{branch: br}, Delta: buildPositionalDelta(t, br)} }
 			}
 		}
-		if ev == nil {
+		if build == nil {
 			continue
+		}
+		var ev any
+		get := func() any {
+			if ev == nil {
+				ev = build()
+			}
+			return ev
 		}
 		for anc := br; anc != nil; anc = ancestorBranch(anc) {
 			if _, seen := under[anc]; !seen {
 				parents = append(parents, anc)
 			}
-			under[anc] = append(under[anc], ev)
+			under[anc] = append(under[anc], get)
 		}
-		br.CallObservers(ev)
+		br.CallObserversWith(get)
 	}
 
 	// Deep observers run after every shallow one, each once, with the
@@ -142,7 +155,8 @@ func dispatchEvents(t *doc.TransactionMut) {
 			depth int
 		}
 		batch := make([]pathed, 0, len(under[anc]))
-		for _, ev := range under[anc] {
+		for _, get := range under[anc] {
+			ev := get()
 			target := eventBranch(ev)
 			if target == nil || (target.Item != nil && target.Item.IsDeleted()) {
 				continue

@@ -155,9 +155,14 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 	// The gap starts right after the last content before idx, ahead of
 	// any format markers and tombstones in between, where yjs's cursor
 	// stops. A lookup that hit a cached position can return a later item.
-	gapStart := right
-	for gapStart != nil && gapStart.Left != nil && (gapStart.Left.IsDeleted() || gapStart.Left.Content.Kind == block.KindFormat) {
-		gapStart = gapStart.Left
+	// A text that never had a format item has no markers to clean up, so
+	// it skips the walk over the tombstones.
+	var gapStart *block.Item
+	if t.branch.HasFormatting {
+		gapStart = right
+		for gapStart != nil && gapStart.Left != nil && (gapStart.Left.IsDeleted() || gapStart.Left.Content.Kind == block.KindFormat) {
+			gapStart = gapStart.Left
+		}
 	}
 
 	remaining := length
