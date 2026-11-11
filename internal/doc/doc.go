@@ -16,14 +16,16 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/store"
 )
 
-// MaxClientID is the upper bound on Doc.ClientID values. Set to
-// 2^53-1 to match the JS-safe-integer range that JS Yjs uses for its
-// clientID; all values produced by NewDoc fit in [1, MaxClientID].
+// MaxClientID is the upper bound on Doc.ClientID values: 2^53-1, the
+// JavaScript safe-integer range, which bounds every client ID on the
+// wire. Generated IDs are smaller: NewDoc draws them from [1, 2^32-1],
+// as yjs 13 and 14 draw a uint32.
 const MaxClientID uint64 = (1 << 53) - 1
 
 // Options bundles per-Doc settings. The zero value (Options{}) gives
@@ -41,7 +43,9 @@ type Options struct {
 
 	// ClientID overrides the random client identifier. When zero
 	// (the default), NewDocWithOptions generates one via crypto/rand.
-	// Pass a fixed value only for deterministic tests.
+	// Pass a fixed value only for deterministic tests. A fixed ID is
+	// replaced like a random one when an update advances it (see
+	// Doc.ClientID), loading the document's own history included.
 	ClientID uint64
 
 	// GUID is the document's stable string identity. Subdocuments are
@@ -57,7 +61,9 @@ type Options struct {
 // methods acquire the internal RWMutex appropriately. Direct field
 // access from outside the doc package is not safe.
 type Doc struct {
-	clientID     uint64
+	// clientID is read outside the doc lock (Doc.ClientID) and written by
+	// a commit that finds the ID in use elsewhere.
+	clientID     atomic.Uint64
 	guid         string
 	store        *store.BlockStore
 	gc           bool
@@ -315,7 +321,7 @@ func (d *Doc) runQueued(t *TransactionMut) {
 }
 
 // NewDoc returns a fresh Doc with default options and a random
-// client identifier in [1, MaxClientID].
+// client identifier in [1, 2^32-1].
 func NewDoc() *Doc {
 	return NewDocWithOptions(Options{})
 }
@@ -331,14 +337,15 @@ func NewDocWithOptions(opts Options) *Doc {
 	if guid == "" {
 		guid = newGUID()
 	}
-	return &Doc{
-		clientID:     cid,
+	d := &Doc{
 		guid:         guid,
 		store:        store.NewBlockStore(),
 		gc:           !opts.DisableGC,
 		rootBranches: map[string]*block.Branch{},
 		subdocs:      map[string]*Doc{},
 	}
+	d.clientID.Store(cid)
+	return d
 }
 
 // newGUID returns a random hex identifier for a (sub)document,
@@ -483,10 +490,15 @@ func (d *Doc) Subdocs() []string {
 	return out
 }
 
-// ClientID returns the random per-replica identifier. Stable for the
-// life of the Doc; used as the Client field in every ID this replica
-// produces.
-func (d *Doc) ClientID() uint64 { return d.clientID }
+// ClientID returns the per-replica identifier, the Client field of every
+// ID this replica produces. It changes when an update made elsewhere
+// advances it: another replica uses the same ID, or the document's own
+// history was loaded into a doc with that ID. The doc then draws a new
+// random ID, as yjs does, so its next edits cannot collide; the commit
+// of that update changes it after its observers and after-transaction
+// handlers ran and before its update handlers run. Safe to call from
+// any goroutine.
+func (d *Doc) ClientID() uint64 { return d.clientID.Load() }
 
 // GC reports whether garbage collection of fully-observed deleted
 // items will run at transaction commit.
@@ -539,18 +551,26 @@ func (d *Doc) WithRoot(name string, fn func(*block.Branch)) {
 	fn(b)
 }
 
-// newClientID returns a random non-zero uint64 in [1, MaxClientID].
-// Uses crypto/rand for collision resistance across replicas. Retry
-// loop handles the (probability 2^-53) case where the masked draw is
-// zero, which our convention treats as reserved (yrs uses NonZeroU64).
+// newClientID returns a random client ID in [1, 2^32-1], as yjs 13
+// and 14 draw random.uint32: an ID of up to 32 bits takes at most 5
+// bytes as a varuint on the wire, where a 53-bit one takes up to 8.
+// Zero is redrawn (it is reserved, as yrs's NonZeroU64).
 func newClientID() uint64 {
-	var b [8]byte
+	var b [4]byte
 	for {
 		if _, err := rand.Read(b[:]); err != nil {
 			panic("ygo: crypto/rand failed: " + err.Error())
 		}
-		id := binary.BigEndian.Uint64(b[:]) & MaxClientID
-		if id != 0 {
+		if id := uint64(binary.BigEndian.Uint32(b[:])); id != 0 {
+			return id
+		}
+	}
+}
+
+// newClientIDOtherThan returns a new random client ID different from old.
+func newClientIDOtherThan(old uint64) uint64 {
+	for {
+		if id := newClientID(); id != old {
 			return id
 		}
 	}

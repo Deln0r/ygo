@@ -93,10 +93,11 @@ var ErrEmptyUpdate = errors.New("persist: update blob is empty")
 // docName in insertion order. Returns a fresh empty Doc when the
 // document has no stored updates.
 //
-// The returned Doc owns its own ClientID (a fresh random one unless
-// overridden by opts.ClientID). Replayed updates do not affect the
-// local client's clock; they integrate into the existing client lists
-// the source documents produced.
+// The returned Doc gets its own ClientID: a fresh random one, or
+// opts.ClientID. Replayed updates integrate into the client lists the
+// source documents produced. When they include edits made under
+// opts.ClientID, the doc takes a new random ID after the load
+// (doc.Doc.ClientID), as yjs does when it loads its own history.
 func LoadDoc(ctx context.Context, s Store, docName string, opts doc.Options) (*doc.Doc, error) {
 	d := doc.NewDocWithOptions(opts)
 	updates, err := s.GetUpdates(ctx, docName)

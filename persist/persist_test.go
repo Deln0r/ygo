@@ -620,3 +620,28 @@ func bytesEqual(a, b []byte) bool {
 	}
 	return true
 }
+
+// A doc loaded with a fixed ClientID that the log wrote under takes a new
+// random ID, as yjs does when it loads its own history, so its next edits
+// cannot collide with the stored ones; with another ID it keeps it.
+func TestLoadDoc_FixedClientIDInTheLogIsReplaced(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 7, "k", "v")); err != nil {
+		t.Fatal(err)
+	}
+	d, err := persist.LoadDoc(ctx, s, "doc", doc.Options{ClientID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ClientID() == 7 {
+		t.Fatal("the loaded doc kept client ID 7, which the log wrote under")
+	}
+	d, err = persist.LoadDoc(ctx, s, "doc", doc.Options{ClientID: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ClientID() != 8 {
+		t.Fatalf("a doc loaded with an ID the log does not use got %d", d.ClientID())
+	}
+}

@@ -107,6 +107,12 @@ func TestClient_OfflineEditsFlowUpOnReconnect(t *testing.T) {
 	a2 := connectClient(t, url, path, 7, st2)
 	t.Cleanup(func() { _ = a2.Close() })
 	waitFor(t, "a2 synced", a2.Synced)
+	// Loading session 1's edit, made under ID 7, gave the document a new
+	// ID (as yjs does when it loads its own history); the edit still goes
+	// up, since the handshake works on state vectors.
+	if a2.Doc().ClientID() == 7 {
+		t.Fatal("the reloaded document kept client ID 7, which its stored edit used")
+	}
 
 	// A second, store-less client on the same server sees the edit that
 	// was originally made offline.

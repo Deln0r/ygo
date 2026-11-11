@@ -315,3 +315,34 @@ func TestClient_ForwardsFormatCleanup(t *testing.T) {
 		return false
 	})
 }
+
+// Two clients that start with the same client ID end up with different
+// ones and converge: the first update that brings the other's edits under
+// the shared ID gives the receiver a new ID, so the edits both make
+// afterwards cannot collide. Before, each skipped the other's items as
+// already known and the two diverged.
+func TestClient_SameClientIDConverges(t *testing.T) {
+	url := startServer(t)
+	a := dial(t, url, "room", 77)
+	waitFor(t, "a synced", a.Synced)
+	am := mapOf(a)
+	txn := a.Doc().WriteTxn()
+	am.Set(txn, "first", "a")
+	txn.Commit()
+	b := dial(t, url, "room", 77)
+	waitFor(t, "b got a's edit", func() bool { return getKey(b, "first") == "a" })
+	// Both edit after the first exchange.
+	txn = a.Doc().WriteTxn()
+	am.Set(txn, "from-a", "x")
+	txn.Commit()
+	bm := mapOf(b)
+	txn = b.Doc().WriteTxn()
+	bm.Set(txn, "from-b", "y")
+	txn.Commit()
+	waitFor(t, "both edits on both sides", func() bool {
+		return getKey(a, "from-b") == "y" && getKey(b, "from-a") == "x"
+	})
+	if b.Doc().ClientID() == 77 {
+		t.Fatal("b kept client ID 77 after receiving a's edits under it")
+	}
+}

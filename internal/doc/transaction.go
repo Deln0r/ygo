@@ -77,7 +77,10 @@ type TransactionMut struct {
 	// true for WriteTxn, false for the transactions that ApplyUpdate,
 	// its V2 and origin forms, and the stored-update loaders open. It is
 	// independent of Origin. A non-local transaction that changes
-	// formatted text is followed by a format cleanup (see Commit).
+	// formatted text is followed by a format cleanup (see Commit), and
+	// one that advances the doc's own client clock gives the doc a new
+	// client ID (Doc.ClientID): a WriteTxn set to false that then edits
+	// changes the ID at every commit.
 	Local bool
 
 	// deletedIDs records the head ID of every item tombstoned during this
@@ -262,6 +265,18 @@ func (t *TransactionMut) commitLocked() (cleanup *TransactionMut) {
 	// (captured above) stays valid.
 	t.squashNewBlocks()
 	t.mergeSplits()
+	// An update made elsewhere that advanced this replica's own clock
+	// means another replica writes under its ID (or its own history was
+	// loaded into a doc with that ID): take a new one, as yjs
+	// cleanupTransactions does at this point, so the next edits cannot
+	// collide. Local transactions never trigger it. The format cleanup
+	// transaction opened above is local and only deletes, so the ID it
+	// was opened under does not matter.
+	if !t.Local {
+		if id := t.doc.ClientID(); t.afterState[id] != t.beforeState[id] {
+			t.doc.clientID.Store(newClientIDOtherThan(id))
+		}
+	}
 	// Update events last, as yjs emits 'update' / 'updateV2' after GC
 	// and the struct merge: the bytes describe the final layout.
 	t.doc.fireUpdateHandlers(t)

@@ -125,15 +125,19 @@ func originValue(origin string) any {
 	return origin
 }
 
-// NewDocWithClientID returns a fresh Doc with the given ClientID.
-// Use this when the calling application wants deterministic
-// per-device IDs (typical mobile pattern: derive from a stable
-// device identifier).
+// NewDocWithClientID returns a fresh Doc with the given ClientID, for
+// deterministic tests. The ID does not stay fixed: once an update
+// advances it, loading this device's own saved state included, the
+// document takes a new random ID (see ClientID), as yjs does. Do not
+// use it as a stable device identifier.
 func NewDocWithClientID(clientID uint64) *Doc {
 	return &Doc{inner: doc.NewDocWithOptions(doc.Options{ClientID: clientID}), shared: &docShared{}}
 }
 
-// ClientID returns this replica's client identifier.
+// ClientID returns this replica's client identifier. It changes when an
+// applied update advances it: another replica uses the same ID, or this
+// document's own history was loaded into it. The document then takes a
+// new random ID, as yjs does, so its next edits cannot collide.
 func (d *Doc) ClientID() uint64 { return d.inner.ClientID() }
 
 // ApplyUpdate decodes raw V1 wire bytes and integrates them into

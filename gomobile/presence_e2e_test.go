@@ -119,3 +119,32 @@ func TestMobile_Presence_CursorEndToEnd(t *testing.T) {
 		return !present
 	})
 }
+
+// Client.ClientID stays the key of the client's own presence entry when
+// the document takes a new ID: an update written under the document's
+// ID changes Doc.ClientID, while the presence keeps the ID it was
+// created with, as y-protocols does.
+func TestMobile_ClientIDStaysThePresenceKey(t *testing.T) {
+	url := startServer(t)
+	da := gomobile.NewDocWithClientID(71)
+	ca := gomobile.NewClient(url, "room", da)
+	if err := ca.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ca.Close() })
+	waitFor(t, "a synced", ca.Synced)
+
+	other := gomobile.NewDocWithClientID(71)
+	if err := other.Text("note").InsertAt(0, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := da.ApplyUpdate(other.EncodeStateAsUpdate()); err != nil {
+		t.Fatal(err)
+	}
+	if da.ClientID() == 71 {
+		t.Fatal("the document kept ID 71 after an update written under it")
+	}
+	if got := ca.ClientID(); got != 71 {
+		t.Fatalf("Client.ClientID() = %d, want the presence key 71 (document now %d)", got, da.ClientID())
+	}
+}

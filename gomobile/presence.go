@@ -70,10 +70,20 @@ func (c *Client) PresenceStates() []byte {
 	return presenceSnapshot(inner.Awareness())
 }
 
-// ClientID returns this client's awareness/document clientID, the key
-// of its own entry in the presence snapshot. Use it to skip yourself
-// when rendering peer cursors.
-func (c *Client) ClientID() uint64 { return c.d.inner.ClientID() }
+// ClientID returns the key of this client's own entry in the presence
+// snapshot, the ID its presence was created with. Use it to skip
+// yourself when rendering peer cursors. It differs from Doc.ClientID
+// once the document has taken a new ID (Doc.ClientID); before Connect
+// it is the document's.
+func (c *Client) ClientID() uint64 {
+	c.mu.Lock()
+	inner := c.inner
+	c.mu.Unlock()
+	if inner != nil {
+		return inner.Awareness().ClientID()
+	}
+	return c.d.inner.ClientID()
+}
 
 // startPresence subscribes pl to inner's awareness change feed and
 // returns the unsubscribe func. The caller holds c.mu.

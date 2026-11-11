@@ -106,7 +106,8 @@ func SaveVersion(ctx context.Context, s VersionedStore, docName, label string) (
 
 // LoadVersion reconstructs the document as it was at the given
 // version. The returned Doc is independent of the live log; mutating
-// it does not affect stored state.
+// it does not affect stored state. As with LoadDoc, an opts.ClientID
+// that the version's state wrote under is replaced by a random one.
 func LoadVersion(ctx context.Context, vs VersionStore, docName string, versionID int64, opts doc.Options) (*doc.Doc, error) {
 	state, err := vs.GetVersionState(ctx, docName, versionID)
 	if err != nil {

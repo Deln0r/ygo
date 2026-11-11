@@ -84,7 +84,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	emit(map[string]any{"ev": "ready", "id": c.Doc().ClientID()})
+	// The presence ID, the key the harness looks the client up by; the
+	// document's ID can change (Doc.ClientID).
+	emit(map[string]any{"ev": "ready", "id": c.Awareness().ClientID()})
 
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
