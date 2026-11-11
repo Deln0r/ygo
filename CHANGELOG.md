@@ -16,6 +16,8 @@ file.
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-11-12
+
 **Upgrade impact**:
 
 - **Generated client IDs are 32-bit**, drawn from [1, 2^32-1] as yjs 13 and 14 draw them; they were 53-bit. Updates and V1 documents get smaller and match yjs: on the B4 trace with a transaction per edit, 6,324,510 bytes of updates instead of up to 8,196,294 and a 311,038-byte V1 document instead of up to 376,756, for an ID of 2^28 or more, as 15 random IDs in 16 are (a smaller one takes 4 bytes instead of 5, and the sizes come out smaller still). IDs up to 2^53-1 still encode and decode everywhere.
@@ -2334,6 +2336,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.39.0]: https://github.com/Deln0r/ygo/releases/tag/v1.39.0
 [1.38.0]: https://github.com/Deln0r/ygo/releases/tag/v1.38.0
 [1.37.0]: https://github.com/Deln0r/ygo/releases/tag/v1.37.0
 [1.36.0]: https://github.com/Deln0r/ygo/releases/tag/v1.36.0
