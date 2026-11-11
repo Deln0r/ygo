@@ -52,6 +52,8 @@ type markerPair struct {
 	remote *doc.Doc
 	name   string
 	ops    int
+	// remoteEdits counts fromRemote calls.
+	remoteEdits int
 }
 
 func newMarkerPair(t *testing.T, seed uint64, name string) *markerPair {
@@ -111,8 +113,13 @@ func (p *markerPair) commit() {
 func (p *markerPair) fromRemote(edit func(txn *doc.TransactionMut, br *block.Branch)) {
 	p.t.Helper()
 	p.commit()
-	if err := encoding.ApplyUpdate(p.remote, encoding.EncodeStateAsUpdate(p.docs[0])); err != nil {
-		p.t.Fatal(err)
+	// Every other time the remote edits without catching up first, so its
+	// items meet ours concurrently.
+	p.remoteEdits++
+	if p.remoteEdits%2 == 0 {
+		if err := encoding.ApplyUpdate(p.remote, encoding.EncodeStateAsUpdate(p.docs[0])); err != nil {
+			p.t.Fatal(err)
+		}
 	}
 	br := p.remote.Branch(p.name)
 	txn := p.remote.WriteTxn()
@@ -262,6 +269,10 @@ func TestSearchMarkers_ArrayMatchesWalkFromStart(t *testing.T) {
 			case k < 50:
 				v := r.IntN(1000)
 				p.edit("push", func(i int, txn *doc.TransactionMut) error { arr[i].Push(txn, v); return nil })
+			case k < 52:
+				// Past the end: the value is appended.
+				at, v := length+1+uint64(r.IntN(100)), r.IntN(1000)
+				p.edit("past the end", func(i int, txn *doc.TransactionMut) error { arr[i].Insert(txn, at, v); return nil })
 			case k < 55:
 				at := cursor
 				p.edit("nested", func(i int, txn *doc.TransactionMut) error { arr[i].InsertMap(txn, at); return nil })
@@ -301,4 +312,63 @@ func TestSearchMarkers_ArrayMatchesWalkFromStart(t *testing.T) {
 		}
 		p.commit()
 	}
+}
+
+// An insert past the end of an array appends the value and leaves a marker
+// at the index the value got, not the one asked for. A marker at the
+// asked index put a second such insert before the first, and later sent
+// an in-range lookup that walked left from it to the wrong place.
+func TestSearchMarkers_InsertPastTheEnd(t *testing.T) {
+	fill := func(n int, v any) []any {
+		vs := make([]any, n)
+		for j := range vs {
+			vs[j] = v
+		}
+		return vs
+	}
+	t.Run("twice", func(t *testing.T) {
+		p := newMarkerPair(t, 0, "list")
+		arr := [2]*types.Array{types.NewArray(p.branch[0]), types.NewArray(p.branch[1])}
+		p.edit("fill", func(i int, txn *doc.TransactionMut) error {
+			arr[i].InsertRange(txn, 0, []any{0, 1, 2, 3, 4})
+			return nil
+		})
+		p.edit("x", func(i int, txn *doc.TransactionMut) error { arr[i].Insert(txn, 100, "x"); return nil })
+		p.edit("y", func(i int, txn *doc.TransactionMut) error { arr[i].Insert(txn, 100, "y"); return nil })
+		p.commit()
+		if got := fmt.Sprint(arr[0].ToSlice()); got != "[0 1 2 3 4 x y]" {
+			t.Fatalf("array is %s", got)
+		}
+	})
+	t.Run("later lookup", func(t *testing.T) {
+		p := newMarkerPair(t, 0, "list")
+		arr := [2]*types.Array{types.NewArray(p.branch[0]), types.NewArray(p.branch[1])}
+		p.edit("fill", func(i int, txn *doc.TransactionMut) error {
+			arr[i].InsertRange(txn, 0, []any{0, 1, 2, 3, 4})
+			return nil
+		})
+		p.edit("x", func(i int, txn *doc.TransactionMut) error { arr[i].Insert(txn, 100, "x"); return nil })
+		p.edit("prepend", func(i int, txn *doc.TransactionMut) error { arr[i].InsertRange(txn, 0, fill(200, "p")); return nil })
+		p.edit("Y", func(i int, txn *doc.TransactionMut) error { arr[i].Insert(txn, 200, "Y"); return nil })
+		p.commit()
+		if got := arr[0].Get(200); got != "Y" {
+			t.Fatalf("index 200 holds %v", got)
+		}
+	})
+	t.Run("xml children", func(t *testing.T) {
+		p := newMarkerPair(t, 0, "frag")
+		fr := [2]*types.XmlFragment{types.NewXmlFragment(p.branch[0]), types.NewXmlFragment(p.branch[1])}
+		p.edit("fill", func(i int, txn *doc.TransactionMut) error {
+			for j := range 5 {
+				fr[i].InsertXmlElement(txn, uint64(j), "p")
+			}
+			return nil
+		})
+		p.edit("a", func(i int, txn *doc.TransactionMut) error { fr[i].InsertXmlElement(txn, 999, "a"); return nil })
+		p.edit("b", func(i int, txn *doc.TransactionMut) error { fr[i].InsertXmlElement(txn, 999, "b"); return nil })
+		p.commit()
+		if got := fr[0].ToString(); got != "<p></p><p></p><p></p><p></p><p></p><a></a><b></b>" {
+			t.Fatalf("fragment is %s", got)
+		}
+	})
 }

@@ -85,7 +85,8 @@ type IntegrateContext interface {
 //   - Move integration recursion is skipped.
 //   - Subdoc registration (ContentDoc) is skipped.
 //   - Weak-link (info.IsLinked) bookkeeping is skipped.
-//   - Format-marker integration is a no-op (matches yrs).
+//   - Format-marker integration only flags the parent as formatted
+//     (HasFormatting).
 func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 	return i.integrate(ctx, offset, false)
 }
@@ -93,8 +94,10 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 // IntegrateTracked integrates a local insert whose caller keeps the
 // parent's search markers in step itself (MarkerList.ShiftAfter at the
 // index it inserted at), so the parent's markers are not dropped. yjs
-// keeps them the same way: its type API updates them on a local insert
-// and only a remote transaction or an undo step resets them.
+// keeps them the same way on a local insert: its type API updates them,
+// and a remote transaction or an undo step resets them. (yjs also stops
+// using them for a type once a format item integrates into it; ygo
+// keeps them, since Text.Delete still looks up positions from them.)
 func (i *Item) IntegrateTracked(ctx IntegrateContext) bool {
 	return i.integrate(ctx, 0, true)
 }

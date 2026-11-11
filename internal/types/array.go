@@ -43,8 +43,9 @@ func (a *Array) Len() uint64 { return a.branch.BlockLen }
 // Insert inserts a single value at idx. Convenience for
 // InsertRange with a one-element slice.
 //
-// idx must be in [0, Len]; out-of-range inserts append at the end
-// (matching JS Y.Array.insert tolerant behaviour).
+// idx should be in [0, Len]. A larger idx appends the value after the
+// last item of the list, deleted or not, as Push does; yjs throws
+// instead.
 func (a *Array) Insert(txn *doc.TransactionMut, idx uint64, value any) {
 	a.InsertRange(txn, idx, []any{value})
 }
@@ -103,8 +104,10 @@ func validValues(values []any) []any {
 }
 
 // insertBetween integrates values as one item between left and right,
-// at user index idx (for the search markers).
+// at user index idx (for the search markers). An idx past the end is
+// recorded as Len, where the item lands.
 func (a *Array) insertBetween(txn *doc.TransactionMut, idx uint64, left, right *block.Item, values []any) {
+	idx = min(idx, a.Len())
 	values = validValues(values)
 	var origin, rightOrigin *block.ID
 	if left != nil {
@@ -446,7 +449,7 @@ func extractValueAt(c block.Content, offset uint64) any {
 // InsertMap inserts a freshly-constructed nested Map at idx and
 // returns the wrapper. Per docs/yrs-port-notes/nested-types.md §6.
 //
-// Like InsertRange, idx is clamped to [0, Len]; the new Map element
+// Like InsertRange, an idx past Len appends; the new Map element
 // occupies one slot (Len contribution = 1).
 func (a *Array) InsertMap(txn *doc.TransactionMut, idx uint64) *Map {
 	inner := &block.Branch{
@@ -478,6 +481,7 @@ func (a *Array) InsertText(txn *doc.TransactionMut, idx uint64) *Text {
 // to the Item.
 func (a *Array) insertNested(txn *doc.TransactionMut, idx uint64, inner *block.Branch) {
 	left, right := findInsertPosition(a.branch, txn, idx)
+	idx = min(idx, a.Len())
 
 	var origin, rightOrigin *block.ID
 	if left != nil {

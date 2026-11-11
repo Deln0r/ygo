@@ -15,15 +15,14 @@ package block
 // (held by TransactionMut). Read-only access from a read txn is
 // safe as long as no concurrent writer holds the same Branch.
 type SearchMarker struct {
-	// Item is the linked-list node this marker points at. May be
-	// a tombstone (in which case Index is the position immediately
-	// after the tombstone run that includes Item — slightly stale
-	// markers still resolve correctly because the search walks
-	// forward from the marker and counts live items).
+	// Item is the linked-list node this marker points at: a live
+	// item, a tombstone or a live uncountable one (a format marker).
 	Item *Item
 
-	// Index is the user-facing index where Item starts in document
-	// order (countable, non-deleted items only).
+	// Index is the number of live countable units before Item in
+	// document order. Lookups trust it exactly, so every edit that
+	// moves it updates it (ShiftAfter, ShrinkAfter, Absorbed) or drops
+	// the markers (Invalidate).
 	Index uint64
 
 	// Timestamp is a monotonic clock value bumped on Touch / Add;
@@ -57,7 +56,7 @@ func NewMarkerList() *MarkerList {
 //
 // Returned pointer aliases internal state; callers must NOT retain
 // it past the next list mutation (Add / Touch / ShiftAfter /
-// ShrinkAfter).
+// ShrinkAfter / Absorbed / Invalidate).
 func (m *MarkerList) Nearest(target uint64) *SearchMarker {
 	if m == nil || len(m.markers) == 0 {
 		return nil
@@ -177,10 +176,18 @@ func (m *MarkerList) Absorbed(from, into *Item, intoLen uint64) {
 	if !into.IsDeleted() && into.IsCountable() {
 		shift = intoLen
 	}
+	intoMarked := false
+	for _, mk := range m.markers {
+		if mk.Item == into {
+			intoMarked = true
+			break
+		}
+	}
 	out := m.markers[:0]
 	for _, mk := range m.markers {
 		if mk.Item == from {
-			if mk.Index < shift {
+			// into already has a marker, with the same index.
+			if intoMarked || mk.Index < shift {
 				continue
 			}
 			mk.Item = into

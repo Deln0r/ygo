@@ -300,8 +300,9 @@ func deleteText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, len
 //     to end (lastSeen, nil) defensively.
 //
 // Search-marker fast path: same shape as Array's
-// findInsertPosition. Forward-only walks from the nearest marker
-// turn the B4 LaTeX-trace workload from O(N) per edit into
+// findInsertPosition. The walk starts from the nearest marker, after
+// stepping left from it when it is past idx (startFromMarker), which
+// turns the B4 LaTeX-trace workload from O(N) per edit into
 // O(distance-from-cursor) per edit.
 func findTextPosition(branch *block.Branch, txn *doc.TransactionMut, idx uint64) (*block.Item, *block.Item, error) {
 	if idx == 0 {
