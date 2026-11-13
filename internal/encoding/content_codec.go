@@ -21,9 +21,14 @@ import (
 // nil values encode as the JSON literal "null". Values go through
 // anyval.ForJSON first, so undefined, -0 and BigInt come out as
 // JSON.stringify writes them (BigInt, where it throws, as a number), and
-// the text is JSON.stringify's (appendStringify), not encoding/json's.
+// the text is JSON.stringify's (anyval.AppendStringify), not
+// encoding/json's. A json.RawMessage is the JSON anyval.ValidJSON stored
+// at the call, already in that form, and goes out as it is.
 func writeJSON(buf []byte, v block.Any) []byte {
-	return lib0.WriteVarString(buf, string(appendStringify(nil, anyval.ForJSON(v))))
+	if raw, ok := v.(json.RawMessage); ok {
+		return lib0.WriteVarString(buf, string(raw))
+	}
+	return lib0.WriteVarString(buf, string(anyval.AppendStringify(nil, anyval.ForJSON(v))))
 }
 
 // readJSON consumes a varstring + JSON-parses it. Returns the

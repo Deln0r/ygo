@@ -1,11 +1,10 @@
-package encoding
+package anyval
 
 import (
 	"encoding/json"
 	"math"
 	"testing"
 
-	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 )
 
@@ -35,7 +34,7 @@ func TestAppendStringify(t *testing.T) {
 		{"BigInt digits", block.BigInt(9007199254740993), "9007199254740993"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := string(appendStringify(nil, anyval.ForJSON(c.v))); got != c.want {
+			if got := string(AppendStringify(nil, ForJSON(c.v))); got != c.want {
 				t.Fatalf("got %s, want %s", got, c.want)
 			}
 		})
@@ -46,10 +45,49 @@ func TestAppendStringify(t *testing.T) {
 		Src string `json:"src"`
 		Alt string `json:"alt"`
 	}
-	if got := string(appendStringify(nil, link{"a&b", "<x>"})); got != `{"src":"a&b","alt":"<x>"}` {
+	if got := string(AppendStringify(nil, link{"a&b", "<x>"})); got != `{"src":"a&b","alt":"<x>"}` {
 		t.Fatalf("struct: got %s", got)
 	}
-	if got := string(appendStringify(nil, json.RawMessage(`{"b":1,"0":2}`))); got != `{"0":2,"b":1}` {
+	if got := string(AppendStringify(nil, json.RawMessage(`{"b":1,"0":2}`))); got != `{"0":2,"b":1}` {
 		t.Fatalf("raw: got %s", got)
+	}
+}
+
+// TestParseJSON_RejectsWhatJSONParseRejects: ParseJSON takes the texts
+// JSON.parse takes and refuses the ones it throws on (node 26, each list
+// checked there), so a text either reads as JavaScript reads it or is not
+// read at all.
+func TestParseJSON_RejectsWhatJSONParseRejects(t *testing.T) {
+	for _, s := range []string{
+		"01", "[1,]", `{"a":1,}`, "{'a':1}", "\"\x01\"", "\v1", "NaN", "\ufeff1",
+		"1 2", "-", "1.", ".5", "1e", `"\x"`, `"\u12"`, "tru", `{"a"}`, "[", `"abc`,
+		"Infinity", `{"a":1 "b":2}`, "\u00a01",
+	} {
+		if _, err := ParseJSON([]byte(s)); err == nil {
+			t.Errorf("ParseJSON(%q) accepted a text JSON.parse rejects", s)
+		}
+	}
+	for _, s := range []string{"  1  ", "-0", "1E+2", `"é"`, "\t\n\r 1", "[]", "{}", `"\/"`} {
+		if _, err := ParseJSON([]byte(s)); err != nil {
+			t.Errorf("ParseJSON(%q): %v, but JSON.parse takes it", s, err)
+		}
+	}
+	// Nesting up to 10000 levels parses, as encoding/json's decoder does,
+	// past it does not.
+	deep := func(n int) []byte {
+		b := make([]byte, 0, 2*n)
+		for range n {
+			b = append(b, '[')
+		}
+		for range n {
+			b = append(b, ']')
+		}
+		return b
+	}
+	if _, err := ParseJSON(deep(10000)); err != nil {
+		t.Errorf("10000 levels: %v", err)
+	}
+	if _, err := ParseJSON(deep(10002)); err == nil {
+		t.Error("10002 levels parsed")
 	}
 }

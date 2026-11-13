@@ -84,7 +84,7 @@ func untagValue(t *testing.T, v any) any {
 		}
 		return f
 	case "array":
-		var out []any
+		out := []any{} // an empty JS array is [], not null
 		for _, el := range m["v"].([]any) {
 			out = append(out, untagValue(t, el))
 		}

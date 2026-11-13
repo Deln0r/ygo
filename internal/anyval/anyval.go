@@ -34,13 +34,14 @@ func Valid(v any) any {
 // encoders decide at encode (encoding.jsonValueForAny): a plain tree all
 // the way down gets Valid and keeps the encoding it has in V1 and V2.
 // Anything else is marshaled once, here, its bytes fixed by
-// utf16.ValidString, and stored as that JSON, a json.RawMessage, which both
-// encoders already take as the JSON it holds. So every encoding of the item
-// writes the same bytes, whatever a marshaler would return on a later call;
-// the JSON text is kept as it is, numbers and escaped surrogates included;
-// and two such values with the same JSON compare equal. A value
-// encoding/json cannot marshal (a cycle) becomes nil, which both formats
-// already write for it.
+// utf16.ValidString, and stored as that JSON, a json.RawMessage, in the
+// form JSON.stringify writes for JSON.parse of it (AppendStringify): that
+// is the text a JavaScript peer holding the value would send, and V1 writes
+// it as it is. So every encoding of the item writes the same bytes,
+// whatever a marshaler would return on a later call; escaped lone
+// surrogates are kept; and two such values with the same JSON compare
+// equal. A value encoding/json cannot marshal (a cycle) becomes nil, which
+// both formats already write for it.
 func ValidJSON(v any) any {
 	if IsTree(v, 0) {
 		return Valid(v)
@@ -48,6 +49,9 @@ func ValidJSON(v any) any {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil
+	}
+	if parsed, err := ParseJSON(raw); err == nil {
+		raw = AppendStringify(nil, parsed)
 	}
 	return json.RawMessage(utf16.ValidString(string(raw)))
 }
@@ -115,7 +119,8 @@ func fixAny(v any, depth int) any {
 // MaxTreeDepth bounds the walk over a caller's value. Nothing decoded from
 // the wire is anywhere near this deep; a value that is, or that refers back to
 // itself, is handed to encoding/json instead, which detects the cycle and
-// degrades it to null exactly as the V1 path does. Without the bound a
+// degrades it to null exactly as the V1 path does, and a deep value without a
+// cycle goes through its JSON text (ParseJSON reads up to 10000 levels). Without the bound a
 // self-referencing map recursed until the stack ran out - a fatal crash, not a
 // recoverable panic - where it used to encode as null.
 const MaxTreeDepth = 1000

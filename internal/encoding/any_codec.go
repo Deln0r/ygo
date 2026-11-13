@@ -114,14 +114,14 @@ func EncodeAny(buf []byte, v any) []byte {
 			buf = EncodeAny(buf, x[k])
 		}
 		return buf
-	case *orderedObject:
+	case *anyval.Object:
 		// JSON text parsed for writing (a json.RawMessage embed or
 		// format value in V2): its own key order.
 		buf = append(buf, AnyTagObject)
-		buf = lib0.WriteVarUint(buf, uint64(len(x.keys)))
-		for _, k := range x.keys {
-			buf = lib0.WriteVarString(buf, sanitizeJSString(k))
-			buf = EncodeAny(buf, x.vals[k])
+		buf = lib0.WriteVarUint(buf, uint64(len(x.Keys)))
+		for _, k := range x.Keys {
+			buf = lib0.WriteVarString(buf, anyval.SanitizeJSString(k))
+			buf = EncodeAny(buf, x.Vals[k])
 		}
 		return buf
 	default:

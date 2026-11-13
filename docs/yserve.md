@@ -5,7 +5,7 @@ yserve is a self-hosted Yjs sync backend in one binary. It speaks the
 (checked with y-websocket 2.1 and 3.1). SQLite persistence and periodic
 document versioning are built in.
 
-Hocuspocus server support is on `main` (unreleased). Providers 2.15.3,
+Hocuspocus server support shipped in 1.37.0. Providers 2.15.3,
 3.4.4 and 4.8.0 connect to the base URL, with the document name in their
 configuration. See [Coming from Hocuspocus](#coming-from-hocuspocus).
 

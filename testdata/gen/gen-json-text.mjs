@@ -14,7 +14,7 @@
 //
 // "texts" pairs JSON text with JSON.stringify(JSON.parse(text)), the text
 // a value given as JSON (a json.RawMessage) must come out as, and the V1 and
-// V2 state of a document holding JSON.parse(text) as an embed.
+// V2 state of a document holding JSON.parse of that text as an embed.
 //
 // Run: node gen-json-text.mjs (after npm install in this directory).
 
@@ -77,6 +77,10 @@ record("embed: an array with NaN and -Infinity", "embed", "", [NaN, 1, -Infinity
 record("embed: array-index keys", "embed", "", { a: 1, 10: 2, 9: 3 });
 record("map value: array-index keys, nested", "map", "k", { a: 1, 10: 2, 9: { b: 1, 2: 0 } });
 record("embed: a Uint8Array", "embed", "", new Uint8Array([1, 2, 255]));
+// Deeper than ygo's Any tree walk (1000 levels): it goes through JSON text.
+let deep = [];
+for (let i = 1; i < 1500; i++) deep = [deep];
+record("embed: arrays nested 1500 deep", "embed", "", { v: deep });
 
 const texts = [
   '{"b":1,"10":2,"a":3,"9":4}',
@@ -91,13 +95,20 @@ const texts = [
   '{"__proto__":1,"a":2}',
   ' { "a" : [ 1 , 2 ] } ',
   '{"\\ud800":1,"\\ud801":2}',
+  '{"a":1,"b":2,"a":3}',
+  '{"a":1,"4294967295":2}',
+  '{"a":1,"4294967294":2}',
+  "[".repeat(1500) + "]".repeat(1500),
 ].map((text) => {
   // Wrapped in an object: yjs inserts a string given to insertEmbed as text
   // (YText insertText takes the string branch), not as an embed.
   const raw = `{"v":${text}}`;
+  // ygo stores JSON text in the form JSON.stringify writes (so -0 is 0 and
+  // a number beyond the float64 range null), and V1 and V2 receivers both
+  // get JSON.parse of that text.
   const doc = new Y.Doc();
   doc.clientID = 1;
-  doc.getText("t").insertEmbed(0, JSON.parse(raw));
+  doc.getText("t").insertEmbed(0, JSON.parse(JSON.stringify(JSON.parse(raw))));
   return {
     raw, want: JSON.stringify(JSON.parse(raw)),
     v1: toHex(Y.encodeStateAsUpdate(doc)),

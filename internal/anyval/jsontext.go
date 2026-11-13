@@ -1,4 +1,4 @@
-package encoding
+package anyval
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 )
 
@@ -17,26 +16,26 @@ import (
 // writes different text for the same value in several places: it escapes
 // &, <, > and U+2028/U+2029, fails the whole value on one NaN or Infinity,
 // writes a float32 by its own shortest form where JavaScript sees the
-// widened double, and writes a []byte as base64. appendStringify writes
+// widened double, and writes a []byte as base64. AppendStringify writes
 // what JSON.stringify writes for the JavaScript value a peer holds.
 
-// orderedObject is a JSON object with its keys in the order JavaScript
+// Object is a JSON object with its keys in the order JavaScript
 // enumerates them, from JSON text parsed for writing (a json.RawMessage
 // value). It is never stored: it lives only while one value is encoded.
-type orderedObject struct {
-	keys []string
-	vals map[string]any
+type Object struct {
+	Keys []string
+	Vals map[string]any
 }
 
-// parseOrderedJSON parses raw as JSON.parse does, keeping what a
+// ParseJSON parses raw as JSON.parse does, keeping what a
 // JavaScript value keeps and encoding/json drops: each object's keys in
 // JavaScript enumeration order (a key seen twice keeps its first position
 // and its last value) and lone surrogates in strings, held as their
 // three-byte generalized UTF-8 form (appendJSONString writes them back as
-// \udxxx escapes, sanitizeJSString turns them into U+FFFD for the wire,
+// \udxxx escapes, SanitizeJSString turns them into U+FFFD for the wire,
 // as lib0's TextEncoder does). Numbers are float64; a literal beyond the
 // float64 range is an infinity, as in JavaScript.
-func parseOrderedJSON(raw []byte) (any, error) {
+func ParseJSON(raw []byte) (any, error) {
 	p := &jsonParser{s: raw}
 	p.space()
 	v, err := p.value(0)
@@ -45,17 +44,22 @@ func parseOrderedJSON(raw []byte) (any, error) {
 	}
 	p.space()
 	if p.i != len(p.s) {
-		return nil, errors.New("encoding: trailing data after JSON value")
+		return nil, errors.New("anyval: trailing data after JSON value")
 	}
 	return v, nil
 }
+
+// maxJSONDepth bounds the nesting ParseJSON reads, as encoding/json bounds
+// its decoder, so a value deeper than the Any tree walk (MaxTreeDepth),
+// which goes through JSON text, still parses.
+const maxJSONDepth = 10000
 
 type jsonParser struct {
 	s []byte
 	i int
 }
 
-var errJSONSyntax = errors.New("encoding: invalid JSON text")
+var errJSONSyntax = errors.New("anyval: invalid JSON text")
 
 func (p *jsonParser) space() {
 	for p.i < len(p.s) {
@@ -77,13 +81,13 @@ func (p *jsonParser) literal(lit string) bool {
 }
 
 func (p *jsonParser) value(depth int) (any, error) {
-	if depth > anyval.MaxTreeDepth || p.i >= len(p.s) {
+	if depth > maxJSONDepth || p.i >= len(p.s) {
 		return nil, errJSONSyntax
 	}
 	switch c := p.s[p.i]; {
 	case c == '{':
 		p.i++
-		obj := &orderedObject{vals: map[string]any{}}
+		obj := &Object{Vals: map[string]any{}}
 		var keys []string
 		p.space()
 		if p.i < len(p.s) && p.s[p.i] == '}' {
@@ -109,10 +113,10 @@ func (p *jsonParser) value(depth int) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			if _, seen := obj.vals[k]; !seen {
+			if _, seen := obj.Vals[k]; !seen {
 				keys = append(keys, k)
 			}
-			obj.vals[k] = v
+			obj.Vals[k] = v
 			p.space()
 			if p.i < len(p.s) && p.s[p.i] == ',' {
 				p.i++
@@ -120,7 +124,7 @@ func (p *jsonParser) value(depth int) (any, error) {
 			}
 			if p.i < len(p.s) && p.s[p.i] == '}' {
 				p.i++
-				obj.keys = anyval.JSOrder(keys)
+				obj.Keys = JSOrder(keys)
 				return obj, nil
 			}
 			return nil, errJSONSyntax
@@ -299,9 +303,9 @@ func surrogateAt(s string, i int) (rune, bool) {
 	return 0, false
 }
 
-// sanitizeJSString returns s with every lone surrogate replaced by U+FFFD,
+// SanitizeJSString returns s with every lone surrogate replaced by U+FFFD,
 // one for each, as lib0's TextEncoder writes a JavaScript string with one.
-func sanitizeJSString(s string) string {
+func SanitizeJSString(s string) string {
 	if utf8.ValidString(s) {
 		return s
 	}
@@ -319,13 +323,13 @@ func sanitizeJSString(s string) string {
 	return string(b)
 }
 
-// appendStringify appends JSON.stringify of the JavaScript value v stands
-// for. v has been through anyval.ForJSON, so undefined object entries are
+// AppendStringify appends JSON.stringify of the JavaScript value v stands
+// for. v has been through ForJSON, so undefined object entries are
 // gone, other undefineds are nil, -0 is 0 and a BigInt is a json.Number.
 // Objects built in Go are written with array-index keys first in ascending
-// order, then the others sorted (anyval.SortedJSOrder); objects parsed from
+// order, then the others sorted (SortedJSOrder); objects parsed from
 // JSON text keep their order.
-func appendStringify(b []byte, v any) []byte {
+func AppendStringify(b []byte, v any) []byte {
 	switch x := v.(type) {
 	case nil, block.Undefined:
 		return append(b, "null"...)
@@ -388,28 +392,28 @@ func appendStringify(b []byte, v any) []byte {
 			if i > 0 {
 				b = append(b, ',')
 			}
-			b = appendStringify(b, el)
+			b = AppendStringify(b, el)
 		}
 		return append(b, ']')
 	case map[string]any:
 		if x == nil {
 			return append(b, "null"...)
 		}
-		return appendObject(b, anyval.SortedJSOrder(x), x)
-	case *orderedObject:
-		return appendObject(b, x.keys, x.vals)
+		return appendObject(b, SortedJSOrder(x), x)
+	case *Object:
+		return appendObject(b, x.Keys, x.Vals)
 	case json.RawMessage:
-		parsed, err := parseOrderedJSON(x)
+		parsed, err := ParseJSON(x)
 		if err != nil {
 			return append(b, "null"...)
 		}
-		return appendStringify(b, parsed)
+		return AppendStringify(b, parsed)
 	default:
 		raw, err := json.Marshal(v)
 		if err != nil {
 			return append(b, "null"...)
 		}
-		return appendStringify(b, json.RawMessage(raw))
+		return AppendStringify(b, json.RawMessage(raw))
 	}
 }
 
@@ -430,7 +434,7 @@ func appendObject(b []byte, keys []string, vals map[string]any) []byte {
 		first = false
 		b = appendJSONString(b, k)
 		b = append(b, ':')
-		b = appendStringify(b, el)
+		b = AppendStringify(b, el)
 	}
 	return append(b, '}')
 }
@@ -472,7 +476,7 @@ func appendJSONString(b []byte, s string) []byte {
 	for i := 0; i < len(s); {
 		c := s[i]
 		if c >= utf8.RuneSelf {
-			// A lone surrogate (from JSON text, parseOrderedJSON) is
+			// A lone surrogate (from JSON text, ParseJSON) is
 			// escaped, as well-formed JSON.stringify escapes it.
 			if r, ok := surrogateAt(s, i); ok {
 				b = append(b, s[start:i]...)

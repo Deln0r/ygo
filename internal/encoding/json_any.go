@@ -3,6 +3,7 @@ package encoding
 import (
 	"encoding/json"
 	"math"
+	"unicode/utf8"
 
 	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
@@ -54,10 +55,13 @@ func jsonValueForAny(v block.Any) block.Any {
 		}
 	}
 	// Parsed with its key order kept, so V2 receivers get the keys in the
-	// order V1 receivers get them (appendStringify parses the same text).
-	out, err := parseOrderedJSON(raw)
+	// order V1 receivers get them. Text the ordered parser does not take
+	// (nothing from the API) goes through encoding/json as before.
+	out, err := anyval.ParseJSON(raw)
 	if err != nil {
-		return nil
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil
+		}
 	}
 	return classifyNumbers(out)
 }
@@ -110,12 +114,16 @@ func classifyNumbers(v any) any {
 		return out
 	case string:
 		// A string from parsed JSON text can hold a lone surrogate, which
-		// lib0 writes as U+FFFD.
-		return sanitizeJSString(x)
-	case *orderedObject:
-		out := &orderedObject{keys: x.keys, vals: make(map[string]any, len(x.vals))}
-		for k, el := range x.vals {
-			out.vals[k] = classifyNumbers(el)
+		// lib0 writes as U+FFFD. Any other string goes back as it came, not
+		// boxed again.
+		if !utf8.ValidString(x) {
+			return anyval.SanitizeJSString(x)
+		}
+		return v
+	case *anyval.Object:
+		out := &anyval.Object{Keys: x.Keys, Vals: make(map[string]any, len(x.Vals))}
+		for k, el := range x.Vals {
+			out.Vals[k] = classifyNumbers(el)
 		}
 		return out
 	case []byte:
