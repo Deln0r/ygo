@@ -46,12 +46,17 @@ func jsonValueForAny(v block.Any) block.Any {
 	if anyval.IsTree(v, 0) {
 		return classifyNumbers(v)
 	}
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil
+	raw, ok := v.(json.RawMessage)
+	if !ok {
+		var err error
+		if raw, err = json.Marshal(v); err != nil {
+			return nil
+		}
 	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	// Parsed with its key order kept, so V2 receivers get the keys in the
+	// order V1 receivers get them (appendStringify parses the same text).
+	out, err := parseOrderedJSON(raw)
+	if err != nil {
 		return nil
 	}
 	return classifyNumbers(out)
@@ -101,6 +106,16 @@ func classifyNumbers(v any) any {
 		out := make(map[string]any, len(x))
 		for k, el := range x {
 			out[k] = classifyNumbers(el)
+		}
+		return out
+	case string:
+		// A string from parsed JSON text can hold a lone surrogate, which
+		// lib0 writes as U+FFFD.
+		return sanitizeJSString(x)
+	case *orderedObject:
+		out := &orderedObject{keys: x.keys, vals: make(map[string]any, len(x.vals))}
+		for k, el := range x.vals {
+			out.vals[k] = classifyNumbers(el)
 		}
 		return out
 	case []byte:

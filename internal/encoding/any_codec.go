@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/lib0"
 )
@@ -58,9 +59,10 @@ var ErrUnsupportedAnyTag = errors.New("encoding: unsupported Any tag")
 //   - []byte → binary (tag 116, varuint length + bytes)
 //   - []any → array (tag 117, varuint count + each element recursively)
 //   - map[string]any → object (tag 118, varuint count + each (varstring key + Any value)).
-//     Keys are sorted alphabetically so the wire bytes are deterministic
-//     across runs — Go map iteration order is randomized, which would
-//     otherwise break the fixture-determinism guarantee.
+//     A Go map has no order, so the keys go out as JavaScript would
+//     enumerate them after decoding: array-index keys first in ascending
+//     order, then the others sorted (anyval.SortedJSOrder). Deterministic
+//     across runs.
 //
 // Mirrors lib0/encoding.js writeAny.
 func EncodeAny(buf []byte, v any) []byte {
@@ -107,19 +109,19 @@ func EncodeAny(buf []byte, v any) []byte {
 	case map[string]any:
 		buf = append(buf, AnyTagObject)
 		buf = lib0.WriteVarUint(buf, uint64(len(x)))
-		// Deterministic key order — JS Object.keys preserves
-		// insertion order but Go map iteration is randomized;
-		// alphabetical sort gives reproducible bytes across runs.
-		// Adopters who need insertion-order semantics should use
-		// the wire bytes as opaque blobs, not byte-equality compare.
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range anyval.SortedJSOrder(x) {
 			buf = lib0.WriteVarString(buf, k)
 			buf = EncodeAny(buf, x[k])
+		}
+		return buf
+	case *orderedObject:
+		// JSON text parsed for writing (a json.RawMessage embed or
+		// format value in V2): its own key order.
+		buf = append(buf, AnyTagObject)
+		buf = lib0.WriteVarUint(buf, uint64(len(x.keys)))
+		for _, k := range x.keys {
+			buf = lib0.WriteVarString(buf, sanitizeJSString(k))
+			buf = EncodeAny(buf, x.vals[k])
 		}
 		return buf
 	default:

@@ -806,43 +806,8 @@ func sortedAttrKeys(attrs Attrs) []string {
 }
 
 // jsPropertyOrder reorders keys, given in insertion order, the way
-// JavaScript enumerates the own string keys of an object: integer-index
-// keys (canonical decimal below 2^32-1, such as "0" or "10") first, in
-// numeric order, then the rest in the order given. keys is reordered in
-// place and returned.
-func jsPropertyOrder(keys []string) []string {
-	var ints []string
-	for _, k := range keys {
-		if isArrayIndexKey(k) {
-			ints = append(ints, k)
-		}
-	}
-	if len(ints) == 0 {
-		return keys
-	}
-	sort.Slice(ints, func(i, j int) bool {
-		a, _ := strconv.ParseUint(ints[i], 10, 32)
-		b, _ := strconv.ParseUint(ints[j], 10, 32)
-		return a < b
-	})
-	rest := make([]string, 0, len(keys)-len(ints))
-	for _, k := range keys {
-		if !isArrayIndexKey(k) {
-			rest = append(rest, k)
-		}
-	}
-	return append(append(keys[:0], ints...), rest...)
-}
-
-// isArrayIndexKey reports whether k is an array index in the sense of
-// ECMAScript: the canonical decimal form of an integer below 2^32-1.
-func isArrayIndexKey(k string) bool {
-	if k == "" || len(k) > 10 || (len(k) > 1 && k[0] == '0') {
-		return false
-	}
-	n, err := strconv.ParseUint(k, 10, 64)
-	return err == nil && n < 1<<32-1
-}
+// JavaScript enumerates an object's own string keys (anyval.JSOrder).
+func jsPropertyOrder(keys []string) []string { return anyval.JSOrder(keys) }
 
 // copyAttrs returns a shallow copy of attrs so callers cannot
 // mutate the walker's running map.

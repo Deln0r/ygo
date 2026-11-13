@@ -20,16 +20,10 @@ import (
 //
 // nil values encode as the JSON literal "null". Values go through
 // anyval.ForJSON first, so undefined, -0 and BigInt come out as
-// JSON.stringify writes them (BigInt, where it throws, as a number).
+// JSON.stringify writes them (BigInt, where it throws, as a number), and
+// the text is JSON.stringify's (appendStringify), not encoding/json's.
 func writeJSON(buf []byte, v block.Any) []byte {
-	raw, err := json.Marshal(anyval.ForJSON(v))
-	if err != nil {
-		// Fall back to the JSON null literal — yjs has the same
-		// failure mode (JSON.stringify of a circular structure
-		// throws; we degrade rather than panic).
-		raw = []byte("null")
-	}
-	return lib0.WriteVarString(buf, string(raw))
+	return lib0.WriteVarString(buf, string(appendStringify(nil, anyval.ForJSON(v))))
 }
 
 // readJSON consumes a varstring + JSON-parses it. Returns the

@@ -365,6 +365,9 @@ jobs:
       - name: regenerate Any value fixtures
         working-directory: testdata/gen
         run: node gen-any-values.mjs
+      - name: regenerate JSON text fixtures
+        working-directory: testdata/gen
+        run: node gen-json-text.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff
