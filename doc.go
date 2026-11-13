@@ -29,7 +29,7 @@
 // numbers, bools, nil, []byte, []any, map[string]any) is copied only where a
 // string in it needs fixing, and an embed or format value of any other type
 // is marshaled once, at the call, and stored as that JSON (a
-// json.RawMessage).
+// json.RawMessage) in the form JSON.stringify writes for it.
 //
 // See https://github.com/Deln0r/ygo for documentation and examples.
 package ygo

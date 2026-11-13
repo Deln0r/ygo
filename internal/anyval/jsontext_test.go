@@ -91,3 +91,17 @@ func TestParseJSON_RejectsWhatJSONParseRejects(t *testing.T) {
 		t.Error("10002 levels parsed")
 	}
 }
+
+// TestIsArrayIndexKey: canonical decimal integers below 2^32-1 only, as
+// ECMAScript defines an array index; a long digit string must not wrap.
+func TestIsArrayIndexKey(t *testing.T) {
+	for k, want := range map[string]bool{
+		"0": true, "9": true, "10": true, "4294967294": true,
+		"4294967295": false, "01": false, "-1": false, "": false, "1.0": false,
+		"18446744073709551617": false, "99999999999": false, "a1": false,
+	} {
+		if got := IsArrayIndexKey(k); got != want {
+			t.Errorf("IsArrayIndexKey(%q) = %v, want %v", k, got, want)
+		}
+	}
+}

@@ -538,9 +538,20 @@ func validAttrs(attrs Attrs) Attrs {
 	sort.Strings(keys)
 	out := make(Attrs, len(attrs))
 	for _, k := range keys {
-		out[utf16.ValidString(k)] = undefinedAsNil(anyval.ValidJSON(attrs[k]))
+		out[utf16.ValidString(k)] = jsonNullAsNil(undefinedAsNil(anyval.ValidJSON(attrs[k])))
 	}
 	return out
+}
+
+// jsonNullAsNil turns a format value stored as the JSON null (a
+// json.RawMessage("null"), a nil pointer, a nil typed map) into nil: every
+// peer reads that value as null, which removes the attribute, so the
+// writer's own document must remove it too.
+func jsonNullAsNil(v any) any {
+	if raw, ok := v.(json.RawMessage); ok && string(raw) == "null" {
+		return nil
+	}
+	return v
 }
 
 // ChunkKind discriminates the variants emitted by Text.Range.

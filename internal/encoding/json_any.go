@@ -37,12 +37,11 @@ import (
 // through ygo came out as null, whole, and a Uint8Array came out as a base64
 // string. Measured both before this split.
 //
-// Anything else - a struct, a typed map or slice, a custom MarshalJSON - goes
-// through encoding/json first, as the V1 path always has, because the Any
-// encoder panics on those types. A value that cannot be marshalled degrades to
-// null, matching writeJSON. That route is also where JSON's limits apply: a
-// custom marshaler emitting a literal like 1e1000 marshals but cannot be read
-// back as a float64, and also degrades to null.
+// Anything else is JSON text: a json.RawMessage anyval.ValidJSON stored at the
+// call (already in JSON.stringify form), or a tree nested past the Any walk
+// (MaxTreeDepth), marshaled here. It is read with anyval.ParseJSON, which keeps
+// its key order, so V2 receivers get the keys in the order V1 receivers get
+// them. Text it cannot read, nested past 10000 levels, degrades to null.
 func jsonValueForAny(v block.Any) block.Any {
 	if anyval.IsTree(v, 0) {
 		return classifyNumbers(v)
@@ -54,14 +53,9 @@ func jsonValueForAny(v block.Any) block.Any {
 			return nil
 		}
 	}
-	// Parsed with its key order kept, so V2 receivers get the keys in the
-	// order V1 receivers get them. Text the ordered parser does not take
-	// (nothing from the API) goes through encoding/json as before.
 	out, err := anyval.ParseJSON(raw)
 	if err != nil {
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil
-		}
+		return nil
 	}
 	return classifyNumbers(out)
 }

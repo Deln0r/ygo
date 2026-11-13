@@ -76,6 +76,7 @@ record("embed: NaN and Infinity next to other values", "embed", "", { i: Infinit
 record("embed: an array with NaN and -Infinity", "embed", "", [NaN, 1, -Infinity], { replayV2: false });
 record("embed: array-index keys", "embed", "", { a: 1, 10: 2, 9: 3 });
 record("map value: array-index keys, nested", "map", "k", { a: 1, 10: 2, 9: { b: 1, 2: 0 } });
+record("embed: 0 next to keys that sort before it", "embed", "", { "": 1, "-1": 2, "0": 3 });
 record("embed: a Uint8Array", "embed", "", new Uint8Array([1, 2, 255]));
 // Deeper than ygo's Any tree walk (1000 levels): it goes through JSON text.
 let deep = [];

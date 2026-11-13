@@ -50,10 +50,14 @@ func ValidJSON(v any) any {
 	if err != nil {
 		return nil
 	}
-	if parsed, err := ParseJSON(raw); err == nil {
-		raw = AppendStringify(nil, parsed)
+	// JSON ygo cannot read back (nested past ParseJSON's 10000 levels) is
+	// stored as nil, what both formats wrote for it before, rather than as
+	// text a V1 receiver, ygo included, would refuse.
+	parsed, err := ParseJSON(raw)
+	if err != nil {
+		return nil
 	}
-	return json.RawMessage(utf16.ValidString(string(raw)))
+	return json.RawMessage(utf16.ValidString(string(AppendStringify(nil, parsed))))
 }
 
 // NeedsJSONFix reports whether ValidJSON would change v: a value that is not
