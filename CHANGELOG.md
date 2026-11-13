@@ -16,6 +16,8 @@ file.
 
 ## [Unreleased]
 
+## [1.40.0] - 2026-11-13
+
 **Upgrade impact**:
 
 - **V1 embeds and format values are written as `JSON.stringify` writes them**, the text yjs sends, instead of as `encoding/json` writes them. The bytes change for:
@@ -2371,6 +2373,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.40.0]: https://github.com/Deln0r/ygo/releases/tag/v1.40.0
 [1.39.0]: https://github.com/Deln0r/ygo/releases/tag/v1.39.0
 [1.38.0]: https://github.com/Deln0r/ygo/releases/tag/v1.38.0
 [1.37.0]: https://github.com/Deln0r/ygo/releases/tag/v1.37.0
