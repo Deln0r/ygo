@@ -10,7 +10,7 @@ import (
 	"github.com/Deln0r/ygo/internal/lib0"
 )
 
-// writeJSON appends `varstring(JSON.stringify(v))` to buf, matching
+// writeJSONOrdered appends `varstring(JSON.stringify(v))` to buf, matching
 // yjs UpdateEncoderV1.writeJSON (testdata/gen/node_modules/yjs/src/
 // utils/UpdateEncoder.js:115). Used by KindFormat and KindEmbed
 // content variants — both encode their payload as a JSON-string,
@@ -24,11 +24,8 @@ import (
 // JSON.stringify writes them (BigInt, where it throws, as a number), and
 // the text is JSON.stringify's (anyval.AppendStringify), not
 // encoding/json's. A json.RawMessage is the JSON anyval.ValidJSON stored
-// at the call, already in that form, and goes out as it is.
-func writeJSON(buf []byte, v block.Any) []byte { return writeJSONOrdered(buf, v, nil) }
-
-// writeJSONOrdered is writeJSON with the key order a decoded value keeps
-// (block.KeyOrder).
+// at the call, already in that form, and goes out as it is. o is the key
+// order a decoded value keeps (block.KeyOrder).
 func writeJSONOrdered(buf []byte, v block.Any, o *block.KeyOrder) []byte {
 	if raw, ok := v.(json.RawMessage); ok {
 		return lib0.WriteVarString(buf, string(raw))
@@ -36,17 +33,11 @@ func writeJSONOrdered(buf []byte, v block.Any, o *block.KeyOrder) []byte {
 	return lib0.WriteVarString(buf, string(anyval.AppendStringifyOrdered(nil, anyval.ForJSON(v), o)))
 }
 
-// readJSON consumes a varstring + JSON-parses it. Returns the
-// parsed value plus the unconsumed tail. Mirrors yjs
-// UpdateDecoderV1.readJSON (UpdateDecoder.js:113).
-func readJSON(buf []byte, strs stringMode) (block.Any, []byte, error) {
-	v, _, tail, err := readJSONOrdered(buf, strs)
-	return v, tail, err
-}
-
-// readJSONOrdered is readJSON that also returns the key order of the
-// objects in the value, as JSON.parse holds them (anyval.OrderOfParsed),
-// or nil where the fallback order is right. The value is encoding/json's,
+// readJSONOrdered consumes a varstring + JSON-parses it. Returns the
+// parsed value, the key order of the objects in it as JSON.parse holds
+// them (anyval.OrderOfParsed), or nil where the fallback order is right,
+// and the unconsumed tail. Mirrors yjs UpdateDecoderV1.readJSON
+// (UpdateDecoder.js:113). The value is encoding/json's,
 // as before; the order comes from a second read of the text, made only
 // when it holds an object.
 func readJSONOrdered(buf []byte, strs stringMode) (block.Any, *block.KeyOrder, []byte, error) {
