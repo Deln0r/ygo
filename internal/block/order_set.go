@@ -9,7 +9,8 @@ import (
 // so objects of one shape that arrived in updates of their own, as live
 // edits do, share an order as those decoded from one update already do.
 // Applying an update hands each content's Orders to Orders under the
-// document's write lock, before the content is stored. The set lives as
+// document's write lock, before the content is stored, when the update
+// holds a few contents with orders, as a live edit does. The set lives as
 // long as the document and keeps at most maxOrderShapes shapes; past that,
 // new shapes keep the orders they came with. Orders never change once
 // built, so replacing one with another of the same shape changes nothing
@@ -23,6 +24,9 @@ type OrderSet struct {
 	lastIn, lastOut           *Orders
 	lastOrderIn, lastOrderOut *KeyOrder
 }
+
+// Len returns the number of shapes s keeps.
+func (s *OrderSet) Len() int { return len(s.shapes) }
 
 // maxOrderShapes bounds the shapes an OrderSet keeps: a document's
 // distinct shapes, which a peer chooses.

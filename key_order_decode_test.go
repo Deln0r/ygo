@@ -399,3 +399,32 @@ func TestKeyOrder_SharedAcrossUpdatesOfOneDocument(t *testing.T) {
 		t.Error("two documents share an order")
 	}
 }
+
+// TestKeyOrder_LargeUpdatesKeepNoShapes: an update of many records, which
+// shares its orders within itself, leaves no shapes in the document's set;
+// a live edit does.
+func TestKeyOrder_LargeUpdatesKeepNoShapes(t *testing.T) {
+	v1, _ := placeholderDoc(t, 100)
+	v1 = bytes.ReplaceAll(v1, placeholderAny, recordAny)
+	d := ygo.NewDoc()
+	if err := ygo.ApplyUpdate(d, v1); err != nil {
+		t.Fatal(err)
+	}
+	if n := shapesKept(d); n != 0 {
+		t.Errorf("a 200-record update left %d shapes in the document's set", n)
+	}
+	for _, u := range appendUpdates(t, 3) {
+		if err := ygo.ApplyUpdate(d, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := shapesKept(d); n == 0 {
+		t.Error("live edits left no shapes in the document's set")
+	}
+}
+
+func shapesKept(d *ygo.Doc) int {
+	txn := d.WriteTxn()
+	defer txn.Commit()
+	return txn.OrderSet().Len()
+}

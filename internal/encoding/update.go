@@ -521,15 +521,7 @@ func decodeID(buf []byte) (block.ID, []byte, error) {
 // Mirrors yrs Update::integrate (update.rs:234-301) plus the
 // pending-buffer retry loop yrs runs in `Store::try_integrate_pending`.
 func (u *Update) Apply(txn *doc.TransactionMut) error {
-	// Objects of one shape in updates of their own share one order.
-	orders := txn.OrderSet()
-	for _, blocks := range u.Blocks {
-		for _, b := range blocks {
-			if b.Kind == WireBlockItem && b.Item != nil && b.Item.Content.Orders != nil {
-				b.Item.Content.Orders = orders.Orders(b.Item.Content.Orders)
-			}
-		}
-	}
+	shareOrders(txn.OrderSet(), u)
 	p := getOrCreatePending(txn)
 	bs := txn.Store()
 	// The order of yjs readUpdateV2: the update's own blocks first, by
@@ -583,6 +575,37 @@ func (u *Update) Apply(txn *doc.TransactionMut) error {
 		txn.SetPendingState(p)
 	}
 	return nil
+}
+
+// maxSharedContents is the most contents with key orders an update can
+// hold for its orders to go through the document's OrderSet. Live edits
+// hold a few. A larger update shares its orders within itself already
+// (orderTable), and keeping the shapes of all its objects would cost the
+// document memory for little: 5,000 records of shapes of their own held
+// 8% more.
+const maxSharedContents = 64
+
+// shareOrders gives the contents of u, an update of a few contents with
+// orders, the document's orders of their shapes (block.OrderSet), so
+// objects of one shape that arrive in updates of their own share one.
+func shareOrders(set *block.OrderSet, u *Update) {
+	n := 0
+	for _, blocks := range u.Blocks {
+		for _, b := range blocks {
+			if b.Kind == WireBlockItem && b.Item != nil && b.Item.Content.Orders != nil {
+				if n++; n > maxSharedContents {
+					return
+				}
+			}
+		}
+	}
+	for _, blocks := range u.Blocks {
+		for _, b := range blocks {
+			if b.Kind == WireBlockItem && b.Item != nil && b.Item.Content.Orders != nil {
+				b.Item.Content.Orders = set.Orders(b.Item.Content.Orders)
+			}
+		}
+	}
 }
 
 // getOrCreatePending returns the doc's pending buffer, lazily
