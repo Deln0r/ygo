@@ -328,6 +328,7 @@ func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
 	}
 
 	u := NewUpdate()
+	var orders orderTable
 	for i := uint64(0); i < clientCount; i++ {
 		blockCount, n, err := lib0.ReadVarUint(buf)
 		if err != nil {
@@ -350,7 +351,7 @@ func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
 		}
 		blocks := make([]Block, 0, blockCount)
 		for j := uint64(0); j < blockCount; j++ {
-			b, tail, err := decodeBlock(buf, block.ID{Client: client, Clock: clock}, strs)
+			b, tail, err := decodeBlock(buf, block.ID{Client: client, Clock: clock}, strs, &orders)
 			if err != nil {
 				return nil, buf, err
 			}
@@ -388,7 +389,7 @@ func (b Block) startClock() uint64 {
 // decodeBlock parses one block record at the given starting ID.
 //
 // Mirrors yrs Update::decode_block (update.rs:364-393).
-func decodeBlock(buf []byte, id block.ID, strs stringMode) (Block, []byte, error) {
+func decodeBlock(buf []byte, id block.ID, strs stringMode, orders *orderTable) (Block, []byte, error) {
 	if len(buf) < 1 {
 		return Block{}, buf, lib0.ErrTruncated
 	}
@@ -469,7 +470,7 @@ func decodeBlock(buf []byte, id block.ID, strs stringMode) (Block, []byte, error
 		buf = buf[n:]
 	}
 
-	content, tail, err := decodeContent(buf, info&block.InfoContentMask, strs)
+	content, tail, err := decodeContent(buf, info&block.InfoContentMask, strs, orders)
 	if err != nil {
 		return Block{}, buf, err
 	}

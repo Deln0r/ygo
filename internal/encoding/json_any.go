@@ -37,13 +37,19 @@ import (
 // through ygo came out as null, whole, and a Uint8Array came out as a base64
 // string. Measured both before this split.
 //
+// The tree test goes as deep as a decoded value can nest (IsDecodedTree), so
+// a value from a peer nested past the walk over a caller's value
+// (MaxTreeDepth) still goes out as it stands, with the key order it was read
+// in. A caller's value is a tree within MaxTreeDepth or JSON text by then
+// (anyval.ValidJSON).
+//
 // Anything else is JSON text: a json.RawMessage anyval.ValidJSON stored at the
-// call (already in JSON.stringify form), or a tree nested past the Any walk
-// (MaxTreeDepth), marshaled here. It is read with anyval.ParseJSON, which keeps
-// its key order, so V2 receivers get the keys in the order V1 receivers get
-// them. Text it cannot read, nested past 10000 levels, degrades to null.
+// call (already in JSON.stringify form), or a value that is not a tree,
+// marshaled here. It is read with anyval.ParseJSON, which keeps its key order,
+// so V2 receivers get the keys in the order V1 receivers get them. Text it
+// cannot read, nested past 10000 levels, degrades to null.
 func jsonValueForAny(v block.Any) block.Any {
-	if anyval.IsTree(v, 0) {
+	if anyval.IsDecodedTree(v) {
 		return classifyNumbers(v)
 	}
 	raw, ok := v.(json.RawMessage)

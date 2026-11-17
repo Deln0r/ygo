@@ -14,10 +14,11 @@ import (
 // keyOrderScenario is one entry of testdata/key-order-fixtures.json
 // (testdata/gen/gen-key-order.mjs, yjs 13.6.33).
 type keyOrderScenario struct {
-	Name    string   `json:"name"`
-	Updates []string `json:"updates"`
-	V1      string   `json:"v1"`
-	V2      string   `json:"v2"`
+	Name      string   `json:"name"`
+	Updates   []string `json:"updates"`
+	UpdatesV2 []string `json:"updatesV2"`
+	V1        string   `json:"v1"`
+	V2        string   `json:"v2"`
 }
 
 func loadKeyOrderFixtures(t *testing.T) []keyOrderScenario {
@@ -42,9 +43,10 @@ func loadKeyOrderFixtures(t *testing.T) []keyOrderScenario {
 // order come out of ygo in that order, as yjs writes them: ygo applies
 // yjs's updates (some waiting for a dependency, one splitting an item
 // between objects, one restoring a format value around new content) and
-// its state equals yjs's in V1 and V2, encoded twice; it reads yjs's V2
-// state back to the same bytes; and a document applying the updates merged
-// has yjs's state.
+// its state equals yjs's in V1 and V2, encoded twice; so does the state of
+// a document applying the updates as yjs converts them to V2; it reads
+// yjs's V2 state back to the same bytes; and a document applying the
+// updates merged has yjs's state.
 // Objects from writers that are not JavaScript, with their keys out of
 // JavaScript's enumeration order or a key repeated, come out as yjs writes
 // them after reading them. ygo sorted the keys before.
@@ -70,6 +72,18 @@ func TestKeyOrder_Fixtures(t *testing.T) {
 				if got := hex.EncodeToString(ygo.EncodeStateAsUpdateV2(d)); got != s.V2 {
 					t.Fatalf("round %d V2:\n got %s\nwant %s", round, got, s.V2)
 				}
+			}
+			dv := ygo.NewDoc()
+			for _, u := range s.UpdatesV2 {
+				if err := ygo.ApplyUpdateV2(dv, mustHex(t, u)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := hex.EncodeToString(ygo.EncodeStateAsUpdate(dv)); got != s.V1 {
+				t.Fatalf("V2 updates, V1 state:\n got %s\nwant %s", got, s.V1)
+			}
+			if got := hex.EncodeToString(ygo.EncodeStateAsUpdateV2(dv)); got != s.V2 {
+				t.Fatalf("V2 updates, V2 state:\n got %s\nwant %s", got, s.V2)
 			}
 			r := ygo.NewDoc()
 			if err := ygo.ApplyUpdateV2(r, mustHex(t, s.V2)); err != nil {
@@ -146,6 +160,9 @@ func TestKeyOrder_RestoringMarkerFromGo(t *testing.T) {
 			return x.Format(txn, 1, 2, ygo.Attrs{"link": nil})
 		},
 		"link removed over where a link starts": func(txn *ygo.TransactionMut, x *ygo.Text) error {
+			return x.Format(txn, 1, 2, ygo.Attrs{"link": nil})
+		},
+		"array link removed from the middle of a link": func(txn *ygo.TransactionMut, x *ygo.Text) error {
 			return x.Format(txn, 1, 2, ygo.Attrs{"link": nil})
 		},
 	} {

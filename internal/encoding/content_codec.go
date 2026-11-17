@@ -35,12 +35,12 @@ func writeJSONOrdered(buf []byte, v block.Any, o *block.KeyOrder) []byte {
 
 // readJSONOrdered consumes a varstring + JSON-parses it. Returns the
 // parsed value, the key order of the objects in it as JSON.parse holds
-// them (anyval.OrderOfParsed), or nil where the fallback order is right,
-// and the unconsumed tail. Mirrors yjs UpdateDecoderV1.readJSON
-// (UpdateDecoder.js:113). The value is encoding/json's,
-// as before; the order comes from a second read of the text, made only
-// when it holds an object.
-func readJSONOrdered(buf []byte, strs stringMode) (block.Any, *block.KeyOrder, []byte, error) {
+// them (jsonOrder, shared through t), or nil where the fallback order is
+// right, and the unconsumed tail. Mirrors yjs UpdateDecoderV1.readJSON
+// (UpdateDecoder.js:113). The value is encoding/json's, as before; the
+// order comes from a second read of the text, made only when it holds an
+// object.
+func readJSONOrdered(buf []byte, strs stringMode, t *orderTable) (block.Any, *block.KeyOrder, []byte, error) {
 	s, n, err := strs.readString(buf)
 	if err != nil {
 		return nil, nil, buf, err
@@ -50,10 +50,8 @@ func readJSONOrdered(buf []byte, strs stringMode) (block.Any, *block.KeyOrder, [
 		return nil, nil, buf, fmt.Errorf("readJSON: %w", err)
 	}
 	var order *block.KeyOrder
-	if strings.IndexByte(s, '{') >= 0 {
-		if parsed, err := anyval.ParseJSON([]byte(s)); err == nil {
-			order = anyval.OrderOfParsed(parsed)
-		}
+	if t != nil && strings.IndexByte(s, '{') >= 0 {
+		order = jsonOrder(s, t)
 	}
 	return v, order, buf[n:], nil
 }
@@ -136,10 +134,13 @@ func EncodeContent(buf []byte, c block.Content) []byte {
 //
 // Mirrors yrs/src/block.rs ItemContent::decode dispatch.
 func DecodeContent(buf []byte, refNum uint8) (block.Content, []byte, error) {
-	return decodeContent(buf, refNum, strictStrings)
+	var t orderTable
+	return decodeContent(buf, refNum, strictStrings, &t)
 }
 
-func decodeContent(buf []byte, refNum uint8, strs stringMode) (block.Content, []byte, error) {
+// decodeContent is DecodeContent sharing the key orders it builds through
+// t, the table of the update being decoded.
+func decodeContent(buf []byte, refNum uint8, strs stringMode, t *orderTable) (block.Content, []byte, error) {
 	switch block.ContentKind(refNum) {
 	case block.KindAny:
 		count, n, err := lib0.ReadVarUint(buf)
@@ -153,7 +154,7 @@ func decodeContent(buf []byte, refNum uint8, strs stringMode) (block.Content, []
 		anys := make([]block.Any, count)
 		var collect anyOrders
 		for i := uint64(0); i < count; i++ {
-			v, o, tail, err := decodeAnyOrdered(buf, strs, true)
+			v, o, tail, err := decodeAnyOrdered(buf, strs, t, 0)
 			if err != nil {
 				return block.Content{}, buf, err
 			}
@@ -161,7 +162,7 @@ func decodeContent(buf []byte, refNum uint8, strs stringMode) (block.Content, []
 			collect.add(int(i), int(count), o)
 			buf = tail
 		}
-		return block.Content{Kind: block.KindAny, Anys: anys, Orders: collect.orders()}, buf, nil
+		return block.Content{Kind: block.KindAny, Anys: anys, Orders: collect.orders(t)}, buf, nil
 	case block.KindString:
 		s, n, err := strs.readString(buf)
 		if err != nil {
@@ -188,22 +189,22 @@ func decodeContent(buf []byte, refNum uint8, strs stringMode) (block.Content, []
 	case block.KindEmbed:
 		// JSON-string payload, NOT lib0 Any. Mirrors
 		// yjs UpdateDecoder.readJSON.
-		v, o, tail, err := readJSONOrdered(buf, strs)
+		v, o, tail, err := readJSONOrdered(buf, strs, t)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
-		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}, Orders: singleOrders(o)}, tail, nil
+		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}, Orders: t.single(o)}, tail, nil
 	case block.KindFormat:
 		key, n, err := strs.readString(buf)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
 		buf = buf[n:]
-		v, o, tail, err := readJSONOrdered(buf, strs)
+		v, o, tail, err := readJSONOrdered(buf, strs, t)
 		if err != nil {
 			return block.Content{}, buf, err
 		}
-		return block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{v}, Orders: singleOrders(o)}, tail, nil
+		return block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{v}, Orders: t.single(o)}, tail, nil
 	case block.KindType:
 		// Mirror of EncodeContent.KindType. Build an empty Branch
 		// with the wire-supplied TypeRef. The Branch.Item back-
@@ -271,10 +272,11 @@ func (a *anyOrders) add(i, count int, o *block.KeyOrder) {
 	a.list[i] = o
 }
 
-// orders returns the content's Orders: shared for a single element.
-func (a *anyOrders) orders() *block.Orders {
+// orders returns the content's Orders: shared through t for a single
+// element.
+func (a *anyOrders) orders(t *orderTable) *block.Orders {
 	if a.single {
-		return singleOrders(a.first)
+		return t.single(a.first)
 	}
 	return block.OrdersFor(a.list)
 }

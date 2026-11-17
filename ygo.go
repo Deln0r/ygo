@@ -555,6 +555,16 @@ var ErrInvalidUTF8 = lib0.ErrInvalidUTF8
 // same document (which writes the halves as U+FFFD) applies.
 var ErrSplitSurrogate = lib0.ErrSplitSurrogate
 
+// ErrNestedTooDeep is wrapped by the errors ApplyUpdate, ApplyUpdateV2,
+// ValidateUpdate, MergeUpdates and MergeUpdatesV2 return for an update
+// holding a value whose arrays and objects nest deeper than 10000 levels,
+// the bound encoding/json applies to JSON text. yjs itself cannot read
+// such a value (lib0 readAny overflows the JavaScript stack after about
+// 4,700 levels in Node 26); without the bound, a few megabytes of nested
+// arrays overflowed the goroutine stack, a crash no caller can recover
+// from. Test with errors.Is.
+var ErrNestedTooDeep = encoding.ErrAnyTooDeep
+
 // ValidateUpdate returns an error unless raw is a well-formed V1 update that
 // is consumed in its entirety, WITHOUT integrating it into any document. Use
 // it on updates that arrive from somewhere you do not control.
@@ -631,6 +641,9 @@ func MissingSV(d *Doc) []byte {
 // pending buffer until the missing history arrives. Carrying is not
 // integrating.
 //
+// A single update comes back as it is, once it decodes, as yjs
+// mergeUpdates returns it.
+//
 // Used by persistence layers for compaction (Flush) and by transports
 // that want to batch-coalesce updates before sending.
 func MergeUpdates(updates [][]byte) ([]byte, error) {
@@ -639,6 +652,12 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 	// between root ygo and persist. Inline the small wrapper here.
 	if len(updates) == 0 {
 		return nil, nil
+	}
+	if len(updates) == 1 {
+		if _, _, err := encoding.DecodeUpdate(updates[0]); err != nil {
+			return nil, err
+		}
+		return append([]byte(nil), updates[0]...), nil
 	}
 	// GC off: a merge carries deleted content, as yjs mergeUpdates does;
 	// whoever applies the result collects it, or keeps it with GC off.
@@ -660,9 +679,10 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 }
 
 // MergeUpdatesV2 is the V2 counterpart of MergeUpdates, with the same
-// contract: nothing is dropped, holes come out as Skip runs, and the
-// result may not integrate fully into an empty document until the missing
-// history arrives. Returns nil for an empty input.
+// contract: nothing is dropped, holes come out as Skip runs, the result
+// may not integrate fully into an empty document until the missing
+// history arrives, and a single update comes back as it is. Returns nil
+// for an empty input.
 //
 // The two formats carry a Skip's length differently - V2 puts it in the
 // rest stream rather than the len column - so the emitters are separate
@@ -670,6 +690,12 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 	if len(updates) == 0 {
 		return nil, nil
+	}
+	if len(updates) == 1 {
+		if _, err := encoding.DecodeUpdateV2(updates[0]); err != nil {
+			return nil, err
+		}
+		return append([]byte(nil), updates[0]...), nil
 	}
 	// GC off: a merge carries deleted content, as yjs mergeUpdates does;
 	// whoever applies the result collects it, or keeps it with GC off.

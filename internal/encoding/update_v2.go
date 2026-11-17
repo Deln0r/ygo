@@ -439,7 +439,7 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 			anys[i] = v
 			collect.add(int(i), int(count), o)
 		}
-		return block.Content{Kind: block.KindAny, Anys: anys, Orders: collect.orders()}, nil
+		return block.Content{Kind: block.KindAny, Anys: anys, Orders: collect.orders(&dec.orders)}, nil
 	case block.KindString:
 		s, err := dec.ReadString()
 		if err != nil {
@@ -463,7 +463,7 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 embed: %w", err)
 		}
-		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}, Orders: singleOrders(o)}, nil
+		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}, Orders: dec.orders.single(o)}, nil
 	case block.KindFormat:
 		key, err := dec.ReadKey()
 		if err != nil {
@@ -473,7 +473,7 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 format value: %w", err)
 		}
-		return block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{v}, Orders: singleOrders(o)}, nil
+		return block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{v}, Orders: dec.orders.single(o)}, nil
 	case block.KindType:
 		typeRefU, err := dec.ReadTypeRef()
 		if err != nil {

@@ -40,6 +40,9 @@ type DecoderV2 struct {
 	// are encountered (asymmetric with the encoder side; see
 	// port-note gotcha 5). ReadKey indexes by keyClock value.
 	keys []string
+
+	// orders shares the key orders of the values read (orderTable).
+	orders orderTable
 }
 
 // ErrV2BadFeatureFlag is returned when the leading byte isn't
@@ -231,7 +234,11 @@ func (d *DecoderV2) ReadAnyOrdered() (block.Any, *block.KeyOrder, error) {
 }
 
 func (d *DecoderV2) readAnyOrdered(want bool) (block.Any, *block.KeyOrder, error) {
-	v, o, tail, err := decodeAnyOrdered(d.rest[d.restPos:], strictStrings, want)
+	var t *orderTable
+	if want {
+		t = &d.orders
+	}
+	v, o, tail, err := decodeAnyOrdered(d.rest[d.restPos:], strictStrings, t, 0)
 	if err != nil {
 		return nil, nil, err
 	}

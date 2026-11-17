@@ -49,10 +49,11 @@ func ParseJSON(raw []byte) (any, error) {
 	return v, nil
 }
 
-// maxJSONDepth bounds the nesting ParseJSON reads, as encoding/json bounds
-// its decoder, so a value deeper than the Any tree walk (MaxTreeDepth),
-// which goes through JSON text, still parses.
-const maxJSONDepth = 10000
+// MaxNesting is the deepest nesting of containers ygo reads: ParseJSON
+// in JSON text, as encoding/json bounds its decoder, and the Any decoder
+// in lib0 Any values. A value deeper than the Any tree walk
+// (MaxTreeDepth), which goes through JSON text, still parses.
+const MaxNesting = 10000
 
 type jsonParser struct {
 	s []byte
@@ -81,7 +82,7 @@ func (p *jsonParser) literal(lit string) bool {
 }
 
 func (p *jsonParser) value(depth int) (any, error) {
-	if depth > maxJSONDepth || p.i >= len(p.s) {
+	if depth > MaxNesting || p.i >= len(p.s) {
 		return nil, errJSONSyntax
 	}
 	switch c := p.s[p.i]; {

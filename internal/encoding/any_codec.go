@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"unsafe"
 
 	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
@@ -34,6 +35,15 @@ const (
 // ErrUnsupportedAnyTag is returned when DecodeAny encounters a type
 // tag that cannot be mapped to a Go value.
 var ErrUnsupportedAnyTag = errors.New("encoding: unsupported Any tag")
+
+// ErrAnyTooDeep is returned for an Any value whose arrays and objects nest
+// deeper than anyval.MaxNesting (10000) levels: the bound encoding/json
+// applies to JSON text, and past what a yjs peer reads (lib0 readAny
+// overflows the JavaScript stack after about 4,700 levels in Node 26).
+// Without it, an update of a few megabytes nesting arrays several hundred
+// thousand levels deep overflowed the goroutine stack, a crash no caller
+// can recover from.
+var ErrAnyTooDeep = fmt.Errorf("encoding: Any value nested deeper than %d levels", anyval.MaxNesting)
 
 // EncodeAny appends the lib0 Any TLV encoding of v to buf.
 //
@@ -221,23 +231,25 @@ func encodeFloatAny(buf []byte, f float64) []byte {
 //	null (126)      → nil
 //	undefined (127) → block.Undefined
 //
-// Unknown tags return ErrUnsupportedAnyTag.
+// Unknown tags return ErrUnsupportedAnyTag, and arrays and objects nested
+// deeper than anyval.MaxNesting levels ErrAnyTooDeep.
 func DecodeAny(buf []byte) (any, []byte, error) {
 	return decodeAny(buf, strictStrings)
 }
 
 // decodeAny reads one Any value, without the key order of its objects.
 func decodeAny(buf []byte, strs stringMode) (any, []byte, error) {
-	v, _, tail, err := decodeAnyOrdered(buf, strs, false)
+	v, _, tail, err := decodeAnyOrdered(buf, strs, nil, 0)
 	return v, tail, err
 }
 
-// decodeAnyOrdered reads one Any value and, with wantOrder, the key order
-// of the objects inside it as a JavaScript reader of the same bytes holds
-// them (lib0 readAny assigns obj[key] = value: a key read twice keeps its
-// first place and its last value, and array-index keys enumerate first).
-// The order is nil where the fallback order is right (anyval.KeyOrder).
-func decodeAnyOrdered(buf []byte, strs stringMode, wantOrder bool) (any, *block.KeyOrder, []byte, error) {
+// decodeAnyOrdered reads one Any value at nesting depth depth and, with a
+// table t, the key order of the objects inside it as a JavaScript reader
+// of the same bytes holds them (lib0 readAny assigns obj[key] = value: a
+// key read twice keeps its first place and its last value, and array-index
+// keys enumerate first), shared through t. The order is nil where the
+// fallback order is right (anyval.ObjectKeys), and always without t.
+func decodeAnyOrdered(buf []byte, strs stringMode, t *orderTable, depth int) (any, *block.KeyOrder, []byte, error) {
 	if len(buf) < 1 {
 		return nil, nil, buf, lib0.ErrTruncated
 	}
@@ -296,183 +308,293 @@ func decodeAnyOrdered(buf []byte, strs stringMode, wantOrder bool) (any, *block.
 		copy(out, b)
 		return out, nil, buf[n:], nil
 	case AnyTagArray:
-		count, n, err := lib0.ReadVarUint(buf)
-		if err != nil {
-			return nil, nil, buf, err
-		}
-		buf = buf[n:]
-		if err := checkDecodeCount(count, len(buf)); err != nil {
-			return nil, nil, buf, err
-		}
-		arr := make([]any, count)
-		var subs []*block.KeyOrder
-		for i := uint64(0); i < count; i++ {
-			el, sub, tail, err := decodeAnyOrdered(buf, strs, wantOrder)
-			if err != nil {
-				return nil, nil, buf, fmt.Errorf("decode Any array element %d: %w", i, err)
-			}
-			arr[i] = el
-			if sub != nil {
-				if subs == nil {
-					subs = make([]*block.KeyOrder, count)
-				}
-				subs[i] = sub
-			}
-			buf = tail
-		}
-		if subs == nil {
-			return arr, nil, buf, nil
-		}
-		return arr, &block.KeyOrder{Sub: subs}, buf, nil
+		return decodeAnyArray(buf, strs, t, depth)
 	case AnyTagObject:
-		count, n, err := lib0.ReadVarUint(buf)
-		if err != nil {
-			return nil, nil, buf, err
+		if t == nil {
+			return decodeAnyObject(buf, strs, depth)
 		}
-		buf = buf[n:]
-		if err := checkDecodeCount(count, len(buf)); err != nil {
-			return nil, nil, buf, err
-		}
-		m := make(map[string]any, count)
-		if !wantOrder {
-			for i := uint64(0); i < count; i++ {
-				key, kn, err := strs.readString(buf)
-				if err != nil {
-					return nil, nil, buf, fmt.Errorf("decode Any object key %d: %w", i, err)
-				}
-				buf = buf[kn:]
-				val, _, tail, err := decodeAnyOrdered(buf, strs, false)
-				if err != nil {
-					return nil, nil, buf, fmt.Errorf("decode Any object value for key %q: %w", key, err)
-				}
-				m[key] = val
-				buf = tail
-			}
-			return m, nil, buf, nil
-		}
-		// The keys in the order they first came, and the orders of their
-		// values; most objects need neither past this function. sorted
-		// stays true while the keys other than array indices come in
-		// ascending order, which is the fallback order once JavaScript
-		// puts the indices first.
-		var small [8]string
-		keys := small[:0]
-		var subs keyedOrders
-		sorted, prev, havePrev := true, "", false
-		for i := uint64(0); i < count; i++ {
-			key, kn, err := strs.readString(buf)
-			if err != nil {
-				return nil, nil, buf, fmt.Errorf("decode Any object key %d: %w", i, err)
-			}
-			buf = buf[kn:]
-			val, sub, tail, err := decodeAnyOrdered(buf, strs, true)
-			if err != nil {
-				return nil, nil, buf, fmt.Errorf("decode Any object value for key %q: %w", key, err)
-			}
-			before := len(m)
-			m[key] = val
-			if len(m) > before { // first time: its place is here
-				keys = append(keys, key)
-				if sorted && !anyval.IsArrayIndexKey(key) {
-					if havePrev && key <= prev {
-						sorted = false
-					}
-					prev, havePrev = key, true
-				}
-			}
-			subs.set(key, sub) // the last value's order, or none
-			buf = tail
-		}
-		if sorted && subs.empty() {
-			return m, nil, buf, nil
-		}
-		return m, objectOrder(keys, &subs), buf, nil
+		return decodeAnyObjectOrdered(buf, strs, t, depth)
 	default:
 		return nil, nil, buf, fmt.Errorf("%w: tag=%d", ErrUnsupportedAnyTag, tag)
 	}
 }
 
+// The containers are read by functions of their own, so the frame that
+// reads a number or a string, most of a value, stays small.
+
+// decodeAnyArray reads the elements of an array, after its tag.
+func decodeAnyArray(buf []byte, strs stringMode, t *orderTable, depth int) (any, *block.KeyOrder, []byte, error) {
+	if depth >= anyval.MaxNesting {
+		return nil, nil, buf, ErrAnyTooDeep
+	}
+	count, n, err := lib0.ReadVarUint(buf)
+	if err != nil {
+		return nil, nil, buf, err
+	}
+	buf = buf[n:]
+	if err := checkDecodeCount(count, len(buf)); err != nil {
+		return nil, nil, buf, err
+	}
+	arr := make([]any, count)
+	var small [8]*block.KeyOrder
+	var subs []*block.KeyOrder // up to the last element with an order
+	for i := uint64(0); i < count; i++ {
+		el, sub, tail, err := decodeAnyOrdered(buf, strs, t, depth+1)
+		if err != nil {
+			return nil, nil, buf, wrapAnyErr(depth, err, "decode Any array element %d", i)
+		}
+		arr[i] = el
+		if sub != nil {
+			if subs == nil {
+				subs = small[:0]
+			}
+			for uint64(len(subs)) < i {
+				subs = append(subs, nil)
+			}
+			subs = append(subs, sub)
+		}
+		buf = tail
+	}
+	if subs == nil {
+		return arr, nil, buf, nil
+	}
+	return arr, t.array(subs), buf, nil
+}
+
+// decodeAnyObject reads the entries of an object, after its tag, without
+// their order.
+func decodeAnyObject(buf []byte, strs stringMode, depth int) (any, *block.KeyOrder, []byte, error) {
+	if depth >= anyval.MaxNesting {
+		return nil, nil, buf, ErrAnyTooDeep
+	}
+	count, n, err := lib0.ReadVarUint(buf)
+	if err != nil {
+		return nil, nil, buf, err
+	}
+	buf = buf[n:]
+	if err := checkDecodeCount(count, len(buf)); err != nil {
+		return nil, nil, buf, err
+	}
+	m := make(map[string]any, count)
+	for i := uint64(0); i < count; i++ {
+		key, kn, err := strs.readString(buf)
+		if err != nil {
+			return nil, nil, buf, wrapAnyErr(depth, err, "decode Any object key %d", i)
+		}
+		buf = buf[kn:]
+		val, _, tail, err := decodeAnyOrdered(buf, strs, nil, depth+1)
+		if err != nil {
+			return nil, nil, buf, wrapAnyErr(depth, err, "decode Any object value for key %q", key)
+		}
+		m[key] = val
+		buf = tail
+	}
+	return m, nil, buf, nil
+}
+
+// decodeAnyObjectOrdered reads the entries of an object, after its tag,
+// and their order, shared through t.
+func decodeAnyObjectOrdered(buf []byte, strs stringMode, t *orderTable, depth int) (any, *block.KeyOrder, []byte, error) {
+	if depth >= anyval.MaxNesting {
+		return nil, nil, buf, ErrAnyTooDeep
+	}
+	count, n, err := lib0.ReadVarUint(buf)
+	if err != nil {
+		return nil, nil, buf, err
+	}
+	buf = buf[n:]
+	if err := checkDecodeCount(count, len(buf)); err != nil {
+		return nil, nil, buf, err
+	}
+	m := make(map[string]any, count)
+	// On the stack for an object of a few keys: arrays a struct of slices
+	// into its own fields would move to the heap.
+	var smallKeys [8]string
+	var smallSubs [8]*block.KeyOrder
+	keys := smallKeys[:0]
+	var subs []*block.KeyOrder
+	var at map[string]int
+	// keyTrack.note, written out: this loop runs for every key read.
+	unsorted, prev, havePrev := false, "", false
+	for i := uint64(0); i < count; i++ {
+		key, kn, err := strs.readString(buf)
+		if err != nil {
+			return nil, nil, buf, wrapAnyErr(depth, err, "decode Any object key %d", i)
+		}
+		buf = buf[kn:]
+		val, sub, tail, err := decodeAnyOrdered(buf, strs, t, depth+1)
+		if err != nil {
+			return nil, nil, buf, wrapAnyErr(depth, err, "decode Any object value for key %q", key)
+		}
+		before := len(m)
+		m[key] = val
+		var p int
+		if len(m) > before { // first time: its place is here
+			p = len(keys)
+			keys = append(keys, key)
+			if at != nil {
+				at[key] = p
+			}
+			if !unsorted && (key == "" || key[0] > '9' || key[0] < '0' || !anyval.IsArrayIndexKey(key)) {
+				if havePrev && !keyAfter(key, prev) {
+					unsorted = true
+				}
+				prev, havePrev = key, true
+			}
+		} else {
+			p, at = keyIndex(keys, at, key)
+		}
+		if sub != nil || subs != nil {
+			subs = setSub(subs, smallSubs[:0], p, sub)
+		}
+		buf = tail
+	}
+	if !unsorted && subs == nil {
+		return m, nil, buf, nil // the fallback order, nothing inside
+	}
+	return m, objectOrder(t, keys, subs, at, unsorted, false), buf, nil
+}
+
+// An object is read as JavaScript holds it (lib0 readAny assigns
+// obj[key] = value, and so does JSON.parse): a key read twice keeps its
+// first place and its last value. The readers keep the keys in the order
+// they first came and, at the same positions, the order of each one's
+// last value (setSub), shorter than the keys where the rest have none.
+
+// keyTrack follows whether the keys other than array indices come in
+// ascending order, which is the fallback order once JavaScript puts the
+// indices first.
+type keyTrack struct {
+	unsorted bool
+	prev     string
+	havePrev bool
+}
+
+// note records key, read for the first time.
+func (k *keyTrack) note(key string) {
+	if k.unsorted || maybeIndexKey(key) {
+		return
+	}
+	if k.havePrev && !keyAfter(key, k.prev) {
+		k.unsorted = true
+	}
+	k.prev, k.havePrev = key, true
+}
+
+// maybeIndexKey is anyval.IsArrayIndexKey, with the test of the first byte
+// that settles most keys done without a call.
+func maybeIndexKey(key string) bool {
+	return key != "" && key[0] <= '9' && key[0] >= '0' && anyval.IsArrayIndexKey(key)
+}
+
+// keyAfter reports whether key sorts after prev. Most keys differ from the
+// one before in their first byte, which decides without a call.
+func keyAfter(key, prev string) bool {
+	if key != "" && prev != "" && key[0] != prev[0] {
+		return key[0] > prev[0]
+	}
+	return key > prev
+}
+
+// keyedOrdersInline is how many keys a repeated one is looked for among
+// one by one; past it a map of positions keeps a read linear in the
+// number of keys whatever repeats.
+const keyedOrdersInline = 16
+
+// keyIndex returns the position of key in keys, or -1, and the map of
+// positions, made here once keys are past keyedOrdersInline; the caller
+// adds the keys it appends to a map it holds.
+func keyIndex(keys []string, at map[string]int, key string) (int, map[string]int) {
+	if at == nil {
+		if len(keys) <= keyedOrdersInline {
+			for i, x := range keys {
+				if x == key {
+					return i, nil
+				}
+			}
+			return -1, nil
+		}
+		at = make(map[string]int, 2*len(keys))
+		for i, x := range keys {
+			at[x] = i
+		}
+	}
+	if i, ok := at[key]; ok {
+		return i, at
+	}
+	return -1, at
+}
+
+// setSub sets the order at position p to sub, the order of the value just
+// read there, growing subs (from buf, the caller's stack, when it has none
+// yet) only when sub is set.
+func setSub(subs, buf []*block.KeyOrder, p int, sub *block.KeyOrder) []*block.KeyOrder {
+	if sub == nil && p >= len(subs) {
+		return subs
+	}
+	if subs == nil {
+		subs = buf
+	}
+	for len(subs) <= p {
+		subs = append(subs, nil)
+	}
+	subs[p] = sub
+	return subs
+}
+
 // objectOrder returns the order of an object whose keys came in the order
-// keys, with subs the orders of their values, normalized to JavaScript
-// enumeration order; nil when the fallback order is right for it and
-// everything inside. keys is not kept.
-func objectOrder(keys []string, subs *keyedOrders) *block.KeyOrder {
-	if subs.empty() && anyval.IsFallbackOrder(anyval.JSOrder(keys)) {
+// keys, with subs the orders of their values at the same positions and at
+// the map of positions keyIndex made, if any, normalized to JavaScript
+// enumeration order and shared through t; nil when the fallback order is
+// right for it and everything inside (keys not unsorted and no order
+// inside). keys and subs are not kept; clone is orderTable.object's.
+func objectOrder(t *orderTable, keys []string, subs []*block.KeyOrder, at map[string]int, unsorted, clone bool) *block.KeyOrder {
+	hasSub := false
+	for _, s := range subs {
+		if s != nil {
+			hasSub = true
+			break
+		}
+	}
+	if !unsorted && !hasSub {
 		return nil
 	}
 	js := anyval.JSOrder(keys)
-	var list []*block.KeyOrder
-	if !subs.empty() {
-		var small [8]*block.KeyOrder
-		list = small[:0]
-		for _, k := range js {
-			list = append(list, subs.get(k))
-		}
+	if !hasSub {
+		return t.object(js, nil, clone)
 	}
-	return internOrder(js, list)
-}
-
-// keyedOrders holds the orders of an object's values while it is decoded:
-// a few pairs inline, a map past keyedOrdersInline of them, so a decode
-// stays linear in the number of keys whatever repeats.
-type keyedOrders struct {
-	pairs []keyedOrder
-	m     map[string]*block.KeyOrder
-}
-
-type keyedOrder struct {
-	key   string
-	order *block.KeyOrder
-}
-
-const keyedOrdersInline = 16
-
-func (s *keyedOrders) empty() bool { return len(s.pairs) == 0 && len(s.m) == 0 }
-
-// set records o as the order of key's value, replacing an earlier one; a
-// nil o removes it.
-func (s *keyedOrders) set(key string, o *block.KeyOrder) {
-	if s.m != nil {
-		if o == nil {
-			delete(s.m, key)
-		} else {
-			s.m[key] = o
+	var small [8]*block.KeyOrder
+	list := small[:0]
+	if unsafe.SliceData(js) == unsafe.SliceData(keys) {
+		// No array-index key: JSOrder returned the keys as they are.
+		list = append(list, subs...)
+		for len(list) < len(js) {
+			list = append(list, nil)
 		}
-		return
-	}
-	for i := range s.pairs {
-		if s.pairs[i].key == key {
-			if o == nil {
-				s.pairs = append(s.pairs[:i], s.pairs[i+1:]...)
-			} else {
-				s.pairs[i].order = o
+	} else {
+		for _, key := range js {
+			var s *block.KeyOrder
+			var p int
+			if p, at = keyIndex(keys, at, key); p >= 0 && p < len(subs) {
+				s = subs[p]
 			}
-			return
+			list = append(list, s)
 		}
 	}
-	if o == nil {
-		return
-	}
-	if len(s.pairs) < keyedOrdersInline {
-		s.pairs = append(s.pairs, keyedOrder{key, o})
-		return
-	}
-	s.m = make(map[string]*block.KeyOrder, 2*keyedOrdersInline)
-	for _, p := range s.pairs {
-		s.m[p.key] = p.order
-	}
-	s.pairs = nil
-	s.m[key] = o
+	return t.object(js, list, clone)
 }
 
-func (s *keyedOrders) get(key string) *block.KeyOrder {
-	if s.m != nil {
-		return s.m[key]
+// anyErrContextDepth is how many of the outer levels of an Any value add
+// their place to an error from inside it.
+const anyErrContextDepth = 4
+
+// wrapAnyErr adds the place of a child, format and arg, to err from
+// inside it, at the outer anyErrContextDepth levels only: each level
+// copies the message of the levels below, so wrapping at every level made
+// a refusal 10000 levels down allocate over a gigabyte.
+func wrapAnyErr(depth int, err error, format string, arg any) error {
+	if depth >= anyErrContextDepth {
+		return err
 	}
-	for _, p := range s.pairs {
-		if p.key == key {
-			return p.order
-		}
-	}
-	return nil
+	return fmt.Errorf(format+": %w", arg, err)
 }

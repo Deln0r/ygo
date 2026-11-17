@@ -133,8 +133,16 @@ const MaxTreeDepth = 1000
 // is, once its numbers are classified: nil, bool, string, []byte, int,
 // int32, int64, float32, float64, and []any / map[string]any of those, no
 // deeper than MaxTreeDepth.
-func IsTree(v any, depth int) bool {
-	if depth > MaxTreeDepth {
+func IsTree(v any, depth int) bool { return isTree(v, depth, MaxTreeDepth) }
+
+// IsDecodedTree is IsTree for a value decoded from the wire, which nests
+// at most MaxNesting levels and cannot refer back to itself: the walk goes
+// that deep. A value no decoder returned, cyclic or nested deeper, is
+// reported as not a tree after at most MaxNesting levels.
+func IsDecodedTree(v any) bool { return isTree(v, 0, MaxNesting) }
+
+func isTree(v any, depth, limit int) bool {
+	if depth > limit {
 		return false
 	}
 	switch x := v.(type) {
@@ -142,14 +150,14 @@ func IsTree(v any, depth int) bool {
 		return true
 	case []any:
 		for _, el := range x {
-			if !IsTree(el, depth+1) {
+			if !isTree(el, depth+1, limit) {
 				return false
 			}
 		}
 		return true
 	case map[string]any:
 		for _, el := range x {
-			if !IsTree(el, depth+1) {
+			if !isTree(el, depth+1, limit) {
 				return false
 			}
 		}

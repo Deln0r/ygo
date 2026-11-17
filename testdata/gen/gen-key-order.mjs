@@ -31,6 +31,9 @@ function push(name, updates, doc) {
   scenarios.push({
     name,
     updates: updates.map(toHex),
+    // The same updates as yjs converts them to V2 (it reads the objects
+    // and writes them again, so foreign key orders are normalized here).
+    updatesV2: updates.map((u) => toHex(Y.convertUpdateFormatV1ToV2(u))),
     v1: toHex(Y.encodeStateAsUpdate(doc)),
     v2: toHex(Y.encodeStateAsUpdateV2(doc)),
   });
@@ -51,6 +54,23 @@ single("format value", (d) => {
   t.insert(0, "abcd");
   t.format(0, 4, { link: { title: "t", href: "h" } });
 });
+// More keys than decoding keeps inline (16), each holding an object of its
+// own, so the orders inside go through the decoder's map.
+{
+  const big = {};
+  for (let i = 19; i >= 0; i--) big["k" + String(i).padStart(2, "0")] = { y: i, x: i };
+  single("object of twenty keys, each holding an object", (d) => d.getMap("m").set("k", big));
+}
+// Nested past the depth ygo walks a caller's value (1000): the embed and
+// the format value keep their order in V2 too.
+const nested = (depth) => { let v = 0; for (let i = 0; i < depth; i++) v = [v]; return v; };
+single("embed nested 1001 levels", (d) => d.getText("t").insertEmbed(0, { b: 1, a: nested(1001) }));
+single("format value nested 1001 levels", (d) => {
+  const t = d.getText("t");
+  t.insert(0, "abcd");
+  t.format(0, 4, { link: { b: 1, a: nested(1001) } });
+});
+single("map value nested 1001 levels", (d) => d.getMap("m").set("k", { b: 1, a: nested(1001) }));
 
 // Several objects in one item, then an insert between them splits it.
 {
@@ -75,15 +95,27 @@ single("format value", (d) => {
   a.insert(1, [{ d: 1, c: 2 }]);
   push("array grown in two transactions", [first, Y.encodeStateAsUpdate(d, Y.encodeStateVectorFromUpdate(first))], d);
 }
+// The same, with values that keep no order on one side of the merge.
+function grown(name, before, after) {
+  const d = new Y.Doc();
+  d.clientID = 1;
+  const a = d.getArray("a");
+  a.insert(0, before);
+  const first = Y.encodeStateAsUpdate(d);
+  a.insert(before.length, after);
+  push(name, [first, Y.encodeStateAsUpdate(d, Y.encodeStateVectorFromUpdate(first))], d);
+}
+grown("array grown in two transactions: plain values, then objects", [1, 2], [{ d: 1, c: 2 }, 3]);
+grown("array grown in two transactions: objects, then plain values", [{ b: 1, a: 2 }, 1], [2, 3]);
 
 // A second client restores a format value around new content: the marker
 // that restores it must write the value as the first client did.
-function restore(name, op, from = 0) {
+function restore(name, op, from = 0, link = { title: "t", href: "h" }) {
   const a = new Y.Doc();
   a.clientID = 1;
   const t = a.getText("t");
   t.insert(0, "abcd");
-  t.format(from, 4 - from, { link: { title: "t", href: "h" } });
+  t.format(from, 4 - from, { link });
   const ua = Y.encodeStateAsUpdate(a);
   const b = new Y.Doc();
   b.clientID = 2;
@@ -96,6 +128,8 @@ restore("link removed from the middle of a link", (t) => t.format(1, 2, { link: 
 // The link starts inside the range: its opening marker is deleted there
 // and its value restored after the range.
 restore("link removed over where a link starts", (t) => t.format(1, 2, { link: null }), 2);
+// A format value that is an array, with the object inside it.
+restore("array link removed from the middle of a link", (t) => t.format(1, 2, { link: null }), 0, [{ title: "t", href: "h" }]);
 
 // The second client's objects arrive before the first client's edit they
 // depend on, so they wait as pending structs.
@@ -110,6 +144,27 @@ restore("link removed over where a link starts", (t) => t.format(1, 2, { link: n
   b.getArray("a").insert(1, [{ d: 1, c: 2 }, { f: 1, e: 2 }]);
   const ub = Y.encodeStateAsUpdate(b, Y.encodeStateVectorFromUpdate(ua));
   push("objects waiting for their dependency", [ub, ua], b);
+}
+
+// The second client's objects wait twice, in overlapping pieces: the
+// second piece is cut to the part the first does not hold.
+{
+  const a = new Y.Doc();
+  a.clientID = 1;
+  a.getArray("a").insert(0, [{ b: 1, a: 2 }]);
+  const ua = Y.encodeStateAsUpdate(a);
+  const b = new Y.Doc();
+  b.clientID = 2;
+  Y.applyUpdate(b, ua);
+  const arr = b.getArray("a");
+  arr.insert(1, [{ d: 1, c: 2 }, { f: 1, e: 2 }]);
+  const svA = Y.encodeStateVectorFromUpdate(ua);
+  const piece1 = Y.encodeStateAsUpdate(b, svA); // clocks 0-1 of client 2
+  arr.insert(3, [{ h: 1, g: 2 }]); // merged into the same item
+  const sv = new Map(Y.decodeStateVector(svA));
+  sv.set(2, 1);
+  const piece2 = Y.encodeStateAsUpdate(b, Y.encodeStateVector(new Map(sv)) ); // clocks 1-2
+  push("objects waiting in overlapping pieces", [piece1, piece2, ua], b);
 }
 
 // Foreign bytes: an object yjs never writes, spliced into a yjs update in
@@ -139,20 +194,38 @@ function foreign(name, entries) {
   push(name, [u], r);
 }
 foreign("foreign: array-index keys after the others", [["b", 1], ["10", 2], ["a", 3], ["9", 4]]);
+// The array-index key moves ahead of the object before it, whose order
+// must stay with its key.
+foreign("foreign: an object before an array-index key", [["b", { y: 1, x: 2 }], ["10", 2], ["a", 1]]);
 foreign("foreign: a repeated key", [["a", 1], ["b", 2], ["a", { y: 1, x: 2 }]]);
 // The last value's order counts, here the sorted one.
 foreign("foreign: a repeated key whose last value is sorted", [["k", { b: 1, a: 2 }], ["z", 0], ["k", { a: 3, b: 4 }]]);
-// A V1 embed whose JSON text has its keys out of enumeration order.
+// More repeated keys than decoding keeps inline, each value with an order
+// of its own; the last value decides, unsorted, sorted or plain.
 {
+  const entries = [];
+  for (let i = 19; i >= 0; i--) entries.push(["k" + String(i).padStart(2, "0"), { y: i, x: i }]);
+  entries.push(["k05", { q: 1, p: 2 }], ["k07", { a: 1, b: 2 }], ["k09", 0], ["zz", { n: 1, m: 2 }]);
+  foreign("foreign: repeated keys past the inline ones", entries);
+}
+// A V1 embed whose JSON text was not written by JSON.stringify.
+function foreignJSON(name, text) {
   const d = new Y.Doc();
   d.clientID = 1;
   d.getText("t").insertEmbed(0, { placeholder: 12345 });
   const enc = (s) => { const e = encoding.createEncoder(); encoding.writeVarString(e, s); return encoding.toUint8Array(e); };
-  const u = splice(Y.encodeStateAsUpdate(d), enc('{"placeholder":12345}'), enc('{"b":1,"10":2,"a":{"y":1,"x":2}}'));
+  const u = splice(Y.encodeStateAsUpdate(d), enc('{"placeholder":12345}'), enc(text));
   const r = new Y.Doc();
   Y.applyUpdate(r, u);
-  push("foreign: embed JSON out of enumeration order", [u], r);
+  push(name, [u], r);
 }
+foreignJSON("foreign: embed JSON out of enumeration order", '{"b":1,"10":2,"a":{"y":1,"x":2}}');
+foreignJSON("foreign: embed JSON with an object before an array-index key", '{"b":{"y":1,"x":2},"10":2,"a":1}');
+// JSON.parse keeps a repeated key's first place and its last value, here
+// an object with an order of its own.
+foreignJSON("foreign: embed JSON with a repeated key", '{"a":{"y":1,"x":2},"b":0,"a":{"q":1,"p":2}}');
+// White space, escaped keys and keys past ASCII.
+foreignJSON("foreign: embed JSON with escaped keys and white space", ' { "b" : 1 ,\n "\\u0061" : { "y" : [ 1 , { "\\u00e9" : 1 , "d" : 2 } ] , "x" : 2 } , "\u00e9t\u00e9" : true , "a\\"q" : null } ');
 
 writeFileSync(outPath, JSON.stringify({ generator: "gen-key-order.mjs (yjs 13.6.33)", scenarios }, null, 2) + "\n");
 console.log(`wrote ${scenarios.length} scenarios to ${outPath}`);
