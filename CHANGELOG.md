@@ -14,7 +14,7 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
-## [Unreleased]
+## [1.41.0] - 2026-11-17
 
 **Upgrade impact**:
 
@@ -32,7 +32,7 @@ file.
 
 ### Changed
 
-- **Reading objects whose keys are not in sorted order costs more, and writing them less.** On documents from yjs 13.6.33 holding 5,000 records of six keys (the minimum of 7 runs alternating with 1.40.0): applying one whose records are Map values takes 12 to 13% longer; records holding an array of objects and an object, 17%; the records as one Array item, 25%; each with 1.40.0's allocations. Writing such a document takes a quarter to 40% less time, one allocation fewer per object, since the keys are no longer sorted. Records whose keys are already sorted apply 4 to 5% slower and are written as before; a text with 500 links applies 2 to 8% slower. Records appended one update each, as live edits arrive, allocate 15% more. A document holds as much memory as in 1.40.0, within 3%: objects of one shape share one order, those decoded from one update and those that arrive in updates of their own, as live edits do. For the second, the document keeps at most 4,096 shapes and about 1 MiB of them, none of more than 512 bytes of keys, and nothing it keeps outgrows that, whatever a peer sends. Records each of a shape of its own hold a fifth more as Map values, two fifths more as one Array item.
+- **Reading objects whose keys are not in sorted order costs more, and writing them less.** On documents from yjs 13.6.33 holding 5,000 records of six keys, against 1.40.0 (the minimum of 7 alternating runs, in two series on machines under different load): applying one whose records are Map values takes 10 to 16% longer; records holding an array of objects and an object, 15 to 28%; the records as one Array item, 19 to 27%; each with 1.40.0's allocations. Writing such a document takes a fifth to 40% less time, one allocation fewer per object, since the keys are no longer sorted. Records whose keys are already sorted apply 3 to 8% slower and are written as before; a text with 500 links applies 2 to 9% slower. Records appended one update each, as live edits arrive, allocate 15% more. A document holds as much memory as in 1.40.0, within 3%: objects of one shape share one order, those decoded from one update and those that arrive in updates of their own, as live edits do. For the second, the document keeps at most 4,096 shapes and about 1 MiB of them, none of more than 512 bytes of keys, and nothing it keeps outgrows that, whatever a peer sends. Records each of a shape of its own hold a fifth more as Map values, two fifths more as one Array item.
 
 ### Tests
 
@@ -2401,6 +2401,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.41.0]: https://github.com/Deln0r/ygo/releases/tag/v1.41.0
 [1.40.0]: https://github.com/Deln0r/ygo/releases/tag/v1.40.0
 [1.39.0]: https://github.com/Deln0r/ygo/releases/tag/v1.39.0
 [1.38.0]: https://github.com/Deln0r/ygo/releases/tag/v1.38.0

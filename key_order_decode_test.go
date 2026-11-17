@@ -484,7 +484,7 @@ func TestKeyOrder_DeletedValuesLeaveNothingHeld(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	updates = nil
+	clear(updates) // let the bytes go before measuring
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	if got := int64(after.HeapAlloc) - int64(before.HeapAlloc); got > 4<<20 {
