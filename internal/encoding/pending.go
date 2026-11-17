@@ -277,6 +277,9 @@ func ownPayload(c *block.Content) {
 		c.Str = strings.Clone(c.Str)
 	case block.KindAny:
 		c.Anys = slices.Clone(c.Anys)
+		if c.Orders != nil {
+			c.Orders = &block.Orders{List: slices.Clone(c.Orders.List)}
+		}
 	case block.KindJSON:
 		c.JSONStrs = slices.Clone(c.JSONStrs)
 	}

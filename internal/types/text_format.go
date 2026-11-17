@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/block"
@@ -216,6 +217,49 @@ type textPos struct {
 	// iterates yjs's currentAttributes: a set on a present key keeps its
 	// place, a delete removes it, a set on an absent key appends it.
 	order []string
+	// keyOrders maps a stored format value the cursor has met (by the
+	// identity of its map or slice) to the key order its marker keeps, so
+	// a marker that restores the value writes it as the peer wrote it.
+	keyOrders map[uintptr]*block.KeyOrder
+}
+
+// noteOrder records the key order of the value format marker it sets.
+func (p *textPos) noteOrder(it *block.Item) {
+	o := it.Content.Orders.Of(0)
+	if o == nil {
+		return
+	}
+	if id, ok := valueIdentity(formatValue(it)); ok {
+		if p.keyOrders == nil {
+			p.keyOrders = map[uintptr]*block.KeyOrder{}
+		}
+		p.keyOrders[id] = o
+	}
+}
+
+// orderOf returns the key order noted for value, or nil.
+func (p *textPos) orderOf(value any) *block.KeyOrder {
+	if id, ok := valueIdentity(value); ok {
+		return p.keyOrders[id]
+	}
+	return nil
+}
+
+// valueIdentity identifies a stored map or slice value by its storage.
+// Stored values are never changed, and the cursor passes the stored value
+// itself, so the identity finds the order of the marker it came from.
+func valueIdentity(v any) (uintptr, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		if x != nil {
+			return uintptr(reflect.ValueOf(x).UnsafePointer()), true
+		}
+	case []any:
+		if len(x) > 0 {
+			return uintptr(unsafe.Pointer(&x[0])), true
+		}
+	}
+	return 0, false
 }
 
 // forward steps the cursor over right, which must not be nil. A live
@@ -225,6 +269,7 @@ func (p *textPos) forward() {
 	r := p.right
 	if !r.IsDeleted() {
 		if r.Content.Kind == block.KindFormat {
+			p.noteOrder(r)
 			p.updateAttr(r.Content.FormatKey, formatValue(r))
 		} else {
 			p.index += r.Len
@@ -362,7 +407,7 @@ func insertAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPo
 			continue
 		}
 		negated.set(key, current)
-		pos.right = buildFormatMarker(txn, pos.left, pos.right, branch, key, value)
+		pos.right = buildFormatMarker(txn, pos.left, pos.right, branch, key, value, nil)
 		pos.forward()
 	}
 	return negated
@@ -385,6 +430,7 @@ walk:
 		if !r.IsDeleted() {
 			if r.Content.Kind == block.KindFormat {
 				key, value := r.Content.FormatKey, formatValue(r)
+				pos.noteOrder(r)
 				if requested, ok := attrs[key]; ok {
 					if attrValuesEqual(requested, value) {
 						negated.remove(key)
@@ -444,7 +490,8 @@ func insertNegatedAttributes(txn *doc.TransactionMut, branch *block.Branch, pos 
 		pos.forward()
 	}
 	for _, key := range negated.keys {
-		pos.right = buildFormatMarker(txn, pos.left, pos.right, branch, key, negated.values[key])
+		value := negated.values[key]
+		pos.right = buildFormatMarker(txn, pos.left, pos.right, branch, key, value, pos.orderOf(value))
 		pos.forward()
 	}
 }
@@ -730,7 +777,7 @@ func (t *Text) ToDelta() []DeltaOp {
 // buildFormatMarker constructs and integrates a single KindFormat
 // Item between left and right neighbours. Returns the new Item so
 // the caller can chain subsequent inserts off it.
-func buildFormatMarker(txn *doc.TransactionMut, left, right *block.Item, parentBranch *block.Branch, key string, value any) *block.Item {
+func buildFormatMarker(txn *doc.TransactionMut, left, right *block.Item, parentBranch *block.Branch, key string, value any, order *block.KeyOrder) *block.Item {
 	var origin, rightOrigin *block.ID
 	if left != nil {
 		lid := left.LastID()
@@ -749,7 +796,7 @@ func buildFormatMarker(txn *doc.TransactionMut, left, right *block.Item, parentB
 		Left:        left,
 		RightOrigin: rightOrigin,
 		Right:       right,
-		Content:     block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{value}},
+		Content:     block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{value}, Orders: block.OrdersFor([]*block.KeyOrder{order})},
 		Parent:      block.Parent{Kind: block.ParentBranch, Branch: parentBranch},
 		// FlagCountable left off — format markers do not contribute
 		// to branch.BlockLen (per Content.IsCountable() returning

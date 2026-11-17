@@ -166,8 +166,8 @@ func EncodeContentV2(enc *EncoderV2, c block.Content) {
 		// ContentAny.write: writeLen(count) + writeAny per item
 		// (verified against ContentAny.js).
 		enc.WriteLen(uint64(len(c.Anys)))
-		for _, v := range c.Anys {
-			enc.WriteAny(v)
+		for i, v := range c.Anys {
+			enc.WriteAnyOrdered(v, c.Orders.Of(i))
 		}
 	case block.KindString:
 		enc.WriteString(c.Str)
@@ -180,7 +180,7 @@ func EncodeContentV2(enc *EncoderV2, c block.Content) {
 		if len(c.Anys) > 0 {
 			v = c.Anys[0]
 		}
-		enc.WriteJSON(v)
+		enc.WriteJSONOrdered(v, c.Orders.Of(0))
 	case block.KindFormat:
 		// ContentFormat.write: writeKey(key) + writeJSON(value).
 		enc.WriteKey(c.FormatKey)
@@ -188,7 +188,7 @@ func EncodeContentV2(enc *EncoderV2, c block.Content) {
 		if len(c.Anys) > 0 {
 			v = c.Anys[0]
 		}
-		enc.WriteJSON(v)
+		enc.WriteJSONOrdered(v, c.Orders.Of(0))
 	case block.KindType:
 		if c.Branch == nil {
 			panic("encoding.EncodeContentV2: KindType with nil Branch")
@@ -430,14 +430,16 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 any count: %w", err)
 		}
 		anys := make([]block.Any, count)
+		var collect anyOrders
 		for i := uint64(0); i < count; i++ {
-			v, err := dec.ReadAny()
+			v, o, err := dec.ReadAnyOrdered()
 			if err != nil {
 				return block.Content{}, fmt.Errorf("DecodeContentV2 any %d: %w", i, err)
 			}
 			anys[i] = v
+			collect.add(int(i), int(count), o)
 		}
-		return block.Content{Kind: block.KindAny, Anys: anys}, nil
+		return block.Content{Kind: block.KindAny, Anys: anys, Orders: collect.orders()}, nil
 	case block.KindString:
 		s, err := dec.ReadString()
 		if err != nil {
@@ -457,21 +459,21 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 		}
 		return block.Content{Kind: block.KindDeleted, DeletedLen: v}, nil
 	case block.KindEmbed:
-		v, err := dec.ReadJSON()
+		v, o, err := dec.ReadJSONOrdered()
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 embed: %w", err)
 		}
-		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}}, nil
+		return block.Content{Kind: block.KindEmbed, Anys: []block.Any{v}, Orders: singleOrders(o)}, nil
 	case block.KindFormat:
 		key, err := dec.ReadKey()
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 format key: %w", err)
 		}
-		v, err := dec.ReadJSON()
+		v, o, err := dec.ReadJSONOrdered()
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 format value: %w", err)
 		}
-		return block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{v}}, nil
+		return block.Content{Kind: block.KindFormat, FormatKey: key, Anys: []block.Any{v}, Orders: singleOrders(o)}, nil
 	case block.KindType:
 		typeRefU, err := dec.ReadTypeRef()
 		if err != nil {

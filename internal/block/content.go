@@ -65,6 +65,11 @@ type Content struct {
 	// Mirrors yjs ContentDoc.write (writeString(guid) + writeAny(opts)).
 	DocGuid string
 	DocOpts map[string]any
+
+	// Orders keeps the key order of the objects in Anys, for KindAny,
+	// KindEmbed and KindFormat content decoded from a peer (KeyOrder).
+	// nil when every object there is written in the fallback order.
+	Orders *Orders
 }
 
 // RefNumber returns the Yjs wire ref number for the content's kind.
@@ -149,6 +154,9 @@ func (c Content) Copy() Content {
 	if c.Anys != nil {
 		out.Anys = append([]Any(nil), c.Anys...)
 	}
+	if c.Orders != nil {
+		out.Orders = &Orders{List: append([]*KeyOrder(nil), c.Orders.List...)}
+	}
 	if c.JSONStrs != nil {
 		out.JSONStrs = append([]string(nil), c.JSONStrs...)
 	}
@@ -230,6 +238,11 @@ func (c *Content) splitAny(offset uint64) (Content, error) {
 	}
 	right := Content{Kind: KindAny, Anys: c.Anys[offset:]}
 	c.Anys = c.Anys[:offset]
+	if c.Orders != nil {
+		list := c.Orders.List
+		right.Orders = OrdersFor(list[offset:])
+		c.Orders = OrdersFor(list[:offset:offset])
+	}
 	return right, nil
 }
 
@@ -263,6 +276,17 @@ func (c *Content) TrySquash(other *Content) bool {
 	}
 	switch c.Kind {
 	case KindAny:
+		if c.Orders != nil || other.Orders != nil {
+			// A new list, never an append into one a split shares.
+			list := make([]*KeyOrder, 0, len(c.Anys)+len(other.Anys))
+			for i := range c.Anys {
+				list = append(list, c.Orders.Of(i))
+			}
+			for i := range other.Anys {
+				list = append(list, other.Orders.Of(i))
+			}
+			c.Orders = &Orders{List: list}
+		}
 		c.Anys = append(c.Anys, other.Anys...)
 		return true
 	case KindDeleted:

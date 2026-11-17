@@ -16,6 +16,24 @@ file.
 
 ## [Unreleased]
 
+**Upgrade impact**:
+
+- **Objects read from a peer keep their key order.** When ygo writes a document again (the state a late joiner gets, a compaction, a V1/V2 conversion, `MergeUpdates`, a format value restored around new content, undo), an object a peer wrote goes out with its keys in the order JavaScript holds them, array-index keys first, where ygo sorted them. The bytes now match yjs's. Objects built in Go are written as in 1.40.0.
+
+### Fixed
+
+- **An object's keys came back sorted from any Go peer.** A JavaScript client that wrote `{name: "a", color: "b"}` and a client that later joined through a ygo server, or read the document after it was compacted, saw `{color, name}`: `Object.keys`, and anything that renders by it, changed order. ygo now keeps the order of each object it reads (Map and Array values, embeds, format values, at any depth), V1 and V2, through item splits and merges, undo and pending updates.
+- **A format value ygo restored around an edit was written with its keys sorted**, so a link `{title, href}` that a Go peer split by an insert or a partial unformat came back as `{href, title}`.
+
+### Changed
+
+- **Reading objects whose keys are not in sorted order costs more**, and writing them less: 5,000 records of six keys take 25% longer to read and one more allocation each, and a third less time to write, since they are no longer sorted. Objects of one shape share one order. Objects whose keys are already sorted read within 5% of 1.40.0's time, with no more allocations.
+
+### Tests
+
+- New fixtures from yjs 13.6.33 (`testdata/key-order-fixtures.json`, `testdata/gen/gen-key-order.mjs`, in CI): 15 documents holding objects with their keys out of sorted order, as Map values, nested in objects and arrays, several in an array item that an insert splits and an array grown over two transactions, as an embed and a format value, a format value a second client restores around an insert and a partial unformat, objects waiting for the update they depend on, and objects from writers that are not JavaScript (keys out of enumeration order, a repeated key). ygo applies yjs's updates and writes yjs's state, V1 and V2, twice; reads yjs's V2 state back to the same bytes; and merges the updates to the same state. ygo, as the second client, makes the restoring edits itself and writes yjs's state. Undo brings back a value with its order. Each fails on 1.40.0.
+- 17 controls, each failing these tests.
+
 ## [1.40.0] - 2026-11-13
 
 **Upgrade impact**:

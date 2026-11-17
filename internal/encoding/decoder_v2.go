@@ -220,12 +220,23 @@ func (d *DecoderV2) AdvanceRest(n int) {
 
 // ReadAny consumes the next lib0 Any TLV from the rest stream.
 func (d *DecoderV2) ReadAny() (block.Any, error) {
-	v, tail, err := decodeAny(d.rest[d.restPos:], strictStrings)
+	v, _, err := d.readAnyOrdered(false)
+	return v, err
+}
+
+// ReadAnyOrdered is ReadAny that also returns the key order of the
+// objects in the value (decodeAnyOrdered).
+func (d *DecoderV2) ReadAnyOrdered() (block.Any, *block.KeyOrder, error) {
+	return d.readAnyOrdered(true)
+}
+
+func (d *DecoderV2) readAnyOrdered(want bool) (block.Any, *block.KeyOrder, error) {
+	v, o, tail, err := decodeAnyOrdered(d.rest[d.restPos:], strictStrings, want)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	d.restPos = len(d.rest) - len(tail)
-	return v, nil
+	return v, o, nil
 }
 
 // ReadVarBuf consumes the next varbuffer from the rest stream.
@@ -275,12 +286,20 @@ func (d *DecoderV2) ReadKey() (string, error) {
 // text code does not model the difference. Undefined nested inside a value
 // is only data and is kept.
 func (d *DecoderV2) ReadJSON() (block.Any, error) {
-	v, err := d.ReadAny()
+	v, _, err := d.ReadJSONOrdered()
+	return v, err
+}
+
+// ReadJSONOrdered is ReadJSON that also returns the key order of the
+// objects in the value. jsonValueFromAny only rewrites numbers, so the
+// order still fits the value it returns.
+func (d *DecoderV2) ReadJSONOrdered() (block.Any, *block.KeyOrder, error) {
+	v, o, err := d.ReadAnyOrdered()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, ok := v.(block.Undefined); ok {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return jsonValueFromAny(v), nil
+	return jsonValueFromAny(v), o, nil
 }

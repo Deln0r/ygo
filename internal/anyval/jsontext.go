@@ -329,7 +329,12 @@ func SanitizeJSString(s string) string {
 // Objects built in Go are written with array-index keys first in ascending
 // order, then the others sorted (SortedJSOrder); objects parsed from
 // JSON text keep their order.
-func AppendStringify(b []byte, v any) []byte {
+func AppendStringify(b []byte, v any) []byte { return AppendStringifyOrdered(b, v, nil) }
+
+// AppendStringifyOrdered is AppendStringify writing the objects inside v
+// in the key order o keeps for them (block.KeyOrder), the fallback order
+// where it keeps none.
+func AppendStringifyOrdered(b []byte, v any, o *block.KeyOrder) []byte {
 	switch x := v.(type) {
 	case nil, block.Undefined:
 		return append(b, "null"...)
@@ -392,16 +397,17 @@ func AppendStringify(b []byte, v any) []byte {
 			if i > 0 {
 				b = append(b, ',')
 			}
-			b = AppendStringify(b, el)
+			b = AppendStringifyOrdered(b, el, SubOrder(o, i))
 		}
 		return append(b, ']')
 	case map[string]any:
 		if x == nil {
 			return append(b, "null"...)
 		}
-		return appendObject(b, SortedJSOrder(x), x)
+		keys, subs := ObjectKeys(x, o)
+		return appendObject(b, keys, subs, x)
 	case *Object:
-		return appendObject(b, x.Keys, x.Vals)
+		return appendObject(b, x.Keys, nil, x.Vals)
 	case json.RawMessage:
 		parsed, err := ParseJSON(x)
 		if err != nil {
@@ -417,10 +423,10 @@ func AppendStringify(b []byte, v any) []byte {
 	}
 }
 
-func appendObject(b []byte, keys []string, vals map[string]any) []byte {
+func appendObject(b []byte, keys []string, subs []*block.KeyOrder, vals map[string]any) []byte {
 	b = append(b, '{')
 	first := true
-	for _, k := range keys {
+	for i, k := range keys {
 		el, ok := vals[k]
 		if !ok {
 			continue
@@ -434,7 +440,11 @@ func appendObject(b []byte, keys []string, vals map[string]any) []byte {
 		first = false
 		b = appendJSONString(b, k)
 		b = append(b, ':')
-		b = AppendStringify(b, el)
+		var sub *block.KeyOrder
+		if i < len(subs) {
+			sub = subs[i]
+		}
+		b = AppendStringifyOrdered(b, el, sub)
 	}
 	return append(b, '}')
 }

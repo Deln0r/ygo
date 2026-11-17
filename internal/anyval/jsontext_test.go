@@ -2,6 +2,7 @@ package anyval
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 
@@ -102,6 +103,26 @@ func TestIsArrayIndexKey(t *testing.T) {
 	} {
 		if got := IsArrayIndexKey(k); got != want {
 			t.Errorf("IsArrayIndexKey(%q) = %v, want %v", k, got, want)
+		}
+	}
+}
+
+// TestObjectKeys: an object is written in its kept order, for the keys it
+// has; its other keys follow in the fallback order. An order of the same
+// length that lists another key is not taken whole.
+func TestObjectKeys(t *testing.T) {
+	m := map[string]any{"a": 1, "b": 2, "c": 3}
+	for _, c := range []struct {
+		order []string
+		want  string
+	}{
+		{[]string{"c", "a", "b"}, "[c a b]"},
+		{[]string{"c", "x", "a"}, "[c a b]"},
+		{[]string{"b"}, "[b a c]"},
+	} {
+		keys, _ := ObjectKeys(m, &block.KeyOrder{Keys: c.order})
+		if got := fmt.Sprint(keys); got != c.want {
+			t.Errorf("order %v: keys %s, want %s", c.order, got, c.want)
 		}
 	}
 }

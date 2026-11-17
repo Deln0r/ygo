@@ -135,6 +135,11 @@ func (e *EncoderV2) WriteAny(v block.Any) {
 	e.rest = EncodeAny(e.rest, v)
 }
 
+// WriteAnyOrdered is WriteAny with the key order a decoded value keeps.
+func (e *EncoderV2) WriteAnyOrdered(v block.Any, o *block.KeyOrder) {
+	e.rest = encodeAnyOrdered(e.rest, v, o)
+}
+
 // WriteVarBuf routes a length-prefixed byte array to the rest
 // stream. Used by ContentBinary.
 func (e *EncoderV2) WriteVarBuf(b []byte) {
@@ -160,6 +165,13 @@ func (e *EncoderV2) WriteKey(key string) {
 // format differs, and the result was unreadable by yjs. See json_any.go.
 func (e *EncoderV2) WriteJSON(v block.Any) {
 	e.WriteAny(jsonValueForAny(v))
+}
+
+// WriteJSONOrdered is WriteJSON with the key order a decoded value keeps.
+// jsonValueForAny keeps the shape of a plain value, so the order still
+// fits it; a value stored as JSON carries its own.
+func (e *EncoderV2) WriteJSONOrdered(v block.Any, o *block.KeyOrder) {
+	e.WriteAnyOrdered(jsonValueForAny(v), o)
 }
 
 // Bytes flushes every column and assembles the final V2 wire
