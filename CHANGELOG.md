@@ -38,7 +38,7 @@ file.
 - The key order read from V1 JSON text equals the one encoding/json's own tokenizer gives, over 10,000 random texts with escapes, raw bytes that are not UTF-8, lone surrogates, repeated and array-index keys; text in the fallback order is read without allocating.
 - Records of one shape decoded from one update share one order, V1 and V2; objects whose keys are already in order get none.
 - Nesting: 10000 levels apply and come back unchanged, 10001 and a million are refused, V1 and V2.
-- 36 controls, each failing these tests.
+- 40 controls, each failing these tests.
 
 ## [1.40.0] - 2026-11-13
 

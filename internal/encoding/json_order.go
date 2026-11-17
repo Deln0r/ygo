@@ -83,12 +83,12 @@ func (sc *jsonKeyScanner) str() (string, bool) {
 	sc.i++ // the opening quote
 	start, plain, high := sc.i, true, false
 	for sc.i < len(sc.s) {
-		switch c := sc.s[sc.i]; {
-		case c == '"':
+		switch c := sc.s[sc.i]; c {
+		case '"':
 			text := sc.s[start:sc.i]
 			sc.i++
 			return text, plain && (!high || utf8.ValidString(text))
-		case c == '\\':
+		case '\\':
 			plain = false
 			sc.i += 2
 		default:
