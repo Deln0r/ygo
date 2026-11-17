@@ -131,8 +131,14 @@ func (sc *jsonKeyScanner) object() *block.KeyOrder {
 		key := sc.key()
 		sc.at(':')
 		sub := sc.value()
-		var p int
-		if p, at = keyIndex(keys, at, key); p < 0 {
+		// A key after the one before it, while the object is in order,
+		// is new: no need to look for it, nor to build the map of
+		// positions past keyedOrdersInline keys.
+		p := -1
+		if kt.unsorted || maybeIndexKey(key) || kt.havePrev && !keyAfter(key, kt.prev) {
+			p, at = keyIndex(keys, at, key)
+		}
+		if p < 0 {
 			p = len(keys)
 			keys = append(keys, key)
 			if at != nil {

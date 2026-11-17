@@ -322,6 +322,20 @@ func decodeAnyOrdered(buf []byte, strs stringMode, t *orderTable, depth int) (an
 // The containers are read by functions of their own, so the frame that
 // reads a number or a string, most of a value, stays small.
 
+// maxAnyPrealloc caps the room an array or object makes for the count
+// its bytes claim before its elements are read. The count is bounded by
+// the bytes left, but each of 10000 nested containers can claim them all:
+// a V1 update of 112 KB made room for 2.8 GB before it was refused. lib0
+// does not make room ahead either.
+const maxAnyPrealloc = 16
+
+func preallocCount(count uint64) int {
+	if count > maxAnyPrealloc {
+		return maxAnyPrealloc
+	}
+	return int(count)
+}
+
 // decodeAnyArray reads the elements of an array, after its tag.
 func decodeAnyArray(buf []byte, strs stringMode, t *orderTable, depth int) (any, *block.KeyOrder, []byte, error) {
 	if depth >= anyval.MaxNesting {
@@ -335,7 +349,7 @@ func decodeAnyArray(buf []byte, strs stringMode, t *orderTable, depth int) (any,
 	if err := checkDecodeCount(count, len(buf)); err != nil {
 		return nil, nil, buf, err
 	}
-	arr := make([]any, count)
+	arr := make([]any, 0, preallocCount(count))
 	var small [8]*block.KeyOrder
 	var subs []*block.KeyOrder // up to the last element with an order
 	for i := uint64(0); i < count; i++ {
@@ -343,7 +357,7 @@ func decodeAnyArray(buf []byte, strs stringMode, t *orderTable, depth int) (any,
 		if err != nil {
 			return nil, nil, buf, wrapAnyErr(depth, err, "decode Any array element %d", i)
 		}
-		arr[i] = el
+		arr = append(arr, el)
 		if sub != nil {
 			if subs == nil {
 				subs = small[:0]
@@ -375,7 +389,7 @@ func decodeAnyObject(buf []byte, strs stringMode, depth int) (any, *block.KeyOrd
 	if err := checkDecodeCount(count, len(buf)); err != nil {
 		return nil, nil, buf, err
 	}
-	m := make(map[string]any, count)
+	m := make(map[string]any, preallocCount(count))
 	for i := uint64(0); i < count; i++ {
 		key, kn, err := strs.readString(buf)
 		if err != nil {
@@ -406,7 +420,7 @@ func decodeAnyObjectOrdered(buf []byte, strs stringMode, t *orderTable, depth in
 	if err := checkDecodeCount(count, len(buf)); err != nil {
 		return nil, nil, buf, err
 	}
-	m := make(map[string]any, count)
+	m := make(map[string]any, preallocCount(count))
 	// On the stack for an object of a few keys: arrays a struct of slices
 	// into its own fields would move to the heap.
 	var smallKeys [8]string

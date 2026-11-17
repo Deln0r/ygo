@@ -277,13 +277,27 @@ func (c *Content) TrySquash(other *Content) bool {
 	switch c.Kind {
 	case KindAny:
 		if c.Orders != nil || other.Orders != nil {
-			// A new list, never an append into one a split shares.
-			list := make([]*KeyOrder, 0, len(c.Anys)+len(other.Anys))
-			for i := range c.Anys {
-				list = append(list, c.Orders.Of(i))
+			// Appended in place, as Anys is, so a run of appends costs
+			// time in proportion to what is added; building a new list
+			// each time made 60,000 one-record appends take seconds and
+			// gigabytes. Only the store squashes, its own items. A list
+			// ends where its content's elements end, and room past that
+			// end belongs to no other content: the left half of a split
+			// is cut to its length (splitAny), a one-element Orders a
+			// decode shares has no room. The Orders itself can be
+			// shared, so it is a new one.
+			var list []*KeyOrder
+			if c.Orders != nil {
+				list = c.Orders.List
+			} else {
+				list = make([]*KeyOrder, len(c.Anys), len(c.Anys)+len(other.Anys))
 			}
-			for i := range other.Anys {
-				list = append(list, other.Orders.Of(i))
+			if other.Orders != nil {
+				list = append(list, other.Orders.List...)
+			} else {
+				for range other.Anys {
+					list = append(list, nil)
+				}
 			}
 			c.Orders = &Orders{List: list}
 		}

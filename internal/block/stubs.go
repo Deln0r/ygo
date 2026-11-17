@@ -83,6 +83,11 @@ type Branch struct {
 	// Used by encoders that need to emit the parent type name.
 	Name string
 
+	// Root is set on a document's root types, whose Name can be the
+	// empty string, as yjs allows (doc.getMap("")). An empty Name alone
+	// does not say a branch is a root.
+	Root bool
+
 	// TypeRef discriminates the kind of shared type this Branch
 	// represents (Map, Array, Text, Xml*, etc.). Set on construction
 	// by the types layer; consumed by the ContentType encoder and by

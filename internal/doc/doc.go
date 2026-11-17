@@ -98,6 +98,10 @@ type Doc struct {
 	// TransactionMut).
 	pendingState any
 
+	// orders shares the key orders of the document's contents across
+	// updates (block.OrderSet); used under the write lock.
+	orders block.OrderSet
+
 	// handlersMu guards the handler lists below, which Commit runs in
 	// registration order before the write lock is released. It is not
 	// the doc lock: Commit calls the handlers with the doc lock held,
@@ -529,7 +533,7 @@ func (d *Doc) Branch(name string) *block.Branch {
 	if b, ok := d.rootBranches[name]; ok {
 		return b
 	}
-	b := &block.Branch{Name: name, Map: map[string]*block.Item{}}
+	b := &block.Branch{Name: name, Root: true, Map: map[string]*block.Item{}}
 	d.rootBranches[name] = b
 	return b
 }
@@ -545,7 +549,7 @@ func (d *Doc) WithRoot(name string, fn func(*block.Branch)) {
 	defer d.mu.Unlock()
 	b, ok := d.rootBranches[name]
 	if !ok {
-		b = &block.Branch{Name: name, Map: map[string]*block.Item{}}
+		b = &block.Branch{Name: name, Root: true, Map: map[string]*block.Item{}}
 		d.rootBranches[name] = b
 	}
 	fn(b)

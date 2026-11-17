@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -274,5 +275,127 @@ func TestKeyOrder_ConcurrentDecodes(t *testing.T) {
 	close(errs)
 	for e := range errs {
 		t.Error(e)
+	}
+}
+
+// appendUpdates returns n updates, each appending one record
+// {b: [{y, x}], a} to the Array "a", as a JavaScript client pushing one
+// record per transaction sends them.
+func appendUpdates(t *testing.T, n int) [][]byte {
+	t.Helper()
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 1})
+	a := ygo.NewArray(d, "a")
+	out := make([][]byte, 0, n)
+	for range n {
+		sv := ygo.EncodeStateVector(d)
+		txn := d.WriteTxn()
+		a.Push(txn, map[string]any{"p": int64(0x12345678)})
+		txn.Commit()
+		u, err := ygo.EncodeDiff(d, sv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, bytes.ReplaceAll(u, placeholderAny, recordAny))
+	}
+	return out
+}
+
+// TestKeyOrder_AppendsStayLinear: applying records appended one per
+// update, each merged into the item before it, allocates in proportion
+// to the records. Each merge used to copy the orders of the whole item,
+// so 60,000 appends allocated 14 GB where 1.40.0 allocated 170 MB.
+func TestKeyOrder_AppendsStayLinear(t *testing.T) {
+	cost := func(n int) uint64 {
+		updates := appendUpdates(t, n)
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		d := ygo.NewDoc()
+		for _, u := range updates {
+			if err := ygo.ApplyUpdate(d, u); err != nil {
+				t.Fatal(err)
+			}
+		}
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	small, large := cost(1000), cost(4000)
+	// Linear is a ratio of about 4; copying the whole item each time
+	// made it about 16.
+	if ratio := float64(large) / float64(small); ratio > 6 {
+		t.Errorf("4000 appends allocated %.1f times what 1000 did (%d vs %d bytes)", ratio, large, small)
+	}
+}
+
+// TestKeyOrder_SharedAcrossUpdatesOfOneDocument: records of one shape
+// that arrive one update each, appended to an Array or set as Map values,
+// share one order in the document that applied them, as records decoded
+// from one update do; another document keeps orders of its own. Each
+// record held its own order before, a third more memory per record than
+// 1.40.0 for a document built from live edits.
+func TestKeyOrder_SharedAcrossUpdatesOfOneDocument(t *testing.T) {
+	apply := func() (*ygo.Doc, *ygo.Array, *ygo.Map) {
+		d := ygo.NewDoc()
+		a, m := ygo.NewArray(d, "a"), ygo.NewMap(d, "m")
+		for _, u := range appendUpdates(t, 50) {
+			if err := ygo.ApplyUpdate(d, u); err != nil {
+				t.Fatal(err)
+			}
+		}
+		src := ygo.NewDocWithOptions(ygo.Options{ClientID: 2})
+		sm := ygo.NewMap(src, "m")
+		for i := range 50 {
+			sv := ygo.EncodeStateVector(src)
+			txn := src.WriteTxn()
+			sm.Set(txn, string(rune('A'+i)), map[string]any{"p": int64(0x12345678)})
+			txn.Commit()
+			u, err := ygo.EncodeDiff(src, sv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ygo.ApplyUpdate(d, bytes.ReplaceAll(u, placeholderAny, recordAny)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return d, a, m
+	}
+	d, a, m := apply()
+	var shared *block.KeyOrder
+	var single *block.Orders
+	n := 0
+	check := func(c block.Content) {
+		for i := range c.Anys {
+			o := c.Orders.Of(i)
+			if o == nil {
+				t.Fatal("record without an order")
+			}
+			if shared == nil {
+				shared = o
+			} else if o != shared {
+				t.Errorf("records of one shape hold different orders")
+			}
+			n++
+		}
+	}
+	for it := a.Branch().Start; it != nil; it = it.Right {
+		check(it.Content)
+	}
+	for _, it := range m.Branch().Map {
+		check(it.Content)
+		if single == nil {
+			single = it.Content.Orders
+		} else if it.Content.Orders != single {
+			t.Errorf("Map values of one shape hold different Orders")
+		}
+	}
+	if n != 100 {
+		t.Fatalf("%d records, want 100", n)
+	}
+	if got := hex.EncodeToString(ygo.EncodeStateAsUpdate(d)); len(got) == 0 {
+		t.Fatal("empty state")
+	}
+	_, a2, _ := apply()
+	if o := a2.Branch().Start.Content.Orders.Of(0); o == shared {
+		t.Error("two documents share an order")
 	}
 }

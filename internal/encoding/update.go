@@ -203,8 +203,8 @@ func encodeItem(buf []byte, it *block.Item) []byte {
 				// Nested branch — emit as parent-by-ID.
 				buf = append(buf, 0x00) // parent_info: false
 				buf = encodeID(buf, b.Item.ID)
-			} else if b.Name != "" {
-				// Root branch — emit by name.
+			} else if b.Root || b.Name != "" {
+				// Root branch — emit by name, which can be empty.
 				buf = append(buf, 0x01) // parent_info: true
 				buf = lib0.WriteVarString(buf, b.Name)
 			} else {
@@ -521,6 +521,15 @@ func decodeID(buf []byte) (block.ID, []byte, error) {
 // Mirrors yrs Update::integrate (update.rs:234-301) plus the
 // pending-buffer retry loop yrs runs in `Store::try_integrate_pending`.
 func (u *Update) Apply(txn *doc.TransactionMut) error {
+	// Objects of one shape in updates of their own share one order.
+	orders := txn.OrderSet()
+	for _, blocks := range u.Blocks {
+		for _, b := range blocks {
+			if b.Kind == WireBlockItem && b.Item != nil && b.Item.Content.Orders != nil {
+				b.Item.Content.Orders = orders.Orders(b.Item.Content.Orders)
+			}
+		}
+	}
 	p := getOrCreatePending(txn)
 	bs := txn.Store()
 	// The order of yjs readUpdateV2: the update's own blocks first, by

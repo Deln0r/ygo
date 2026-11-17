@@ -54,6 +54,12 @@ func TestOrderTable(t *testing.T) {
 	if tab.single(a) != s || s.Of(0) != a || tab.single(nil) != nil {
 		t.Error("one-element Orders not shared")
 	}
+	if sb := tab.single(b); sb == s || sb.Of(0) != b {
+		t.Errorf("Orders of another order: %v", sb.List)
+	}
+	if tab.single(a) != s {
+		t.Error("one-element Orders not found again after another one")
+	}
 
 	var fresh orderTable
 	if fresh.object([]string{"y", "x"}, nil, false) == inner1 {

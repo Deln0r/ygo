@@ -107,6 +107,22 @@ function grown(name, before, after) {
 }
 grown("array grown in two transactions: plain values, then objects", [1, 2], [{ d: 1, c: 2 }, 3]);
 grown("array grown in two transactions: objects, then plain values", [{ b: 1, a: 2 }, 1], [2, 3]);
+// Three transactions: the plain values in the middle must keep their
+// places in the merged item, or the third's orders land on them.
+{
+  const d = new Y.Doc();
+  d.clientID = 1;
+  const a = d.getArray("a");
+  const parts = [[{ b: 1, a: 2 }], [1, 2], [{ d: 1, c: 2 }]];
+  const updates = [];
+  let sv = null;
+  for (const p of parts) {
+    a.insert(a.length, p);
+    updates.push(sv === null ? Y.encodeStateAsUpdate(d) : Y.encodeStateAsUpdate(d, sv));
+    sv = Y.encodeStateVector(d);
+  }
+  push("array grown in three transactions: objects, plain values, objects", updates, d);
+}
 
 // A second client restores a format value around new content: the marker
 // that restores it must write the value as the first client did.

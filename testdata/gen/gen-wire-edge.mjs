@@ -9,6 +9,7 @@
 //      clientID from 32 to 53 bits. ygo already uses uint64 + varint
 //      throughout; this locks that in against regression and proves
 //      forward-compatibility with the v14 clientID space.
+//   3. a root type named the empty string.
 //
 // The Go test (wire_edge_fixture_test.go) applies each update to a
 // fresh doc and re-encodes it byte-identically.
@@ -87,6 +88,21 @@ scenarios.push({
 
     Y.applyUpdate(d1, Y.encodeStateAsUpdate(d2));
     return d1;
+  },
+});
+
+// 4. A root type named the empty string, which yjs allows: ygo applied
+// it and then panicked writing the document, since an empty name was
+// its mark of a type that is not a root.
+scenarios.push({
+  description: "root type named the empty string",
+  root_name: "",
+  root_kind: "map",
+  build() {
+    const d = new Y.Doc();
+    d.clientID = 48;
+    d.getMap("").set("0", "v");
+    return d;
   },
 });
 

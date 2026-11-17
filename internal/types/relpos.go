@@ -113,10 +113,7 @@ func anchorOnly(br *block.Branch, assoc int64) (RelativePosition, error) {
 	case br.Item != nil:
 		id := br.Item.ID
 		return RelativePosition{Type: &id, Assoc: assoc}, nil
-	case br.Name != "":
-		// Branch.Name's zero value doubles as the "not a root" sentinel,
-		// so a root type actually NAMED "" cannot be anchored from the
-		// creation side (decode/resolve of such anchors works fine).
+	case br.Root || br.Name != "":
 		name := br.Name
 		return RelativePosition{TName: &name, Assoc: assoc}, nil
 	default:

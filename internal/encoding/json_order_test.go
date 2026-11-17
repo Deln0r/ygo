@@ -205,6 +205,30 @@ func TestJSONOrder_NoAllocationInFallbackOrder(t *testing.T) {
 	}
 }
 
+// TestJSONOrder_LargeObjectsInOrder: an object of many keys in the
+// fallback order allocates only to hold its keys, and builds no map of
+// their positions; it built one for every object past 16 keys.
+func TestJSONOrder_LargeObjectsInOrder(t *testing.T) {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i := range 200 {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `"k%03d":%d`, i, i)
+	}
+	b.WriteByte('}')
+	text := b.String()
+	var tab orderTable
+	if o := jsonOrder(text, &tab); o != nil {
+		t.Fatalf("order %s, want none", orderString(o))
+	}
+	// The keys slice grows from 8 to 256: 5 allocations.
+	if n := testing.AllocsPerRun(20, func() { jsonOrder(text, &tab) }); n > 5 {
+		t.Errorf("%v allocations for 200 keys in order", n)
+	}
+}
+
 // TestJSONOrder_KeysDoNotPinTheText: the keys of an order read from JSON
 // text are copies, so a stored order does not keep the whole text alive.
 func TestJSONOrder_KeysDoNotPinTheText(t *testing.T) {

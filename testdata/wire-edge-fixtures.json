@@ -31,6 +31,15 @@
         "x",
         "y"
       ]
+    },
+    {
+      "description": "root type named the empty string",
+      "root_name": "",
+      "root_kind": "map",
+      "update_hex": "0101300028010001300177017600",
+      "expected_map": {
+        "0": "v"
+      }
     }
   ]
 }

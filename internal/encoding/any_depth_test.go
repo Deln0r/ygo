@@ -3,6 +3,7 @@ package encoding
 import (
 	"bytes"
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/Deln0r/ygo/internal/anyval"
@@ -64,5 +65,43 @@ func TestDecodeAny_DeepRefusalIsCheap(t *testing.T) {
 	// One []any per level read, and the few wraps of the outer levels.
 	if allocs > anyval.MaxNesting+20 {
 		t.Errorf("%v allocations to refuse %d bytes", allocs, len(buf))
+	}
+}
+
+// TestDecodeAny_ClaimedCountsMakeNoRoom: nested containers that each claim
+// as many elements as there are bytes left are refused without making
+// room for those counts first. Each used to make room for the count it
+// claimed: a 112 KB update of 9000 nested arrays allocated 2.8 GB.
+func TestDecodeAny_ClaimedCountsMakeNoRoom(t *testing.T) {
+	for _, tag := range []byte{AnyTagArray, AnyTagObject} {
+		const depth = 9000
+		// Each level: tag, a 3-byte varuint count, and for an object a
+		// one-byte key. The count claims everything after it.
+		per := 4
+		if tag == AnyTagObject {
+			per = 6
+		}
+		total := depth * per
+		buf := make([]byte, 0, total)
+		for i := range depth {
+			left := uint64(total - (i+1)*per + per - 4)
+			buf = append(buf, tag)
+			buf = append(buf, byte(left&0x7f|0x80), byte(left>>7&0x7f|0x80), byte(left>>14&0x7f))
+			if tag == AnyTagObject {
+				buf = append(buf, 1, 'k')
+			}
+		}
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		var tab orderTable
+		_, _, _, err := decodeAnyOrdered(buf, strictStrings, &tab, 0)
+		runtime.ReadMemStats(&after)
+		if err == nil {
+			t.Fatalf("tag %d: a truncated value decoded", tag)
+		}
+		if got := after.TotalAlloc - before.TotalAlloc; got > 64<<20 {
+			t.Errorf("tag %d: %d MB allocated to refuse %d KB", tag, got>>20, len(buf)>>10)
+		}
 	}
 }

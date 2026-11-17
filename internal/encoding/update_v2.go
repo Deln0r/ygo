@@ -132,7 +132,7 @@ func encodeItemV2(enc *EncoderV2, it *block.Item) {
 			if b.Item != nil {
 				enc.WriteParentInfo(false)
 				enc.WriteLeftID(b.Item.ID)
-			} else if b.Name != "" {
+			} else if b.Root || b.Name != "" {
 				enc.WriteParentInfo(true)
 				enc.WriteString(b.Name)
 			} else {

@@ -883,7 +883,7 @@ func (t *TransactionMut) GetOrCreateBranch(name string) *block.Branch {
 	if b, ok := t.doc.rootBranches[name]; ok {
 		return b
 	}
-	b := &block.Branch{Name: name, Map: map[string]*block.Item{}}
+	b := &block.Branch{Name: name, Root: true, Map: map[string]*block.Item{}}
 	t.doc.rootBranches[name] = b
 	return b
 }
@@ -923,6 +923,9 @@ func (t *TransactionMut) PendingState() any { return t.doc.pendingState }
 // queue drains to empty and the encoding layer wants to release
 // the allocation).
 func (t *TransactionMut) SetPendingState(s any) { t.doc.pendingState = s }
+
+// OrderSet returns the document's set of key orders (block.OrderSet).
+func (t *TransactionMut) OrderSet() *block.OrderSet { return &t.doc.orders }
 
 // Compile-time check that TransactionMut satisfies the
 // block.IntegrateContext interface. If this line stops compiling,
