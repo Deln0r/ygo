@@ -2,8 +2,10 @@ package ygo_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 	"testing"
@@ -427,4 +429,66 @@ func shapesKept(d *ygo.Doc) int {
 	txn := d.WriteTxn()
 	defer txn.Commit()
 	return txn.OrderSet().Len()
+}
+
+// unsortedObjectAny returns the Any bytes of an object of n keys, each
+// distinct to tag, in descending order, as a peer could write it.
+func unsortedObjectAny(tag, n int) []byte {
+	b := []byte{encoding.AnyTagObject}
+	b = binary.AppendUvarint(b, uint64(n))
+	for i := n - 1; i >= 0; i-- {
+		k := fmt.Sprintf("u%d-%05d", tag, i)
+		b = binary.AppendUvarint(b, uint64(len(k)))
+		b = append(b, k...)
+		b = append(b, encoding.AnyTagInteger, 1)
+	}
+	return b
+}
+
+// TestKeyOrder_DeletedValuesLeaveNothingHeld: a Map value set again and
+// again to a large object, one update each, then to a number, leaves the
+// document holding about what the number needs once the objects are
+// collected. The document's set of orders kept every shape, 2.7 times the
+// bytes the objects took on the wire.
+func TestKeyOrder_DeletedValuesLeaveNothingHeld(t *testing.T) {
+	src := ygo.NewDocWithOptions(ygo.Options{ClientID: 3})
+	sm := ygo.NewMap(src, "m")
+	var updates [][]byte
+	for i := range 100 {
+		sv := ygo.EncodeStateVector(src)
+		txn := src.WriteTxn()
+		sm.Set(txn, "k", map[string]any{"p": int64(0x12345678)})
+		txn.Commit()
+		u, err := ygo.EncodeDiff(src, sv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updates = append(updates, bytes.ReplaceAll(u, placeholderAny, unsortedObjectAny(i, 5000)))
+	}
+	sv := ygo.EncodeStateVector(src)
+	txn := src.WriteTxn()
+	sm.Set(txn, "k", int64(1))
+	txn.Commit()
+	last, err := ygo.EncodeDiff(src, sv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates = append(updates, last)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	d := ygo.NewDoc()
+	for _, u := range updates {
+		if err := ygo.ApplyUpdate(d, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updates = nil
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	if got := int64(after.HeapAlloc) - int64(before.HeapAlloc); got > 4<<20 {
+		t.Errorf("the document holds %d MB after its large values were deleted", got>>20)
+	}
+	runtime.KeepAlive(d)
 }

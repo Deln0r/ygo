@@ -32,7 +32,7 @@ file.
 
 ### Changed
 
-- **Reading objects whose keys are not in sorted order costs more, and writing them less.** On documents from yjs 13.6.33 holding 5,000 records of six keys (the minimum of 7 runs alternating with 1.40.0): applying one whose records are Map values takes 12 to 13% longer; records holding an array of objects and an object, 17%; the records as one Array item, 25%; each with 1.40.0's allocations. Writing such a document takes a quarter to 40% less time, one allocation fewer per object, since the keys are no longer sorted. Records whose keys are already sorted apply 4 to 5% slower and are written as before; a text with 500 links applies 2 to 8% slower. Records appended one update each, as live edits arrive, allocate 15% more. A document holds as much memory as in 1.40.0, within 2%: objects of one shape share one order, those decoded from one update and those that arrive in updates of their own, as live edits do (up to 4,096 shapes per document). 5,000 records each of a shape of its own hold about a fifth more.
+- **Reading objects whose keys are not in sorted order costs more, and writing them less.** On documents from yjs 13.6.33 holding 5,000 records of six keys (the minimum of 7 runs alternating with 1.40.0): applying one whose records are Map values takes 12 to 13% longer; records holding an array of objects and an object, 17%; the records as one Array item, 25%; each with 1.40.0's allocations. Writing such a document takes a quarter to 40% less time, one allocation fewer per object, since the keys are no longer sorted. Records whose keys are already sorted apply 4 to 5% slower and are written as before; a text with 500 links applies 2 to 8% slower. Records appended one update each, as live edits arrive, allocate 15% more. A document holds as much memory as in 1.40.0, within 3%: objects of one shape share one order, those decoded from one update and those that arrive in updates of their own, as live edits do. For the second, the document keeps at most 4,096 shapes and about 1 MiB of them, none of more than 512 bytes of keys, and nothing it keeps outgrows that, whatever a peer sends. Records each of a shape of its own hold a fifth more as Map values, two fifths more as one Array item.
 
 ### Tests
 
@@ -41,7 +41,8 @@ file.
 - Records of one shape share one order, decoded from one update and applied one update each, V1 and V2; two documents share none; a large update leaves no shapes behind in the document; objects whose keys are already in order get none. Records appended one update each allocate in proportion to their number.
 - Nesting: 10000 levels apply and come back unchanged, 10001 and a million are refused, V1 and V2; nested containers that claim more elements than they hold are refused with no room made for them.
 - A wire-edge fixture from yjs 13.6.33: a root type named the empty string, written back byte for byte in V1 and V2, with a relative position on it.
-- 56 controls, each failing these tests.
+- Large values set again and again, one update each, then deleted leave the document holding nothing for them; the document's set of shapes stays within its bounds whatever it is given, and an order it cannot keep is used as it came.
+- 59 controls, each failing these tests.
 
 ## [1.40.0] - 2026-11-13
 
