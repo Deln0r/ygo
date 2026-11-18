@@ -382,10 +382,11 @@ type stackEntry struct {
 // waiting block and comes back for it is not.
 //
 // The checks run in yjs's order, on the block as decoded: the hole
-// (offset < 0), then the missing reference, then, for a block the store
-// does not wholly have, whether what it hangs off was collected, then the
-// cut of the known prefix. A wholly known block is not integrated, but a
-// missing reference still walls its client, as in yjs.
+// (offset < 0), then the missing reference, then the cuts at its
+// references (cutAtRefs), then, for a block the store does not wholly
+// have, whether what it hangs off was collected, then the cut of the known
+// prefix. A wholly known block is not integrated, but a missing reference
+// still walls its client, and its references still cut, as in yjs.
 func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint64][]Block, map[uint64]uint64) {
 	bs := txn.Store()
 	rest := map[uint64][]Block{}
@@ -490,9 +491,19 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 				// It waits on an update that has not come yet.
 				updateMissing(m, bs.GetClock(m))
 				wall()
-			} else if start+blockLen(b) > state {
-				if !integrateBlock(txn, b, state-start) {
-					rest[head.client] = append(rest[head.client], b)
+			} else {
+				if state > start {
+					// Known in part or whole: the cuts the block's own
+					// references make are not the ones integrating what is
+					// left of it makes (integrateBlock repairs a block
+					// that starts where the store ends with the same
+					// references, so it needs none here).
+					cutAtRefs(txn, b)
+				}
+				if start+blockLen(b) > state {
+					if !integrateBlock(txn, b, state-start) {
+						rest[head.client] = append(rest[head.client], b)
+					}
 				}
 			}
 		}
@@ -512,6 +523,27 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 		}
 	}
 	return rest, missing
+}
+
+// cutAtRefs cuts the items b's origin and right origin, as decoded, point
+// into, so that the origin ends an item and the right origin starts one,
+// as yjs Item.getMissing does (getItemCleanEnd, getItemCleanStart) for
+// every block whose references are all there, before deciding whether to
+// integrate it. A block the store already has, an update delivered twice,
+// still cuts. The pieces are merged back at commit, as yjs merges
+// _mergeStructs, but not those an undo brought back (Item.Redone), so
+// skipping the cut left ygo with one item where yjs holds two: the bytes
+// differed from yjs's after an undo and a repeated update.
+func cutAtRefs(txn *doc.TransactionMut, b Block) {
+	if b.Kind != WireBlockItem || b.Item == nil {
+		return
+	}
+	if r := b.Item.Origin; r != nil {
+		txn.MaterializeCleanEnd(*r)
+	}
+	if r := b.Item.RightOrigin; r != nil {
+		txn.MaterializeCleanStart(*r)
+	}
 }
 
 // integrateBlock integrates b, of which the store already has the first

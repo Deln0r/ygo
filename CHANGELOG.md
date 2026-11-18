@@ -14,6 +14,17 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [Unreleased]
+
+### Fixed
+
+- **An update delivered twice after an undo left ygo's bytes different from yjs's.** Reading an update, yjs cuts the items its blocks' origins point into (`Item.getMissing`), also for a block it already has; the pieces merge back at the end of the transaction, except those an undo brought back. ygo made no cut for a block it already had, so after a delete, its undo and a repeated update (a provider resending after a reconnect does this) it held one item where yjs holds two, and every state it wrote from then on differed from yjs's, V1 and V2. The content read the same. In random traces of a receiver with an UndoManager among three clients, about 1,200 runs on six seeds, every run that diverged at a step now matches yjs at every step.
+
+### Tests
+
+- New fixtures from yjs 13.6.33 (`testdata/undo-wire-fixtures.json`, `testdata/gen/gen-undo-wire.mjs`, in CI): 6 sequences of a receiver with an UndoManager that deletes, undoes and redoes around a peer's updates, in an array and in text, with updates delivered twice. ygo replays the receiver's steps and writes yjs's bytes after every step, V1 and V2. 5 of them fail on 1.41.0; the sixth repeats an update whose block cuts nothing.
+- 3 controls, each failing these tests.
+
 ## [1.41.0] - 2026-11-17
 
 **Upgrade impact**:
