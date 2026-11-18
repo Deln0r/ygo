@@ -130,5 +130,38 @@ scenario("array: an update delivered twice after an insert, a delete and its und
     ["01010100" + "c8" + "0101" + "0103" + "017d01" + "00"], [{ t: "up", i: 0 }, { t: "up", i: 1 }, { t: "del", i: 1, n: 1 }, { t: "up", i: 1 }]);
 }
 
+// Cuts that split a surrogate pair change the text for good: yjs makes
+// both halves U+FFFD (ContentString.splice), and the pieces merge back
+// like that. No undo is involved.
+{
+  const src = new Y.Doc();
+  src.clientID = 1;
+  src.getText("r").insert(0, "a\u{1F600}b");
+  const base = Y.encodeStateAsUpdate(src);
+  const text = (name, updates, steps) => scenario(`surrogates: ${name}`, "text", [base, ...updates.map(fromHex)], steps);
+  text("a known block whose origin is the high surrogate", ["01010103" + "84" + "0101" + "0162" + "00"], [{ t: "up", i: 0 }, { t: "up", i: 1 }]);
+  text("a known block whose right origin is the low surrogate", ["01010103" + "44" + "0102" + "0162" + "00"], [{ t: "up", i: 0 }, { t: "up", i: 1 }]);
+  text("a block hanging off a GC run, its right origin the low surrogate",
+    ["0102020000" + "01" + "c4" + "0200" + "0102" + "0178" + "00"], [{ t: "up", i: 0 }, { t: "up", i: 1 }]);
+  // A peer types the pair in two inserts; the receiver takes its full
+  // state, then the second update again.
+  const p = new Y.Doc();
+  p.clientID = 3;
+  const ups = [];
+  p.on("update", (u) => ups.push(u));
+  p.getText("r").insert(0, "a\uD83D");
+  p.getText("r").insert(2, "\uDE00b");
+  scenario("surrogates: a pair typed in two inserts, the full state, then the second insert again", "text",
+    [Y.encodeStateAsUpdate(p), ups[1]], [{ t: "up", i: 0 }, { t: "up", i: 1 }]);
+}
+// A block known in part whose right origin lies inside the item that
+// holds its last known clock: the cuts at its references come before its
+// left is taken from that clock.
+{
+  const base = fromHex("02010200880103027d047d05010100080103617272047d007d017d027d0300");
+  scenario("crafted: a block known in part, its right origin inside the item holding its last known clock", "array",
+    [base, fromHex("01010102480101037d0a7d0b7d0c00")], [{ t: "up", i: 0 }, { t: "up", i: 1 }]);
+}
+
 writeFileSync(outPath, JSON.stringify({ generator: "gen-undo-wire.mjs (yjs 13.6.33)", scenarios }, null, 2) + "\n");
 console.log(`wrote ${scenarios.length} scenarios to ${outPath}`);

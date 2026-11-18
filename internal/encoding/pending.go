@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -406,6 +407,7 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 	next := map[uint64]int{}
 	walled := map[uint64]bool{}
 	var stack []stackEntry
+	var astral map[*block.Item][]uint64 // lastingCut's, for this update
 
 	updateMissing := func(client, clock uint64) {
 		if m, ok := missing[client]; !ok || clock < m {
@@ -497,8 +499,10 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 					// references make are not the ones integrating what is
 					// left of it makes (integrateBlock repairs a block
 					// that starts where the store ends with the same
-					// references, so it needs none here).
-					cutAtRefs(txn, b)
+					// references, so it needs none here). A block known in
+					// part, at most one per client in an update, makes all
+					// of them: they come before what it hangs its left on.
+					cutAtRefs(txn, b, state < start+blockLen(b), &astral)
 				}
 				if start+blockLen(b) > state {
 					if !integrateBlock(txn, b, state-start) {
@@ -533,29 +537,88 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 // integrates as GC. Integrating any other block makes the same cuts
 // itself (block.Repair).
 //
-// yjs merges the pieces back at commit (_mergeStructs), and they stay
-// apart only where an undo brought the item back (Item.Redone), since
-// mergeWith refuses those; a block that integrates between two pieces
-// cuts there for itself. So only an item an undo brought back is cut
-// here: the other cuts would come undone, and making them cost time in
-// proportion to the item for each one (an update of known one-character
-// blocks with origins inside one long text took seconds). Skipping the cut
-// left ygo with one item where yjs holds two, and the bytes differed from
-// yjs's after an undo and a repeated update.
-func cutAtRefs(txn *doc.TransactionMut, b Block) {
+// yjs merges the pieces back at commit (_mergeStructs), and a block that
+// integrates between two pieces cuts there for itself. With all, every
+// cut is made; otherwise only those that leave a trace (lastingCut), since
+// making each cut costs time in proportion to the item: an update of
+// known one-character blocks with origins inside one long text took
+// seconds. Making no cut left ygo with one item where yjs holds two, and
+// the bytes differed from yjs's after an undo and a repeated update.
+// astral is the caller's memo for lastingCut, made here when needed.
+func cutAtRefs(txn *doc.TransactionMut, b Block, all bool, astral *map[*block.Item][]uint64) {
 	if b.Kind != WireBlockItem || b.Item == nil {
 		return
 	}
 	if r := b.Item.Origin; r != nil {
-		if it := txn.GetItem(*r); it != nil && it.Redone != nil {
+		if it := txn.GetItem(*r); it != nil && (all || lastingCut(it, r.Clock-it.ID.Clock+1, astral)) {
 			txn.MaterializeCleanEnd(*r)
 		}
 	}
 	if r := b.Item.RightOrigin; r != nil {
-		if it := txn.GetItem(*r); it != nil && it.Redone != nil {
+		if it := txn.GetItem(*r); it != nil && (all || lastingCut(it, r.Clock-it.ID.Clock, astral)) {
 			txn.MaterializeCleanStart(*r)
 		}
 	}
+}
+
+// lastingCut reports whether cutting it offset clocks in leaves a trace
+// once commit merges the pieces back: an undo brought it back
+// (Item.Redone), whose pieces never merge, or the cut falls between the
+// two halves of a surrogate pair in its string, which yjs turns into two
+// U+FFFD for good (ContentString.splice). The pairs of a string are found
+// once per item and kept in *astral, so each check costs a search.
+func lastingCut(it *block.Item, offset uint64, astral *map[*block.Item][]uint64) bool {
+	if offset == 0 || offset >= it.Len {
+		return false // at an end: nothing to cut
+	}
+	if it.Redone != nil {
+		return true
+	}
+	if it.Content.Kind != block.KindString {
+		return false
+	}
+	var pairs []uint64
+	cached := false
+	if astral != nil {
+		pairs, cached = (*astral)[it]
+	}
+	if !cached {
+		pairs = surrogatePairs(it.Content.Str)
+		if astral != nil {
+			if *astral == nil {
+				*astral = map[*block.Item][]uint64{}
+			}
+			(*astral)[it] = pairs
+		}
+	}
+	// A cut offset units in splits the pair whose high half is at
+	// offset-1.
+	_, found := slices.BinarySearch(pairs, offset-1)
+	return found
+}
+
+// surrogatePairs returns the UTF-16 offsets, ascending, of the high halves
+// of the surrogate pairs s holds as JavaScript holds it: one for each
+// character outside the Basic Multilingual Plane. nil when there is none.
+func surrogatePairs(s string) []uint64 {
+	var pairs []uint64
+	u := uint64(0)
+	for i := 0; i < len(s); {
+		if s[i] < utf8.RuneSelf {
+			i++
+			u++
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(s[i:])
+		i += n
+		if r > 0xFFFF {
+			pairs = append(pairs, u)
+			u += 2
+		} else {
+			u++
+		}
+	}
+	return pairs
 }
 
 // integrateBlock integrates b, of which the store already has the first
@@ -584,7 +647,7 @@ func integrateBlock(txn *doc.TransactionMut, b Block, offset uint64) bool {
 		}
 		if collected {
 			if offset == 0 {
-				cutAtRefs(txn, b) // a known part cut in integrateStack
+				cutAtRefs(txn, b, false, nil) // a known part cut in integrateStack
 			}
 			// What the item hangs off was garbage-collected: it
 			// integrates as a GC run of its length, so the client's clock

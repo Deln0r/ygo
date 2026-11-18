@@ -127,20 +127,35 @@ func replayUndoWire(t *testing.T, s undoWireScenario, format string) {
 
 // TestUndoWire_KnownBlocksStayLinear: an update of known one-character
 // blocks whose origins point inside one long text item, none of it
-// brought back by an undo, costs in proportion to its blocks. Cutting at
-// each one and merging the pieces back, as yjs does, took 17 seconds for
-// an update of 543 KB; the cuts come undone, so ygo does not make them.
+// brought back by an undo, costs in proportion to its blocks, also when
+// the text holds a character outside the Basic Multilingual Plane. Cutting
+// at each one and merging the pieces back, as yjs does, took 17 seconds
+// for an update of 543 KB; the cuts come undone, so ygo makes only those
+// that split a surrogate pair.
 func TestUndoWire_KnownBlocksStayLinear(t *testing.T) {
-	cost := func(n int) uint64 {
+	for _, prefix := range []string{"", "\U0001F600"} {
+		cost := knownBlocksCost(t, prefix)
+		small, large := cost(2000), cost(8000)
+		// Linear is a ratio of about 4; cutting and merging back made it 16.
+		if ratio := float64(large) / float64(small); ratio > 6 {
+			t.Errorf("text %q...: 8000 known blocks allocated %.1f times what 2000 did (%d vs %d bytes)", prefix, ratio, large, small)
+		}
+	}
+}
+
+// knownBlocksCost returns what applying n known one-character blocks,
+// their origins inside a text of prefix and n characters, allocates.
+func knownBlocksCost(t *testing.T, prefix string) func(n int) uint64 {
+	return func(n int) uint64 {
 		src := ygo.NewDocWithOptions(ygo.Options{ClientID: 1})
 		x := ygo.NewText(src, "t")
 		txn := src.WriteTxn()
-		if err := x.Insert(txn, 0, strings.Repeat("x", n)); err != nil {
+		if err := x.Insert(txn, 0, prefix+strings.Repeat("x", n)); err != nil {
 			t.Fatal(err)
 		}
 		txn.Commit()
 		// n blocks 1:i, one character each, origin 1:(n-1-i), as known
-		// as the text they repeat.
+		// as the text they repeat (their own content does not matter).
 		u := []byte{1}
 		u = binary.AppendUvarint(u, uint64(n))
 		u = append(u, 1, 0)
@@ -163,10 +178,5 @@ func TestUndoWire_KnownBlocksStayLinear(t *testing.T) {
 		}
 		runtime.ReadMemStats(&after)
 		return after.TotalAlloc - before.TotalAlloc
-	}
-	small, large := cost(2000), cost(8000)
-	// Linear is a ratio of about 4; cutting and merging back made it 16.
-	if ratio := float64(large) / float64(small); ratio > 6 {
-		t.Errorf("8000 known blocks allocated %.1f times what 2000 did (%d vs %d bytes)", ratio, large, small)
 	}
 }
