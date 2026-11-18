@@ -8,7 +8,14 @@
 //
 // Steps: {t: "up", i} applies updates[i] with origin "remote"; {t: "del",
 // i, n} and {t: "ins", i, v} edit the root locally; {t: "undo"} and
-// {t: "redo"} drive the UndoManager.
+// {t: "redo"} drive the UndoManager. Every scenario runs with garbage
+// collection on and off (gc), and the Go test delivers the updates as
+// written (V1) and as yjs converts them (updatesV2).
+//
+// "crafted" scenarios are updates written by hand, as another writer could
+// send them: blocks that hang off a garbage-collected run, a known block
+// whose right origin alone points inside an item an undo brought back, a
+// block the receiver knows in part.
 //
 // Run: node gen-undo-wire.mjs (after npm install in this directory).
 
@@ -37,7 +44,10 @@ function updatesOf(kind, edits) {
 
 const scenarios = [];
 function scenario(name, kind, updates, steps) {
-  const d = new Y.Doc();
+  for (const gc of [true, false]) scenarioGC(`${name} (gc ${gc ? "on" : "off"})`, kind, gc, updates, steps);
+}
+function scenarioGC(name, kind, gc, updates, steps) {
+  const d = new Y.Doc({ gc });
   d.clientID = 99;
   const root = kind === "text" ? d.getText("r") : d.getArray("r");
   const um = new Y.UndoManager(root, { captureTimeout: 1e12 });
@@ -53,8 +63,13 @@ function scenario(name, kind, updates, steps) {
     }
     states.push({ v1: toHex(Y.encodeStateAsUpdate(d)), v2: toHex(Y.encodeStateAsUpdateV2(d)) });
   }
-  scenarios.push({ name, kind, updates: updates.map(toHex), steps, states });
+  scenarios.push({
+    name, kind, gc, steps, states,
+    updates: updates.map(toHex),
+    updatesV2: updates.map((u) => toHex(Y.convertUpdateFormatV1ToV2(u))),
+  });
 }
+const fromHex = (h) => Uint8Array.from(h.replace(/ /g, "").match(/../g).map((x) => parseInt(x, 16)));
 
 // The peer appends two pieces; the receiver, which merged them into one
 // item, deletes them, undoes the delete, and gets the second piece again.
@@ -81,6 +96,39 @@ scenario("array: the first update delivered twice after a delete and its undo", 
 scenario("array: an update delivered twice after an insert, a delete and its undo", "array", pieces("array"), [
   { t: "up", i: 0 }, { t: "up", i: 1 }, { t: "ins", i: 4, v: "e" }, { t: "del", i: 1, n: 2 }, { t: "undo" }, { t: "up", i: 1 }, { t: "up", i: 0 },
 ]);
+
+// Crafted updates on an array "r" holding w, x, y, z from client 1
+// (1:0+4), which the receiver deletes and brings back with an undo, so
+// that item is marked as redone and its pieces do not merge again.
+{
+  const src = new Y.Doc();
+  src.clientID = 1;
+  src.getArray("r").insert(0, ["w", "x", "y", "z"]);
+  const base = Y.encodeStateAsUpdate(src);
+  const gcRun = "0102020000" + "01"; // client 2: a GC run 2:0+1, then one more block
+  const pre = [{ t: "up", i: 0 }, { t: "del", i: 0, n: 4 }, { t: "undo" }];
+  const crafted = (name, updates, steps) => scenario(`crafted: ${name}`, "array", [base, ...updates.map(fromHex)], steps);
+  // A new block 2:1 after the GC run: origin in the run, right origin
+  // inside the redone item; it integrates as GC, and still cuts.
+  crafted("a new block with its origin in a GC run and its right origin inside a redone item",
+    [gcRun + "c8" + "0200" + "0102" + "017d01" + "00"], [...pre, { t: "up", i: 1 }, { t: "up", i: 1 }]);
+  crafted("a new block with its origin inside a redone item and its right origin in a GC run",
+    [gcRun + "c8" + "0101" + "0200" + "017d01" + "00"], [...pre, { t: "up", i: 1 }, { t: "up", i: 1 }]);
+  crafted("the GC run and the block after it in two updates",
+    ["0101020000" + "01" + "00", "01010201" + "c8" + "0200" + "0102" + "017d01" + "00"], [...pre, { t: "up", i: 1 }, { t: "up", i: 2 }, { t: "up", i: 2 }]);
+  // Client 2 first inserts r at 0 (2:0); then a block 2:0+2 the receiver
+  // knows in part, origin and right origin inside the redone item.
+  crafted("a block known in part, its origin and right origin inside a redone item",
+    ["01010200" + "08" + "010172" + "017d01" + "00", "01010200" + "c8" + "0101" + "0103" + "027d017d02" + "00"],
+    [{ t: "up", i: 0 }, { t: "up", i: 1 }, { t: "del", i: 1, n: 4 }, { t: "undo" }, { t: "up", i: 2 }, { t: "up", i: 2 }]);
+  // A known block with only a right origin, inside the redone item.
+  crafted("a known block whose right origin alone is inside a redone item",
+    ["01010200" + "08" + "010172" + "017d01" + "00", "01010200" + "48" + "0102" + "017d01" + "00"],
+    [{ t: "up", i: 0 }, { t: "up", i: 1 }, { t: "del", i: 1, n: 4 }, { t: "undo" }, { t: "up", i: 2 }]);
+  // No undo: the cuts merge back.
+  crafted("a known block cutting an item no undo brought back",
+    ["01010100" + "c8" + "0101" + "0103" + "017d01" + "00"], [{ t: "up", i: 0 }, { t: "up", i: 1 }, { t: "del", i: 1, n: 1 }, { t: "up", i: 1 }]);
+}
 
 writeFileSync(outPath, JSON.stringify({ generator: "gen-undo-wire.mjs (yjs 13.6.33)", scenarios }, null, 2) + "\n");
 console.log(`wrote ${scenarios.length} scenarios to ${outPath}`);

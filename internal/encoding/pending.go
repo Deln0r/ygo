@@ -525,24 +525,36 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 	return rest, missing
 }
 
-// cutAtRefs cuts the items b's origin and right origin, as decoded, point
-// into, so that the origin ends an item and the right origin starts one,
-// as yjs Item.getMissing does (getItemCleanEnd, getItemCleanStart) for
-// every block whose references are all there, before deciding whether to
-// integrate it. A block the store already has, an update delivered twice,
-// still cuts. The pieces are merged back at commit, as yjs merges
-// _mergeStructs, but not those an undo brought back (Item.Redone), so
-// skipping the cut left ygo with one item where yjs holds two: the bytes
-// differed from yjs's after an undo and a repeated update.
+// cutAtRefs makes the cuts yjs Item.getMissing makes (getItemCleanEnd,
+// getItemCleanStart) at b's origin and right origin, as decoded, for a
+// block whose references are all there, before deciding whether to
+// integrate it: also for a block the store already has (an update
+// delivered twice) and for one that hangs off something collected, which
+// integrates as GC. Integrating any other block makes the same cuts
+// itself (block.Repair).
+//
+// yjs merges the pieces back at commit (_mergeStructs), and they stay
+// apart only where an undo brought the item back (Item.Redone), since
+// mergeWith refuses those; a block that integrates between two pieces
+// cuts there for itself. So only an item an undo brought back is cut
+// here: the other cuts would come undone, and making them cost time in
+// proportion to the item for each one (an update of known one-character
+// blocks with origins inside one long text took seconds). Skipping the cut
+// left ygo with one item where yjs holds two, and the bytes differed from
+// yjs's after an undo and a repeated update.
 func cutAtRefs(txn *doc.TransactionMut, b Block) {
 	if b.Kind != WireBlockItem || b.Item == nil {
 		return
 	}
 	if r := b.Item.Origin; r != nil {
-		txn.MaterializeCleanEnd(*r)
+		if it := txn.GetItem(*r); it != nil && it.Redone != nil {
+			txn.MaterializeCleanEnd(*r)
+		}
 	}
 	if r := b.Item.RightOrigin; r != nil {
-		txn.MaterializeCleanStart(*r)
+		if it := txn.GetItem(*r); it != nil && it.Redone != nil {
+			txn.MaterializeCleanStart(*r)
+		}
 	}
 }
 
@@ -571,6 +583,9 @@ func integrateBlock(txn *doc.TransactionMut, b Block, offset uint64) bool {
 			}
 		}
 		if collected {
+			if offset == 0 {
+				cutAtRefs(txn, b) // a known part cut in integrateStack
+			}
 			// What the item hangs off was garbage-collected: it
 			// integrates as a GC run of its length, so the client's clock
 			// moves on (yjs Item.getMissing sets the parent to null,
