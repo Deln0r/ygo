@@ -447,6 +447,8 @@ var ErrSnapshotGC = errors.New("ygo: RestoreSnapshot requires the source Doc to 
 // bytes are those of Y.encodeStateAsUpdate(doc, sv): the updates d's
 // pending buffer holds are appended from sv on, as yjs appends them,
 // and the delete set is the whole document's with the pending deletes.
+// Where waiting updates overlap each other, or leave adjacent GC runs
+// that yjs merges, the bytes can differ (docs/tech-debt.md).
 // For one transaction's changes alone, use Doc.OnUpdate, which never
 // carries the pending buffer.
 //

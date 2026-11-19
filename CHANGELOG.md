@@ -18,7 +18,7 @@ file.
 
 **Upgrade impact**:
 
-- **State encodings carry the pending buffer, as yjs's do.** `EncodeStateAsUpdate`, `EncodeStateAsUpdateV2`, `EncodeDiff` and `EncodeDiffV2` (and gomobile's), the server's SyncStep2 and the Go client's answer to SyncStep1 now append the updates a document holds but cannot integrate yet (`HasPending`), from the target state vector on, with Skip runs over the clocks nobody has sent, and the delete set includes the deletes still waiting for their items. The bytes are those of yjs `encodeStateAsUpdate(doc, sv)`. Applying such a state to an empty document can leave part of it waiting until the missing history arrives, as with yjs. With nothing pending, the bytes are unchanged. A transaction's update (`OnUpdate`), the Go client's routine sends and its local log, and snapshots still leave the pending buffer out, as yjs's update event and snapshots do; `persist.MergeUpdates` still refuses a log that does not integrate (`ErrIncompleteLog`).
+- **State encodings carry the pending buffer, as yjs's do.** `EncodeStateAsUpdate`, `EncodeStateAsUpdateV2`, `EncodeDiff` and `EncodeDiffV2` (and gomobile's), `persist.GetDiff`, the server's SyncStep2 and the Go client's answer to SyncStep1 now append the updates a document holds but cannot integrate yet (`HasPending`), from the target state vector on, with Skip runs over the clocks nobody has sent, and the delete set includes the deletes still waiting for their items. The bytes are those of yjs `encodeStateAsUpdate(doc, sv)`, except where updates waiting in the buffer overlap each other or leave adjacent GC runs that yjs merges (see `docs/tech-debt.md`). Applying such a state to an empty document can leave part of it waiting until the missing history arrives, as with yjs. With nothing pending, the bytes are unchanged. A transaction's update (`OnUpdate`), the Go client's routine sends and its local log, and snapshots still leave the pending buffer out, as yjs's update event and snapshots do; `persist.MergeUpdates` still refuses a log that does not integrate (`ErrIncompleteLog`).
 - **`DiffUpdate` carries blocks whose dependencies are absent from the input**, as yjs `diffUpdate` does. It dropped them.
 
 ### Fixed
@@ -28,8 +28,8 @@ file.
 ### Tests
 
 - New fixtures from yjs 13.6.33 (`testdata/pending-state-fixtures.json`, `testdata/gen/gen-pending-state.mjs`, in CI): 12 documents holding updates that wait (a hole in a client's clocks, a block waiting on another client, deletes of items not seen yet, both at once, blocks of two clients, a waiting block whose start the document has), garbage collection on and off, written whole and as diffs against state vectors inside an item, at and inside a hole, at, inside and past a waiting block, and ahead of the document, V1 and V2. All of them fail on 1.41.1.
-- The sync handler answers SyncStep1 with yjs's bytes for every one of those state vectors; a snapshot of a document with updates waiting restores the store's state alone; `DiffUpdate` of a delta whose ancestor is absent carries it.
-- 8 controls, each failing these tests.
+- The sync handler answers SyncStep1 with yjs's bytes for every one of those state vectors; a snapshot of a document with updates waiting restores the store's state alone; `DiffUpdate` of a delta whose ancestor is absent carries it, and so does `persist.GetDiff` of a log that holds one.
+- 9 controls, each failing these tests.
 
 ## [1.41.1] - 2026-11-18
 

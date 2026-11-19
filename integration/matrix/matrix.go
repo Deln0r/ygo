@@ -198,11 +198,12 @@ func (t *Transport) Publish(ctx context.Context, update []byte) (id.EventID, err
 // smaller events can compute a delta with ygo.EncodeDiff and hand it to
 // Publish - deltas arriving out of order are held in the pending buffer until
 // their predecessor turns up, so they converge too, but a delta whose
-// predecessor is never published stays invisible forever. Full state has no
-// such failure mode, which is why it is the default here: it also carries
-// what doc holds but cannot integrate yet (its pending buffer), as yjs's full
-// state does, so what is published never loses a queued update. Its cost is
-// size: see MaxUpdateBytes and README.md.
+// predecessor is never published stays invisible forever. Full state avoids
+// that for everything doc has integrated, which is why it is the default
+// here. It also carries what doc holds but cannot integrate yet (its pending
+// buffer), as yjs's full state does: that part stays invisible to receivers
+// too until its predecessor is published by someone. Its cost is size: see
+// MaxUpdateBytes and README.md.
 func (t *Transport) PublishDoc(ctx context.Context, doc *ygo.Doc) (id.EventID, error) {
 	return t.Publish(ctx, ygo.EncodeStateAsUpdate(doc))
 }

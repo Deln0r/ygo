@@ -183,7 +183,9 @@ func GetDiff(ctx context.Context, s Store, docName string, remoteSV []byte) ([]b
 	}
 	txn := d.ReadTxn()
 	defer txn.Close()
-	return encoding.EncodeDiff(d, txn, sv), nil
+	// The updates the log holds that wait for what they depend on too, as
+	// yjs encodeStateAsUpdate appends its pending buffer.
+	return encoding.EncodeDiffWithPending(d, txn, sv), nil
 }
 
 // MergeUpdates decodes every blob in updates in order, applies them

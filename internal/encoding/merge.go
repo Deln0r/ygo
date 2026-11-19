@@ -220,7 +220,9 @@ func EncodeStateAsUpdateWithPending(d *doc.Doc) []byte {
 }
 
 // EncodeDiffWithPending is EncodeDiff plus the pending buffer from sv on, in
-// the caller's transaction: the bytes of yjs encodeStateAsUpdate(doc, sv).
+// the caller's transaction: the bytes of yjs encodeStateAsUpdate(doc, sv),
+// except where pending updates overlap or leave adjacent GC runs yjs merges
+// (docs/tech-debt.md "State encodings ignore the pending buffer").
 func EncodeDiffWithPending(d *doc.Doc, txn *doc.Transaction, sv store.StateVector) []byte {
 	bs := txn.Store()
 	clients, byClient := buildMergePlan(bs, GetPending(txn), sv)

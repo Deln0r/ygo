@@ -417,6 +417,48 @@ func TestGetDiff_AgainstEmptySV_EmitsAll(t *testing.T) {
 	}
 }
 
+// TestGetDiff_CarriesUpdatesThatWait: a log holding an update whose
+// dependency was never stored gives it to the peer, as yjs's state of the
+// same log does; GetDiff left it out.
+func TestGetDiff_CarriesUpdatesThatWait(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	src := doc.NewDocWithOptions(doc.Options{ClientID: 1200})
+	x := types.NewText(src.Branch("t"))
+	txn := src.WriteTxn()
+	if err := x.Insert(txn, 0, "ab"); err != nil {
+		t.Fatal(err)
+	}
+	txn.Commit()
+	rtxn := src.ReadTxn()
+	sv := rtxn.Store().GetStateVector()
+	rtxn.Close()
+	txn = src.WriteTxn()
+	if err := x.Insert(txn, 2, "cd"); err != nil {
+		t.Fatal(err)
+	}
+	txn.Commit()
+	rtxn = src.ReadTxn()
+	late := encoding.EncodeDiff(src, rtxn, sv)
+	rtxn.Close()
+	if err := s.StoreUpdate(ctx, "doc", late); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := persist.GetDiff(ctx, s, "doc", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, _, err := encoding.DecodeUpdate(diff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upd.Blocks[1200]) == 0 {
+		t.Fatalf("GetDiff %x carries none of the waiting update %x", diff, late)
+	}
+}
+
 func TestGetDiff_AgainstFullSV_EmitsNothingMeaningful(t *testing.T) {
 	// A diff against a remote SV that already covers everything
 	// should be applyable to a fresh doc without ill effect; in the
