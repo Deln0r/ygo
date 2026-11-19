@@ -659,7 +659,8 @@ func (c *Client) handleSync(frame *syncpkg.Frame, hs *handshake) error {
 			return fmt.Errorf("client: step1 decode: %w", err)
 		}
 		rtxn := c.doc.ReadTxn()
-		diff := encoding.EncodeDiff(c.doc, rtxn, remoteSV)
+		// SyncStep2 carries the pending buffer, as y-protocols does.
+		diff := encoding.EncodeDiffWithPending(c.doc, rtxn, remoteSV)
 		localSV := cloneSV(rtxn.Store().GetStateVector())
 		rtxn.Close()
 		if err := c.write(syncpkg.EncodeSyncStep2(diff)); err != nil {

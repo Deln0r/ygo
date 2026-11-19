@@ -52,8 +52,9 @@ func NewUpdate() *Update {
 // The caller may pass an existing transaction for read access; if nil
 // a fresh ReadTxn is acquired and released.
 //
-// Mirrors yrs Doc::encode_state_as_update_v1, simplified to omit the
-// pending-update merge path (we have no pending buffer yet).
+// It leaves the pending buffer out: the store's state alone, as a
+// transaction's update and a snapshot hold it. ygo.EncodeStateAsUpdate
+// includes it (EncodeStateAsUpdateWithPending), as yjs does.
 func EncodeStateAsUpdate(d *doc.Doc) []byte {
 	txn := d.ReadTxn()
 	defer txn.Close()

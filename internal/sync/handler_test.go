@@ -2,6 +2,9 @@ package sync_test
 
 import (
 	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"os"
 	"sync"
 	"testing"
 
@@ -417,5 +420,55 @@ func TestHandler_AwarenessSnapshotsInStateOrder(t *testing.T) {
 	}
 	if reply := decodeOrFail(t, tr.Sent[0]); !bytes.Equal(reply.Payload, []byte{0}) {
 		t.Fatalf("reply with only a tombstone: %x, want an update with no entries", reply.Payload)
+	}
+}
+
+// TestHandler_SyncStep2_CarriesThePendingBuffer: a document that holds
+// updates waiting for what they depend on answers SyncStep1 with what yjs
+// writes for the same state vector (y-protocols writeSyncStep2 sends
+// encodeStateAsUpdate(doc, sv)), the waiting updates included, for a peer
+// behind it, inside its hole, and ahead of it. ygo left them out, so a
+// late joiner never got what the server held but could not integrate yet.
+func TestHandler_SyncStep2_CarriesThePendingBuffer(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/pending-state-fixtures.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Scenarios []struct {
+			Name    string   `json:"name"`
+			GC      bool     `json:"gc"`
+			Updates []string `json:"updates"`
+			Diffs   []struct {
+				SV string `json:"sv"`
+				V1 string `json:"v1"`
+			} `json:"diffs"`
+		} `json:"scenarios"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range f.Scenarios {
+		server := doc.NewDocWithOptions(doc.Options{ClientID: 99, DisableGC: !s.GC})
+		for _, u := range s.Updates {
+			b, _ := hex.DecodeString(u)
+			if err := encoding.ApplyUpdate(server, b); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, df := range s.Diffs {
+			conn, tr := newTestConn(t, server, awareness.New(99), "client")
+			sv, _ := hex.DecodeString(df.SV)
+			if err := conn.HandleFrame(decodeOrFail(t, syncpkg.EncodeSyncStep1(sv))); err != nil {
+				t.Fatal(err)
+			}
+			if len(tr.Sent) != 1 {
+				t.Fatalf("%s: %d frames sent, want 1", s.Name, len(tr.Sent))
+			}
+			reply := decodeOrFail(t, tr.Sent[0])
+			if got := hex.EncodeToString(reply.Payload); got != df.V1 {
+				t.Errorf("%s, state vector %s:\n got %s\nwant %s", s.Name, df.SV, got, df.V1)
+			}
+		}
 	}
 }

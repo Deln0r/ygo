@@ -192,3 +192,35 @@ func TestUpdateUtils_EmptyInputs(t *testing.T) {
 		t.Errorf("empty-update SV = %x, want %x", sv, ygo.EncodeStateVector(ygo.NewDoc()))
 	}
 }
+
+// TestDiffUpdate_CarriesBlocksWaitingForTheirDependencies: a delta whose
+// ancestor is absent from the input comes out of DiffUpdate, as yjs
+// diffUpdate keeps it; it waits in the receiver until the history arrives.
+// DiffUpdate dropped it before.
+func TestDiffUpdate_CarriesBlocksWaitingForTheirDependencies(t *testing.T) {
+	_, late, _, full := gapUpdates(t)
+	diff, err := ygo.DiffUpdate(late, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := ygo.NewDoc()
+	if err := ygo.ApplyUpdate(d, diff); err != nil {
+		t.Fatal(err)
+	}
+	if !ygo.HasPending(d) {
+		t.Fatal("the waiting delta did not come out of DiffUpdate")
+	}
+	if err := ygo.ApplyUpdate(d, full); err != nil {
+		t.Fatal(err)
+	}
+	if ygo.HasPending(d) {
+		t.Fatal("still waiting after the history arrived")
+	}
+	want := ygo.NewDoc()
+	if err := ygo.ApplyUpdate(want, full); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ygo.EncodeStateAsUpdate(d), ygo.EncodeStateAsUpdate(want)) {
+		t.Error("the document differs from one built from the full history")
+	}
+}

@@ -374,6 +374,9 @@ jobs:
       - name: regenerate undo over the wire fixtures
         working-directory: testdata/gen
         run: node gen-undo-wire.mjs
+      - name: regenerate pending state fixtures
+        working-directory: testdata/gen
+        run: node gen-pending-state.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff

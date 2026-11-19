@@ -249,11 +249,11 @@
 - **Resolved since (1.30.0):** `OnSubdocs` lists added subdocuments in the order they integrate, queued ones after a retry included (`IntegrateContext.AddedSubdoc`); it used to list them by client, highest first.
 - **When to address:** if a consumer depends on that order.
 
-### State encodings ignore the pending buffer
+### State encodings ignore the pending buffer (resolved in 1.42.0)
 
-- **Where:** `EncodeDiff` / `EncodeDiffV2` (and so `EncodeStateAsUpdate`); `EncodeStateAsUpdateWithPending` exists separately.
-- **What:** yjs `encodeStateAsUpdateV2` appends `pendingDs` and the pending structs diffed against the target state vector, so a replica relays what it holds but cannot integrate yet. ygo's state encodings leave the pending buffer out; per-transaction updates correctly exclude it in both.
-- **When to address:** with the sync-provider work.
+- **Was:** `EncodeStateAsUpdate*` / `EncodeDiff*`, and the server's SyncStep2, left the pending buffer out, where yjs `encodeStateAsUpdateV2` appends `pendingDs` and the pending structs diffed against the target state vector; a late joiner synced from ygo never got what it held but could not integrate yet.
+- **Resolved by:** `internal/encoding/merge.go` `EncodeDiffWithPending` / `EncodeDiffV2WithPending` (the merge plan from a state vector), used by the public encoders, the sync handler, the client's SyncStep2 and gomobile. The store-only `encoding.EncodeDiff` stays for what yjs sends from its update event, which never carries the pending buffer: the client's routine sends and its local log, a transaction's update, snapshots. Fixtures: `testdata/pending-state-fixtures.json`.
+- **Remaining gap:** the pending buffer keeps a different definition of the same clocks than yjs when queued updates overlap (it keeps the longer block at the same start, where yjs `mergeUpdatesV2` keeps the first and cuts the later one, and yjs merges adjacent GC runs from different updates), so a state with such a queue can still differ from yjs's in where one item ends.
 
 ### Item.Repair ParentID (resolved)
 

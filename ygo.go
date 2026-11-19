@@ -348,9 +348,13 @@ const DefaultAwarenessTimeout = awareness.DefaultTimeout
 // EncodeStateAsUpdate returns the wire-encoded V1 update carrying
 // the doc's full state. Apply to a fresh peer doc to bring it up
 // to speed in one shot; same bytes interoperate with JS Yjs's
-// Y.encodeStateAsUpdate.
+// Y.encodeStateAsUpdate. As there, the state includes updates d holds
+// but cannot integrate yet (its pending buffer, see HasPending), with
+// Skip runs over the clocks nobody has sent, so a peer brought up to
+// speed from d gets them too; until what they wait for arrives, they
+// wait in that peer's pending buffer.
 func EncodeStateAsUpdate(d *Doc) []byte {
-	return encoding.EncodeStateAsUpdate(d)
+	return encoding.EncodeStateAsUpdateWithPending(d)
 }
 
 // EncodeStateAsUpdateV2 returns the wire-encoded V2 update carrying
@@ -361,7 +365,7 @@ func EncodeStateAsUpdate(d *Doc) []byte {
 //
 // V1 and V2 are NOT wire-interchangeable — see ApplyUpdateV2.
 func EncodeStateAsUpdateV2(d *Doc) []byte {
-	return encoding.EncodeStateAsUpdateV2(d)
+	return encoding.EncodeStateAsUpdateV2WithPending(d)
 }
 
 // EncodeStateVector returns the wire-encoded V1 state vector of d.
@@ -440,10 +444,11 @@ var ErrSnapshotGC = errors.New("ygo: RestoreSnapshot requires the source Doc to 
 // blocks d has that the remote (per remoteSVBytes) does not. A
 // nil remoteSVBytes is treated as the empty SV — emit everything.
 // Each client's first block is cut at the remote's clock, so the
-// bytes are those of Y.encodeStateAsUpdate(doc, sv), except that yjs
-// also appends updates its pending buffer holds; the delete set is
-// the whole document's, as there. For one transaction's changes alone,
-// use Doc.OnUpdate.
+// bytes are those of Y.encodeStateAsUpdate(doc, sv): the updates d's
+// pending buffer holds are appended from sv on, as yjs appends them,
+// and the delete set is the whole document's with the pending deletes.
+// For one transaction's changes alone, use Doc.OnUpdate, which never
+// carries the pending buffer.
 //
 // remoteSVBytes is the V1 wire-encoded form of the remote's state
 // vector (the same shape EncodeStateVector produces).
@@ -458,7 +463,7 @@ func EncodeDiff(d *Doc, remoteSVBytes []byte) ([]byte, error) {
 	}
 	t := d.ReadTxn()
 	defer t.Close()
-	return encoding.EncodeDiff(d, t, sv), nil
+	return encoding.EncodeDiffWithPending(d, t, sv), nil
 }
 
 // EncodeDiffV2 is the V2 analogue of EncodeDiff. State-vector
@@ -475,7 +480,7 @@ func EncodeDiffV2(d *Doc, remoteSVBytes []byte) ([]byte, error) {
 	}
 	t := d.ReadTxn()
 	defer t.Close()
-	return encoding.EncodeDiffV2(d, t, sv), nil
+	return encoding.EncodeDiffV2WithPending(d, t, sv), nil
 }
 
 // ApplyUpdate decodes raw and integrates it into d. Items whose
@@ -730,16 +735,12 @@ func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
 // stored update before sending it to a peer that already has part of it.
 //
 // It reconstructs the update's state and diffs against remoteSV, cutting
-// the first block of each client at the remote clock like EncodeDiff. The
-// update is integrated first, so blocks commit-time squash can merge come
-// out merged, where yjs diffUpdate keeps the input's blocks. Blocks whose
-// dependencies are absent from the input are DROPPED rather than
-// carried: unlike MergeUpdates, this
-// does not preserve the pending buffer. That is fine for the intended use
-// - trimming a self-contained update before sending it - and lossy for
-// anything else, including the output of MergeUpdates over an incomplete
-// set, which by design can contain blocks that do not integrate on their
-// own. Do not use DiffUpdate to re-trim such an update.
+// the first block of each client at the remote clock like EncodeDiff, and
+// carries the blocks whose dependencies are absent from the input, as yjs
+// diffUpdate does. The update is integrated first, into a document with
+// garbage collection on, so blocks commit-time squash can merge come out
+// merged, and deleted content comes out as ContentDeleted, where yjs
+// diffUpdate keeps the input's blocks as they are.
 func DiffUpdate(update, remoteSV []byte) ([]byte, error) {
 	d := NewDoc()
 	if err := ApplyUpdate(d, update); err != nil {

@@ -284,7 +284,9 @@ func (c *Conn) handleSync(frame *Frame) error {
 			return fmt.Errorf("decode SyncStep1 SV: %w", err)
 		}
 		rtxn := c.Doc.ReadTxn()
-		diff := encoding.EncodeDiff(c.Doc, rtxn, remoteSV)
+		// The pending buffer too, as y-protocols writeSyncStep2 sends
+		// what encodeStateAsUpdate writes.
+		diff := encoding.EncodeDiffWithPending(c.Doc, rtxn, remoteSV)
 		sv := encoding.EncodeStateVector(rtxn.Store().GetStateVector(), nil)
 		rtxn.Close()
 		if c.Hocuspocus {

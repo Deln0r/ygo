@@ -209,7 +209,7 @@ func (d *Doc) ObserveUpdates(l UpdateListener) {
 // doc's full state. Apply to a peer doc to bring it up to speed.
 // Interoperates with JS Yjs Y.encodeStateAsUpdate output.
 func (d *Doc) EncodeStateAsUpdate() []byte {
-	return encoding.EncodeStateAsUpdate(d.inner)
+	return encoding.EncodeStateAsUpdateWithPending(d.inner)
 }
 
 // EncodeStateVector returns wire-encoded V1 state vector — what
@@ -240,7 +240,7 @@ func (d *Doc) EncodeDiff(remoteSV []byte) ([]byte, error) {
 	}
 	t := d.inner.ReadTxn()
 	defer t.Close()
-	return encoding.EncodeDiff(d.inner, t, sv), nil
+	return encoding.EncodeDiffWithPending(d.inner, t, sv), nil
 }
 
 // HasPending reports whether the doc has any queued items

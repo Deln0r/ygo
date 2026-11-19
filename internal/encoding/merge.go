@@ -10,16 +10,21 @@ import (
 )
 
 // This file exists for one job: encoding a document together with whatever is
-// still queued in its pending buffer, so that merging updates cannot quietly
-// lose the half that has not integrated yet.
+// still queued in its pending buffer, so that a replica relays what it holds
+// but cannot integrate yet, and merging updates cannot quietly lose the half
+// that has not integrated.
 //
-// EncodeStateAsUpdate deliberately does NOT do this. It answers "what is in
-// this document", and a queued block is not in it. Merging answers a different
-// question - "what did these updates carry" - and dropping the queued half
-// loses data that was handed to us. The reference implementation draws the
-// same line: yjs `mergeUpdates` preserves unintegrated structs and writes Skip
-// runs for the gaps between them, so merging a lone delta whose ancestor is
-// absent returns that delta rather than an empty update.
+// yjs encodeStateAsUpdateV2 (utils/encoding.js) does this for every state it
+// writes: the integrated structs from the target state vector, then the
+// pending delete set whole and the pending structs diffed against the vector,
+// merged. ygo's public state encodings (ygo.EncodeStateAsUpdate*,
+// ygo.EncodeDiff*) and the sync handler's SyncStep2 go through
+// EncodeDiffWithPending. The store-only EncodeDiff stays for what yjs sends
+// from its update event, which never carries the pending buffer: a client's
+// routine sends and its local log. yjs `mergeUpdates` likewise preserves
+// unintegrated structs and writes Skip runs for the gaps between them, so
+// merging a lone delta whose ancestor is absent returns that delta rather than
+// an empty update.
 //
 // Wire shape, checked against yjs 13.6.32 on the same scenario: one client run
 // whose declared start clock is the first block emitted, then blocks in
@@ -36,10 +41,12 @@ type mergeRecord struct {
 }
 
 // buildMergePlan orders every block the document can speak for - integrated
-// and queued alike - by client and clock. Returns nil when nothing is queued,
-// which tells the caller to use the ordinary encoder and keep the common path
-// byte-identical to what the fixtures pin.
-func buildMergePlan(bs *store.BlockStore, pending *Pending) ([]uint64, map[uint64][]mergeRecord) {
+// and queued alike - by client and clock, from sv on (nil: everything), as
+// yjs writes the store from the target state vector and the pending structs
+// diffed against it. Returns nil when nothing is queued, which tells the
+// caller to use the ordinary encoder and keep the common path byte-identical
+// to what the fixtures pin.
+func buildMergePlan(bs *store.BlockStore, pending *Pending, sv store.StateVector) ([]uint64, map[uint64][]mergeRecord) {
 	if pending.IsEmpty() {
 		return nil, nil
 	}
@@ -47,12 +54,17 @@ func buildMergePlan(bs *store.BlockStore, pending *Pending) ([]uint64, map[uint6
 
 	for client := range bs.GetStateVector() {
 		list := bs.GetClient(client)
+		from := sv[client]
 		for i := 0; i < list.Len(); i++ {
 			cell, ok := list.Get(i)
 			if !ok {
 				continue
 			}
-			rec := mergeRecord{clock: cell.ClockStart(), length: cell.ClockEnd() - cell.ClockStart() + 1}
+			start, end := cell.ClockStart(), cell.ClockEnd()+1
+			if end <= from {
+				continue // the remote has it
+			}
+			rec := mergeRecord{clock: start, length: end - start}
 			switch cell.Kind {
 			case store.CellKindItem:
 				rec.kind, rec.item = WireBlockItem, cell.Item
@@ -61,12 +73,23 @@ func buildMergePlan(bs *store.BlockStore, pending *Pending) ([]uint64, map[uint6
 			default:
 				continue
 			}
+			if start < from {
+				// The first struct of the run, written from the remote's
+				// clock, as EncodeDiff writes it (encodeCellFrom).
+				off := from - start
+				if rec.kind == WireBlockItem {
+					rec.item = itemFrom(cell.Item, off)
+				}
+				rec.clock, rec.length = from, rec.length-off
+			}
 			byClient[client] = append(byClient[client], rec)
 		}
 	}
 
 	for client, blocks := range pending.Blocks {
-		known := bs.GetClock(client)
+		// What the store has is written above, from sv; what the remote
+		// has is left out (yjs diffUpdateV2 of the pending structs).
+		known := max(bs.GetClock(client), sv[client])
 		for _, b := range blocks {
 			rec := mergeRecord{kind: b.Kind, item: b.Item}
 			switch b.Kind {
@@ -81,13 +104,13 @@ func buildMergePlan(bs *store.BlockStore, pending *Pending) ([]uint64, map[uint6
 				continue
 			}
 			// Below the store clock the block is already represented by the
-			// integrated records above, or superseded by them. Emitting it as
-			// well would overlap the run and corrupt the receiver's list. A
-			// queued block can still reach past the store clock: one that
-			// waits on another client is queued as it came, not cut to what
-			// is new (yjs checks its references before the cut). Its unknown
-			// part is carried, cut on a COPY, since the record points into
-			// the live pending buffer.
+			// integrated records above, or superseded by them; below sv the
+			// remote has it. Emitting it as well would overlap the run and
+			// corrupt the receiver's list. A queued block can still reach
+			// past the store clock: one that waits on another client is
+			// queued as it came, not cut to what is new (yjs checks its
+			// references before the cut). Its unknown part is carried, cut on
+			// a COPY, since the record points into the live pending buffer.
 			if rec.length == 0 || rec.clock+rec.length <= known {
 				continue
 			}
@@ -107,8 +130,10 @@ func buildMergePlan(bs *store.BlockStore, pending *Pending) ([]uint64, map[uint6
 	}
 
 	clients := make([]uint64, 0, len(byClient))
-	for c := range byClient {
-		clients = append(clients, c)
+	for c, recs := range byClient {
+		if len(recs) > 0 {
+			clients = append(clients, c)
+		}
 	}
 	// Descending clientID, matching EncodeDiff and yrs gotcha 1.
 	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
@@ -191,11 +216,16 @@ func countWithSkips(recs []mergeRecord) uint64 {
 func EncodeStateAsUpdateWithPending(d *doc.Doc) []byte {
 	txn := d.ReadTxn()
 	defer txn.Close()
-	bs := txn.Store()
+	return EncodeDiffWithPending(d, txn, nil)
+}
 
-	clients, byClient := buildMergePlan(bs, GetPending(txn))
-	if clients == nil {
-		return EncodeDiff(d, txn, nil)
+// EncodeDiffWithPending is EncodeDiff plus the pending buffer from sv on, in
+// the caller's transaction: the bytes of yjs encodeStateAsUpdate(doc, sv).
+func EncodeDiffWithPending(d *doc.Doc, txn *doc.Transaction, sv store.StateVector) []byte {
+	bs := txn.Store()
+	clients, byClient := buildMergePlan(bs, GetPending(txn), sv)
+	if clients == nil { // nothing pending
+		return EncodeDiff(d, txn, sv)
 	}
 
 	buf := lib0.WriteVarUint(nil, uint64(len(clients)))
@@ -235,11 +265,15 @@ func EncodeStateAsUpdateWithPending(d *doc.Doc) []byte {
 func EncodeStateAsUpdateV2WithPending(d *doc.Doc) []byte {
 	txn := d.ReadTxn()
 	defer txn.Close()
-	bs := txn.Store()
+	return EncodeDiffV2WithPending(d, txn, nil)
+}
 
-	clients, byClient := buildMergePlan(bs, GetPending(txn))
-	if clients == nil {
-		return EncodeDiffV2(d, txn, nil)
+// EncodeDiffV2WithPending is the V2 twin of EncodeDiffWithPending.
+func EncodeDiffV2WithPending(d *doc.Doc, txn *doc.Transaction, sv store.StateVector) []byte {
+	bs := txn.Store()
+	clients, byClient := buildMergePlan(bs, GetPending(txn), sv)
+	if clients == nil { // nothing pending
+		return EncodeDiffV2(d, txn, sv)
 	}
 
 	enc := NewEncoderV2()
