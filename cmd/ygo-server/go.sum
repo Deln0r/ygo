@@ -1,3 +1,7 @@
+github.com/Deln0r/ygo v1.47.0 h1:SrSi7+zOMF4ePL03VreKLQQEhLEZVIDHN5QF78ebgpY=
+github.com/Deln0r/ygo v1.47.0/go.mod h1:keGZ3CEtNsv+3kYp7enCPKdaHAGlnU/KOv0hj1F9sFA=
+github.com/Deln0r/ygo/persist/sqlite v1.47.0 h1:9BI70jj1eoo2zGJLKYvv+kk00veezaktFeelob8Lw2Y=
+github.com/Deln0r/ygo/persist/sqlite v1.47.0/go.mod h1:SyYUoKEAjMB8HD92Bf8riNpu99YMU+svczND+4bSPRc=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
