@@ -1,7 +1,18 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directory: "/"
+    # Every module: the core, the SQLite store and its users (nested since
+    # 1.47.0), the NATS and Matrix adapters.
+    directories:
+      - "/"
+      - "/persist/sqlite"
+      - "/gomobile"
+      - "/cmd/yserve"
+      - "/cmd/ygo-server"
+      - "/examples/collab-server"
+      - "/examples/offline-first"
+      - "/server/backplane/nats"
+      - "/integration/matrix"
     schedule:
       interval: weekly
       day: monday

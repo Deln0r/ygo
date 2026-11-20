@@ -3,8 +3,7 @@ package gomobile
 import (
 	"encoding/json"
 
-	"github.com/Deln0r/ygo/internal/anyval"
-	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo"
 )
 
 // TextChangeListener receives text change deltas. Implement it in
@@ -58,7 +57,7 @@ func (t *Text) ObserveChanges(l TextChangeListener) {
 	}
 	// Read as a yjs binding reads event.delta (ReadDelta), so the
 	// document ends where a yjs editor's would.
-	t.unobserve = t.inner.Observe(func(e *types.TextEvent) {
+	t.unobserve = t.inner.Observe(func(e *ygo.TextEvent) {
 		l.OnTextChange(marshalTextDelta(e.ReadDelta()))
 	})
 }
@@ -79,7 +78,7 @@ func (m *Map) ObserveChanges(l MapChangeListener) {
 	if l == nil {
 		return
 	}
-	m.unobserve = m.inner.Observe(func(e *types.MapEvent) {
+	m.unobserve = m.inner.Observe(func(e *ygo.MapEvent) {
 		l.OnMapChange(marshalMapKeys(e.Keys))
 	})
 }
@@ -100,14 +99,14 @@ func (a *Array) ObserveChanges(l ArrayChangeListener) {
 	if l == nil {
 		return
 	}
-	a.unobserve = a.inner.Observe(func(e *types.ArrayEvent) {
+	a.unobserve = a.inner.Observe(func(e *ygo.ArrayEvent) {
 		l.OnArrayChange(marshalArrayDelta(e.Delta))
 	})
 }
 
 // marshalArrayDelta renders an array delta as Quill-style JSON, with
 // each insert op carrying a run of values.
-func marshalArrayDelta(delta []types.ArrayDeltaOp) []byte {
+func marshalArrayDelta(delta []ygo.ArrayDeltaOp) []byte {
 	ops := make([]any, 0, len(delta))
 	for _, op := range delta {
 		m := map[string]any{}
@@ -121,13 +120,13 @@ func marshalArrayDelta(delta []types.ArrayDeltaOp) []byte {
 		}
 		ops = append(ops, m)
 	}
-	b, _ := json.Marshal(anyval.ForJSON(ops))
+	b, _ := json.Marshal(ygo.JSONValue(ops))
 	return b
 }
 
 // marshalTextDelta renders a text delta in the standard Quill JSON
 // shape.
-func marshalTextDelta(delta []types.DeltaOp) []byte {
+func marshalTextDelta(delta []ygo.DeltaOp) []byte {
 	ops := make([]any, 0, len(delta))
 	for _, op := range delta {
 		m := map[string]any{}
@@ -146,12 +145,12 @@ func marshalTextDelta(delta []types.DeltaOp) []byte {
 		}
 		ops = append(ops, m)
 	}
-	b, _ := json.Marshal(anyval.ForJSON(ops))
+	b, _ := json.Marshal(ygo.JSONValue(ops))
 	return b
 }
 
 // marshalMapKeys renders a map event's changed keys as JSON.
-func marshalMapKeys(keys map[string]types.KeyChange) []byte {
+func marshalMapKeys(keys map[string]ygo.KeyChange) []byte {
 	out := make(map[string]any, len(keys))
 	for k, c := range keys {
 		entry := map[string]any{"action": c.Action}
@@ -161,6 +160,6 @@ func marshalMapKeys(keys map[string]types.KeyChange) []byte {
 		out[k] = entry
 	}
 	// ForJSON drops an undefined oldValue, as JSON.stringify does.
-	b, _ := json.Marshal(anyval.ForJSON(out))
+	b, _ := json.Marshal(ygo.JSONValue(out))
 	return b
 }

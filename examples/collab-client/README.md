@@ -12,7 +12,7 @@ distinguishing feature; most CRDT stacks only ship a browser client.
 Against the sibling server example ([`../collab-server`](../collab-server)):
 
 ```sh
-go run ./examples/collab-server &
+(cd examples/collab-server && go run .) &
 go run ./examples/collab-client -url ws://localhost:8080/collab -doc room1 -name alice
 go run ./examples/collab-client -url ws://localhost:8080/collab -doc room1 -name bob
 ```

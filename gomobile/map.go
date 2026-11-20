@@ -3,7 +3,7 @@ package gomobile
 import (
 	"encoding/json"
 
-	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo"
 )
 
 // SetJSON sets key to a scalar JSON value (string, number, bool, null,
@@ -76,7 +76,7 @@ func (m *Map) SetText(key string) *Text {
 func (m *Map) GetMap(key string) *Map {
 	rtxn := m.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if nested, ok := m.inner.Get(key).(*types.Map); ok {
+	if nested, ok := m.inner.Get(key).(*ygo.Map); ok {
 		return &Map{d: m.d, inner: nested}
 	}
 	return nil
@@ -86,7 +86,7 @@ func (m *Map) GetMap(key string) *Map {
 func (m *Map) GetArray(key string) *Array {
 	rtxn := m.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if nested, ok := m.inner.Get(key).(*types.Array); ok {
+	if nested, ok := m.inner.Get(key).(*ygo.Array); ok {
 		return &Array{d: m.d, inner: nested}
 	}
 	return nil
@@ -96,7 +96,7 @@ func (m *Map) GetArray(key string) *Array {
 func (m *Map) GetText(key string) *Text {
 	rtxn := m.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if nested, ok := m.inner.Get(key).(*types.Text); ok {
+	if nested, ok := m.inner.Get(key).(*ygo.Text); ok {
 		return &Text{d: m.d, inner: nested}
 	}
 	return nil

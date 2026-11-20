@@ -3,7 +3,7 @@ package gomobile
 import (
 	"encoding/json"
 
-	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo"
 )
 
 // XmlFragment is the bindable root of an XML document tree — the shape
@@ -11,21 +11,21 @@ import (
 // XmlElement and XmlText children.
 type XmlFragment struct {
 	d     *Doc
-	inner *types.XmlFragment
+	inner *ygo.XmlFragment
 }
 
 // XmlElement is a named node with string attributes and ordered
 // children (elements or text).
 type XmlElement struct {
 	d     *Doc
-	inner *types.XmlElement
+	inner *ygo.XmlElement
 }
 
 // XmlText is a rich-text leaf in an XML tree. Use Text() for the full
 // formatting surface (ApplyDelta / Format / InsertAt).
 type XmlText struct {
 	d     *Doc
-	inner *types.XmlText
+	inner *ygo.XmlText
 }
 
 // XmlFragment returns the shared XML fragment registered under name,
@@ -63,7 +63,7 @@ func (f *XmlFragment) GetElement(index int) *XmlElement {
 	}
 	rtxn := f.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if e, ok := f.inner.Get(uint64(index)).(*types.XmlElement); ok {
+	if e, ok := f.inner.Get(uint64(index)).(*ygo.XmlElement); ok {
 		return &XmlElement{d: f.d, inner: e}
 	}
 	return nil
@@ -76,7 +76,7 @@ func (f *XmlFragment) GetText(index int) *XmlText {
 	}
 	rtxn := f.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if x, ok := f.inner.Get(uint64(index)).(*types.XmlText); ok {
+	if x, ok := f.inner.Get(uint64(index)).(*ygo.XmlText); ok {
 		return &XmlText{d: f.d, inner: x}
 	}
 	return nil
@@ -175,7 +175,7 @@ func (e *XmlElement) GetElement(index int) *XmlElement {
 	}
 	rtxn := e.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if c, ok := e.inner.Get(uint64(index)).(*types.XmlElement); ok {
+	if c, ok := e.inner.Get(uint64(index)).(*ygo.XmlElement); ok {
 		return &XmlElement{d: e.d, inner: c}
 	}
 	return nil
@@ -188,7 +188,7 @@ func (e *XmlElement) GetText(index int) *XmlText {
 	}
 	rtxn := e.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if x, ok := e.inner.Get(uint64(index)).(*types.XmlText); ok {
+	if x, ok := e.inner.Get(uint64(index)).(*ygo.XmlText); ok {
 		return &XmlText{d: e.d, inner: x}
 	}
 	return nil

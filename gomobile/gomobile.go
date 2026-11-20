@@ -51,10 +51,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Deln0r/ygo/internal/awareness"
-	"github.com/Deln0r/ygo/internal/doc"
-	"github.com/Deln0r/ygo/internal/encoding"
-	"github.com/Deln0r/ygo/internal/store"
+	"github.com/Deln0r/ygo"
 )
 
 // Doc is the gomobile-bindable opaque handle for a ygo CRDT
@@ -68,7 +65,7 @@ import (
 // internally; gomobile callers do not see Transaction or
 // TransactionMut directly.
 type Doc struct {
-	inner *doc.Doc
+	inner *ygo.Doc
 	// origin tags every edit made through this handle and the shared
 	// types taken from it ("" for none); see WithOrigin.
 	origin string
@@ -89,7 +86,7 @@ type docShared struct {
 
 // NewDoc returns a fresh Doc with a random ClientID.
 func NewDoc() *Doc {
-	return &Doc{inner: doc.NewDoc(), shared: &docShared{}}
+	return &Doc{inner: ygo.NewDoc(), shared: &docShared{}}
 }
 
 // WithOrigin returns a handle on the same document whose edits carry
@@ -110,7 +107,7 @@ func (d *Doc) WithOrigin(origin string) *Doc {
 }
 
 // writeTxn opens a write transaction carrying this handle's origin.
-func (d *Doc) writeTxn() *doc.TransactionMut {
+func (d *Doc) writeTxn() *ygo.TransactionMut {
 	txn := d.inner.WriteTxn()
 	txn.Origin = originValue(d.origin)
 	return txn
@@ -131,7 +128,7 @@ func originValue(origin string) any {
 // document takes a new random ID (see ClientID), as yjs does. Do not
 // use it as a stable device identifier.
 func NewDocWithClientID(clientID uint64) *Doc {
-	return &Doc{inner: doc.NewDocWithOptions(doc.Options{ClientID: clientID}), shared: &docShared{}}
+	return &Doc{inner: ygo.NewDocWithOptions(ygo.Options{ClientID: clientID}), shared: &docShared{}}
 }
 
 // ClientID returns this replica's client identifier. It changes when an
@@ -149,7 +146,7 @@ func (d *Doc) ClientID() uint64 { return d.inner.ClientID() }
 // dependency cases queue silently and are queryable via HasPending
 // / MissingSV.
 func (d *Doc) ApplyUpdate(rawBytes []byte) error {
-	if err := encoding.ApplyUpdate(d.inner, rawBytes); err != nil {
+	if err := ygo.ApplyUpdate(d.inner, rawBytes); err != nil {
 		return fmt.Errorf("ApplyUpdate: %w", err)
 	}
 	return nil
@@ -161,7 +158,7 @@ func (d *Doc) ApplyUpdate(rawBytes []byte) error {
 // no origin, which a default UndoManager captures, so Undo would revert
 // the collaborator's edit. Update listeners receive the origin too.
 func (d *Doc) ApplyUpdateWithOrigin(rawBytes []byte, origin string) error {
-	if err := encoding.ApplyUpdateWithOrigin(d.inner, rawBytes, originValue(origin)); err != nil {
+	if err := ygo.ApplyUpdateWithOrigin(d.inner, rawBytes, originValue(origin)); err != nil {
 		return fmt.Errorf("ApplyUpdate: %w", err)
 	}
 	return nil
@@ -209,16 +206,14 @@ func (d *Doc) ObserveUpdates(l UpdateListener) {
 // doc's full state. Apply to a peer doc to bring it up to speed.
 // Interoperates with JS Yjs Y.encodeStateAsUpdate output.
 func (d *Doc) EncodeStateAsUpdate() []byte {
-	return encoding.EncodeStateAsUpdateWithPending(d.inner)
+	return ygo.EncodeStateAsUpdate(d.inner)
 }
 
 // EncodeStateVector returns wire-encoded V1 state vector — what
 // the y-sync protocol's SyncStep1 sends. The peer replies with
 // the diff.
 func (d *Doc) EncodeStateVector() []byte {
-	t := d.inner.ReadTxn()
-	defer t.Close()
-	return encoding.EncodeStateVector(t.Store().GetStateVector(), nil)
+	return ygo.EncodeStateVector(d.inner)
 }
 
 // EncodeDiff returns the wire-encoded V1 update carrying blocks
@@ -230,17 +225,11 @@ func (d *Doc) EncodeStateVector() []byte {
 // vector (same shape EncodeStateVector produces). Pass straight
 // from a sync-protocol message; the function decodes internally.
 func (d *Doc) EncodeDiff(remoteSV []byte) ([]byte, error) {
-	var sv store.StateVector
-	if len(remoteSV) > 0 {
-		decoded, _, err := encoding.DecodeStateVector(remoteSV)
-		if err != nil {
-			return nil, fmt.Errorf("EncodeDiff: remoteSV decode: %w", err)
-		}
-		sv = decoded
+	out, err := ygo.EncodeDiff(d.inner, remoteSV)
+	if err != nil {
+		return nil, fmt.Errorf("EncodeDiff: remoteSV decode: %w", err)
 	}
-	t := d.inner.ReadTxn()
-	defer t.Close()
-	return encoding.EncodeDiffWithPending(d.inner, t, sv), nil
+	return out, nil
 }
 
 // HasPending reports whether the doc has any queued items
@@ -248,9 +237,7 @@ func (d *Doc) EncodeDiff(remoteSV []byte) ([]byte, error) {
 // before their Origin / RightOrigin / Parent ID was visible
 // locally).
 func (d *Doc) HasPending() bool {
-	t := d.inner.ReadTxn()
-	defer t.Close()
-	return encoding.HasPending(t)
+	return ygo.HasPending(d.inner)
 }
 
 // MissingSV returns the wire-encoded V1 state vector to ask a peer
@@ -261,10 +248,7 @@ func (d *Doc) HasPending() bool {
 // An empty return ([]byte{0x00}, the encoded-empty-SV) means the
 // pending buffer is empty.
 func (d *Doc) MissingSV() []byte {
-	t := d.inner.ReadTxn()
-	defer t.Close()
-	sv := encoding.MissingSV(t)
-	return encoding.EncodeStateVector(sv, nil)
+	return ygo.MissingSV(d.inner)
 }
 
 // Awareness is the gomobile-bindable handle for the y-protocols
@@ -278,12 +262,12 @@ func (d *Doc) MissingSV() []byte {
 // typed access (cursor positions, user names) JSON-parse on the
 // caller side after pulling via States.
 type Awareness struct {
-	inner *awareness.Awareness
+	inner *ygo.Awareness
 }
 
 // NewAwareness returns a fresh Awareness for the given clientID.
 func NewAwareness(clientID uint64) *Awareness {
-	return &Awareness{inner: awareness.New(clientID)}
+	return &Awareness{inner: ygo.NewAwareness(clientID)}
 }
 
 // ClientID returns the local awareness clientID.

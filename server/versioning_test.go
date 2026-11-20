@@ -7,9 +7,9 @@ import (
 
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
+	"github.com/Deln0r/ygo/internal/memstore"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/persist"
-	"github.com/Deln0r/ygo/persist/sqlite"
 )
 
 func mapSetUpdate(t *testing.T, clientID uint64, key, value string) []byte {
@@ -25,7 +25,7 @@ func mapSetUpdate(t *testing.T, clientID uint64, key, value string) []byte {
 // TestSweepVersions_DirtyOnly confirms a sweep versions exactly the
 // dirty documents, clears the dirty set, and prunes to KeepVersions.
 func TestSweepVersions_DirtyOnly(t *testing.T) {
-	store, err := sqlite.Open(":memory:")
+	store, err := memstore.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestSweepVersions_DirtyOnly(t *testing.T) {
 // TestVersioningLoop_StartStop confirms the ticker goroutine runs
 // sweeps and shuts down cleanly via Close.
 func TestVersioningLoop_StartStop(t *testing.T) {
-	store, err := sqlite.Open(":memory:")
+	store, err := memstore.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestVersioningLoop_StartStop(t *testing.T) {
 // TestVersioning_DisabledWithoutInterval confirms the zero-value path
 // stays inert: no goroutine, dirty marks are no-ops.
 func TestVersioning_DisabledWithoutInterval(t *testing.T) {
-	store, err := sqlite.Open(":memory:")
+	store, err := memstore.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +123,6 @@ func TestVersioning_DisabledWithoutInterval(t *testing.T) {
 	}
 }
 
-// Interface satisfaction: the sqlite backend must remain a
-// persist.VersionedStore or auto-versioning silently degrades.
-var _ persist.VersionedStore = (*sqlite.Store)(nil)
+// Interface satisfaction: the test store must be a persist.VersionedStore
+// or auto-versioning silently degrades (persist/sqlite checks its own).
+var _ persist.VersionedStore = (*memstore.Store)(nil)

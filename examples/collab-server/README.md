@@ -10,8 +10,9 @@ exposes to code that mounts it, which the CLI cannot express.
 ## Run
 
 ```sh
-go run ./examples/collab-server              # in-memory
-go run ./examples/collab-server -store x.db  # sqlite-backed (survives restart)
+cd examples/collab-server       # a module of its own (it uses persist/sqlite)
+go run .                        # in-memory
+go run . -store x.db            # sqlite-backed (survives restart)
 ```
 
 Then connect any [y-websocket](https://github.com/yjs/y-websocket) client:

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo"
 )
 
 // Array is the bindable shared Array (ordered sequence) CRDT. Elements
 // are scalar JSON values or nested Text / Map / Array types.
 type Array struct {
 	d         *Doc
-	inner     *types.Array
+	inner     *ygo.Array
 	observeMu sync.Mutex // serializes ObserveChanges' replace step
 	unobserve func()
 }
@@ -127,7 +127,7 @@ func (a *Array) GetText(index int) *Text {
 	}
 	rtxn := a.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if t, ok := a.inner.Get(uint64(index)).(*types.Text); ok {
+	if t, ok := a.inner.Get(uint64(index)).(*ygo.Text); ok {
 		return &Text{d: a.d, inner: t}
 	}
 	return nil
@@ -140,7 +140,7 @@ func (a *Array) GetMap(index int) *Map {
 	}
 	rtxn := a.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if m, ok := a.inner.Get(uint64(index)).(*types.Map); ok {
+	if m, ok := a.inner.Get(uint64(index)).(*ygo.Map); ok {
 		return &Map{d: a.d, inner: m}
 	}
 	return nil
@@ -153,7 +153,7 @@ func (a *Array) GetArray(index int) *Array {
 	}
 	rtxn := a.d.inner.ReadTxn()
 	defer rtxn.Close()
-	if arr, ok := a.inner.Get(uint64(index)).(*types.Array); ok {
+	if arr, ok := a.inner.Get(uint64(index)).(*ygo.Array); ok {
 		return &Array{d: a.d, inner: arr}
 	}
 	return nil

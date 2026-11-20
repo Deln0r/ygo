@@ -12,7 +12,25 @@ entry opens with an **Upgrade impact** note. Most releases have none.
 Two optional adapters live in nested modules and are versioned independently of
 ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
-file.
+file. Since 1.47.0 the SQLite store (`persist/sqlite`), the mobile SDK
+(`gomobile`) and the server commands (`cmd/yserve`, `cmd/ygo-server`) are
+nested modules too, with the same import paths, tagged with the core's
+version number when they change (`persist/sqlite/v1.47.0`); their changes are
+listed in the core's entries.
+
+## [1.47.0] - 2026-11-21
+
+**Upgrade impact**:
+
+- **The core module needs Go 1.23** (it needed 1.26). Only `modernc.org/sqlite` held it there: SQLite and the packages that import it are modules of their own now, so an adopter on Go 1.23, 1.24 or 1.25 can use ygo, and the core's dependencies are `coder/websocket` alone.
+- **`persist/sqlite`, `gomobile`, `cmd/yserve` and `cmd/ygo-server` are nested modules**, with the same import paths, requiring Go 1.26 and the core at v1.47.0. A program that imports `persist/sqlite` adds it: `go get github.com/Deln0r/ygo@v1.47.0 github.com/Deln0r/ygo/persist/sqlite@v1.47.0` (or `go mod tidy` after upgrading the core). `go install github.com/Deln0r/ygo/cmd/yserve@latest` is unchanged. The examples `collab-server` and `offline-first` run from their own directories (`cd examples/collab-server && go run .`).
+- **`gomobile` uses only the core's public API**, so any later core works with it; two names it needed are public now: `JSONValue` (a value as `JSON.stringify` sees it) and `AwarenessSummary` (what an `Awareness.OnChange` callback is told).
+- **The coverage report covers the core module only**: the moved packages' statements, and the share of core statements their tests reached, left it, so its percentage starts again from a new baseline.
+
+### Changed
+
+- The core's tests run on an in-memory store (`internal/memstore`) with the SQLite store's behaviour, and one conformance suite (`internal/persisttest`, 34 tests of updates, compaction, documents, versions and the persist helpers) runs on both stores; SQLite's own tests, and a client and a server restarted on SQLite files, run in `persist/sqlite`.
+- CI: the core matrix is Go 1.23 (with `GOTOOLCHAIN=local`, a tidy check and the cross builds at the floor) and stable; the nested modules run their vet, race suite, lint and `govulncheck` in a workspace (`tools/go-work.sh`) and, once the versions they require are published, are tidied, built and vetted against them; Dependabot watches every module; the Dockerfile builds `yserve` in the workspace.
 
 ## [1.46.0] - 2026-11-20
 

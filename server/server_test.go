@@ -16,9 +16,9 @@ import (
 	"github.com/Deln0r/ygo/internal/awareness"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
+	"github.com/Deln0r/ygo/internal/memstore"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
 	"github.com/Deln0r/ygo/internal/types"
-	"github.com/Deln0r/ygo/persist/sqlite"
 	"github.com/Deln0r/ygo/server"
 )
 
@@ -218,10 +218,10 @@ func TestServer_Awareness_BroadcastBetweenClients(t *testing.T) {
 }
 
 func TestServer_Persistence_StateSurvivesRestart(t *testing.T) {
-	// Round 1: server with a file-backed sqlite store; one client
-	// pushes content; disconnect.
+	// Round 1: server with a store opened by path (persist/sqlite runs a
+	// restart on a SQLite file); one client pushes content; disconnect.
 	dbPath := filepath.Join(t.TempDir(), "ygo-server.db")
-	store1, err := sqlite.Open(dbPath)
+	store1, err := memstore.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestServer_Persistence_StateSurvivesRestart(t *testing.T) {
 
 	// Round 2: brand-new server, same db, new client. Server must
 	// load the persisted state on first connect.
-	store2, err := sqlite.Open(dbPath)
+	store2, err := memstore.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,9 +13,9 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/Deln0r/ygo/internal/encoding"
+	"github.com/Deln0r/ygo/internal/memstore"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
 	"github.com/Deln0r/ygo/internal/types"
-	"github.com/Deln0r/ygo/persist/sqlite"
 	"github.com/Deln0r/ygo/server"
 	"github.com/Deln0r/ygo/server/backplane"
 )
@@ -28,7 +28,7 @@ import (
 // bytes, from loading the room. Valid edits from another client go through,
 // before and after.
 func TestServer_RefusesInvalidUTF8Update(t *testing.T) {
-	store, err := sqlite.Open(filepath.Join(t.TempDir(), "rooms.db"))
+	store, err := memstore.Open(filepath.Join(t.TempDir(), "rooms.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

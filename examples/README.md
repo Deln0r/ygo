@@ -1,7 +1,11 @@
 # Examples
 
 Runnable examples for embedding and using ygo. Each is a `go run`-able
-program with its own README.
+program with its own README. `collab-server` and `offline-first` use the
+SQLite store, so each is a module of its own: run them from their
+directory (`cd examples/collab-server && go run .`); they build against
+this checkout through `replace` directives. `collab-client` is part of the
+core module (`go run ./examples/collab-client`).
 
 | Example | What it shows |
 |---|---|

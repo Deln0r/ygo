@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"github.com/Deln0r/ygo"
 	"github.com/Deln0r/ygo/client"
-	"github.com/Deln0r/ygo/internal/awareness"
 )
 
 // PresenceListener receives the room's presence (awareness) snapshot
@@ -89,7 +89,7 @@ func (c *Client) ClientID() uint64 {
 // returns the unsubscribe func. The caller holds c.mu.
 func (c *Client) startPresence(inner *client.Client, pl PresenceListener) func() {
 	aw := inner.Awareness()
-	return aw.OnChange(func(awareness.Summary, any) {
+	return aw.OnChange(func(ygo.AwarenessSummary, any) {
 		pl.OnPresenceChange(presenceSnapshot(aw))
 	})
 }
@@ -98,7 +98,7 @@ func (c *Client) startPresence(inner *client.Client, pl PresenceListener) func()
 // keyed by clientID string, each value the peer's raw state JSON.
 // Only online peers appear (a removed peer drops out, so the listener
 // sees it leave).
-func presenceSnapshot(aw *awareness.Awareness) []byte {
+func presenceSnapshot(aw *ygo.Awareness) []byte {
 	states := aw.States()
 	out := make(map[string]json.RawMessage, len(states))
 	for id, st := range states {

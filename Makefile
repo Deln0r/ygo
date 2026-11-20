@@ -24,13 +24,27 @@ fmt-check:
 		exit 1; \
 	fi
 
+# The core, then the nested modules that build in the workspace
+# (tools/go-work.sh) and the examples (through their replace directives).
+NESTED ?= persist/sqlite gomobile cmd/yserve cmd/ygo-server
+EXAMPLES ?= examples/collab-server examples/offline-first
+
+.PHONY: work
+work:
+	./tools/go-work.sh
+	./tools/check-modules.sh
+
 .PHONY: vet
-vet:
-	$(GO) vet ./...
+vet: work
+	GOWORK=off $(GO) vet ./...
+	for d in $(NESTED); do (cd $$d && $(GO) vet ./...) || exit 1; done
+	for d in $(EXAMPLES); do (cd $$d && GOWORK=off $(GO) vet ./...) || exit 1; done
 
 .PHONY: test
-test:
-	$(GO) test -race -coverprofile=coverage.txt -covermode=atomic ./...
+test: work
+	GOWORK=off $(GO) test -race -coverprofile=coverage.txt -covermode=atomic ./...
+	for d in $(NESTED); do (cd $$d && $(GO) test -race ./...) || exit 1; done
+	for d in $(EXAMPLES); do (cd $$d && GOWORK=off $(GO) test -race ./...) || exit 1; done
 
 .PHONY: lint
 lint:

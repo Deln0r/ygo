@@ -31,3 +31,12 @@ jobs:
       - name: run govulncheck on the Matrix transport module
         working-directory: integration/matrix
         run: govulncheck ./...
+      # SQLite and its users are modules of their own since 1.47.0
+      # (modernc.org/sqlite, libc and x/sys come in only there).
+      - name: run govulncheck on persist/sqlite, gomobile and the commands
+        run: |
+          ./tools/go-work.sh
+          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+            echo "== $d"
+            (cd "$d" && govulncheck ./...)
+          done

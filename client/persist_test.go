@@ -7,8 +7,8 @@ import (
 
 	"github.com/Deln0r/ygo/client"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/memstore"
 	"github.com/Deln0r/ygo/internal/types"
-	"github.com/Deln0r/ygo/persist/sqlite"
 )
 
 // deadURL returns a ws:// URL nothing answers (a bound-then-closed
@@ -21,18 +21,18 @@ func deadURL(t *testing.T) string {
 	return url
 }
 
-func openStore(t *testing.T, path string) *sqlite.Store {
+func openStore(t *testing.T, path string) *memstore.Store {
 	t.Helper()
-	s, err := sqlite.Open(path)
+	s, err := memstore.Open(path)
 	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
+		t.Fatalf("memstore.Open: %v", err)
 	}
 	return s
 }
 
 // connectClient builds + connects a client with a local store and a doc
 // of the given clientID.
-func connectClient(t *testing.T, url, path string, clientID uint64, store *sqlite.Store) *client.Client {
+func connectClient(t *testing.T, url, path string, clientID uint64, store *memstore.Store) *client.Client {
 	t.Helper()
 	c, err := client.New(client.Options{
 		URL:        url,

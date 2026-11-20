@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/Deln0r/ygo"
 	"github.com/Deln0r/ygo/client"
-	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/persist/sqlite"
 )
 
@@ -132,7 +132,7 @@ func (c *Client) Connect() error {
 	}
 	c.inner = inner
 	if l != nil {
-		c.cancelWatch = c.d.inner.OnAfterTransaction(func(*doc.TransactionMut) {
+		c.cancelWatch = c.d.inner.OnAfterTransaction(func(*ygo.TransactionMut) {
 			l.OnDocChanged()
 		})
 	}

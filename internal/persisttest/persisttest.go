@@ -1,31 +1,88 @@
-package persist_test
+// Package persisttest is the conformance suite for persist.VersionedStore
+// implementations: what a store does with updates (append, read back,
+// compact with Flush, refuse to compact an incomplete log), documents
+// (exist, list, clear) and versions (save, list, read, delete, restore,
+// prune), and the persist helpers on top of it. Run calls every test
+// against stores opened by the caller, so the core's in-memory store and
+// persist/sqlite are held to one behaviour.
+package persisttest
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
 	"testing"
 
+	ygo "github.com/Deln0r/ygo"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/persist"
-	"github.com/Deln0r/ygo/persist/sqlite"
 )
 
-// newTestStore returns a fresh in-memory sqlite store with cleanup
-// registered on the test. Use this for every persist-layer test so
-// no test leaves shared state behind.
-func newTestStore(t *testing.T) *sqlite.Store {
+// openStore opens the store under test (set by Run); newTestStore also
+// closes it when the test ends.
+var openStore func(t *testing.T) persist.VersionedStore
+
+func newTestStore(t *testing.T) persist.VersionedStore {
 	t.Helper()
-	s, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
+	s := openStore(t)
 	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
+
+// Run runs the suite, each test against a store of its own from open.
+func Run(t *testing.T, open func(t *testing.T) persist.VersionedStore) {
+	openStore = open
+	defer func() { openStore = nil }()
+	for _, tc := range tests {
+		t.Run(tc.name, tc.fn)
+	}
+}
+
+var tests = []struct {
+	name string
+	fn   func(*testing.T)
+}{
+	{"TestStoreUpdate_RejectsEmpty", testStoreUpdate_RejectsEmpty},
+	{"TestStoreUpdate_GetUpdates_RoundTrip", testStoreUpdate_GetUpdates_RoundTrip},
+	{"TestGetUpdates_UnknownDoc_ReturnsEmpty", testGetUpdates_UnknownDoc_ReturnsEmpty},
+	{"TestDocumentExists", testDocumentExists},
+	{"TestListDocuments", testListDocuments},
+	{"TestClearDocument", testClearDocument},
+	{"TestLoadDoc_ReplayProducesEquivalentState", testLoadDoc_ReplayProducesEquivalentState},
+	{"TestLoadDoc_UnknownDoc_ReturnsEmpty", testLoadDoc_UnknownDoc_ReturnsEmpty},
+	{"TestLoadDoc_MultipleSeparateUpdates", testLoadDoc_MultipleSeparateUpdates},
+	{"TestFlush_CompactsToSingleUpdate", testFlush_CompactsToSingleUpdate},
+	{"TestFlush_NoOpOnZeroOrOneUpdate", testFlush_NoOpOnZeroOrOneUpdate},
+	{"TestGetStateVector", testGetStateVector},
+	{"TestGetDiff_AgainstEmptySV_EmitsAll", testGetDiff_AgainstEmptySV_EmitsAll},
+	{"TestGetDiff_CarriesUpdatesThatWait", testGetDiff_CarriesUpdatesThatWait},
+	{"TestGetDiff_AgainstFullSV_EmitsNothingMeaningful", testGetDiff_AgainstFullSV_EmitsNothingMeaningful},
+	{"TestGetDiff_UnknownDoc_ReturnsNil", testGetDiff_UnknownDoc_ReturnsNil},
+	{"TestMergeUpdates_PreservesState", testMergeUpdates_PreservesState},
+	{"TestMergeUpdates_EmptyInput", testMergeUpdates_EmptyInput},
+	{"TestCrossDocIsolation", testCrossDocIsolation},
+	{"TestStoreUpdate_ConcurrentAppends", testStoreUpdate_ConcurrentAppends},
+	{"TestClose_Idempotent", testClose_Idempotent},
+	{"TestLoadDoc_FixedClientIDInTheLogIsReplaced", testLoadDoc_FixedClientIDInTheLogIsReplaced},
+	{"TestSaveVersion_RoundTrip", testSaveVersion_RoundTrip},
+	{"TestSaveVersion_UnknownDocument", testSaveVersion_UnknownDocument},
+	{"TestVersions_SurviveFlushAndClear", testVersions_SurviveFlushAndClear},
+	{"TestRestoreVersion_RewindsLiveLog", testRestoreVersion_RewindsLiveLog},
+	{"TestRestoreVersion_NotFound", testRestoreVersion_NotFound},
+	{"TestGetVersionState_NotFound", testGetVersionState_NotFound},
+	{"TestDeleteVersion_Idempotent", testDeleteVersion_Idempotent},
+	{"TestPruneVersions_KeepsNewest", testPruneVersions_KeepsNewest},
+	{"TestSaveVersion_EmptyStateRejected", testSaveVersion_EmptyStateRejected},
+	{"TestLoadVersion_FixedClientIDInTheStateIsReplaced", testLoadVersion_FixedClientIDInTheStateIsReplaced},
+	{"TestMergeUpdates_RefusesIncompleteLog", testMergeUpdates_RefusesIncompleteLog},
+	{"TestFlush_IncompleteLogSurvives", testFlush_IncompleteLogSurvives},
+}
+
+// From persist/persist_test.go.
 
 // applyMapSet builds a doc, performs one Map.Set, and returns the
 // resulting V1 update bytes (the diff from empty SV). Convenience
@@ -40,7 +97,7 @@ func applyMapSet(t *testing.T, clientID uint64, key string, value any) []byte {
 	return encoding.EncodeStateAsUpdate(d)
 }
 
-func TestStoreUpdate_RejectsEmpty(t *testing.T) {
+func testStoreUpdate_RejectsEmpty(t *testing.T) {
 	s := newTestStore(t)
 	err := s.StoreUpdate(context.Background(), "doc", nil)
 	if !errors.Is(err, persist.ErrEmptyUpdate) {
@@ -52,7 +109,7 @@ func TestStoreUpdate_RejectsEmpty(t *testing.T) {
 	}
 }
 
-func TestStoreUpdate_GetUpdates_RoundTrip(t *testing.T) {
+func testStoreUpdate_GetUpdates_RoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -81,7 +138,7 @@ func TestStoreUpdate_GetUpdates_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestGetUpdates_UnknownDoc_ReturnsEmpty(t *testing.T) {
+func testGetUpdates_UnknownDoc_ReturnsEmpty(t *testing.T) {
 	s := newTestStore(t)
 	got, err := s.GetUpdates(context.Background(), "never-seen")
 	if err != nil {
@@ -92,7 +149,7 @@ func TestGetUpdates_UnknownDoc_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestDocumentExists(t *testing.T) {
+func testDocumentExists(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -116,7 +173,7 @@ func TestDocumentExists(t *testing.T) {
 	}
 }
 
-func TestListDocuments(t *testing.T) {
+func testListDocuments(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -139,7 +196,7 @@ func TestListDocuments(t *testing.T) {
 	}
 }
 
-func TestClearDocument(t *testing.T) {
+func testClearDocument(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -162,7 +219,7 @@ func TestClearDocument(t *testing.T) {
 	}
 }
 
-func TestLoadDoc_ReplayProducesEquivalentState(t *testing.T) {
+func testLoadDoc_ReplayProducesEquivalentState(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -204,7 +261,7 @@ func TestLoadDoc_ReplayProducesEquivalentState(t *testing.T) {
 	}
 }
 
-func TestLoadDoc_UnknownDoc_ReturnsEmpty(t *testing.T) {
+func testLoadDoc_UnknownDoc_ReturnsEmpty(t *testing.T) {
 	s := newTestStore(t)
 	d, err := persist.LoadDoc(context.Background(), s, "never-seen", doc.Options{ClientID: 600})
 	if err != nil {
@@ -218,7 +275,7 @@ func TestLoadDoc_UnknownDoc_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestLoadDoc_MultipleSeparateUpdates(t *testing.T) {
+func testLoadDoc_MultipleSeparateUpdates(t *testing.T) {
 	// Each update is encoded as its own diff and stored separately.
 	// LoadDoc must replay them in order and converge to the same
 	// state a single combined update would produce.
@@ -270,7 +327,7 @@ func TestLoadDoc_MultipleSeparateUpdates(t *testing.T) {
 	}
 }
 
-func TestFlush_CompactsToSingleUpdate(t *testing.T) {
+func testFlush_CompactsToSingleUpdate(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -314,7 +371,7 @@ func TestFlush_CompactsToSingleUpdate(t *testing.T) {
 	}
 }
 
-func TestFlush_NoOpOnZeroOrOneUpdate(t *testing.T) {
+func testFlush_NoOpOnZeroOrOneUpdate(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -343,7 +400,7 @@ func TestFlush_NoOpOnZeroOrOneUpdate(t *testing.T) {
 	}
 }
 
-func TestGetStateVector(t *testing.T) {
+func testGetStateVector(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -379,7 +436,7 @@ func TestGetStateVector(t *testing.T) {
 	}
 }
 
-func TestGetDiff_AgainstEmptySV_EmitsAll(t *testing.T) {
+func testGetDiff_AgainstEmptySV_EmitsAll(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -417,10 +474,10 @@ func TestGetDiff_AgainstEmptySV_EmitsAll(t *testing.T) {
 	}
 }
 
-// TestGetDiff_CarriesUpdatesThatWait: a log holding an update whose
+// testGetDiff_CarriesUpdatesThatWait: a log holding an update whose
 // dependency was never stored gives it to the peer, as yjs's state of the
 // same log does; GetDiff left it out.
-func TestGetDiff_CarriesUpdatesThatWait(t *testing.T) {
+func testGetDiff_CarriesUpdatesThatWait(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -459,7 +516,7 @@ func TestGetDiff_CarriesUpdatesThatWait(t *testing.T) {
 	}
 }
 
-func TestGetDiff_AgainstFullSV_EmitsNothingMeaningful(t *testing.T) {
+func testGetDiff_AgainstFullSV_EmitsNothingMeaningful(t *testing.T) {
 	// A diff against a remote SV that already covers everything
 	// should be applyable to a fresh doc without ill effect; in the
 	// trivial case it is the empty-update wire form (one client-count
@@ -496,7 +553,7 @@ func TestGetDiff_AgainstFullSV_EmitsNothingMeaningful(t *testing.T) {
 	}
 }
 
-func TestGetDiff_UnknownDoc_ReturnsNil(t *testing.T) {
+func testGetDiff_UnknownDoc_ReturnsNil(t *testing.T) {
 	s := newTestStore(t)
 	diff, err := persist.GetDiff(context.Background(), s, "missing", nil)
 	if err != nil {
@@ -507,7 +564,7 @@ func TestGetDiff_UnknownDoc_ReturnsNil(t *testing.T) {
 	}
 }
 
-func TestMergeUpdates_PreservesState(t *testing.T) {
+func testMergeUpdates_PreservesState(t *testing.T) {
 	// MergeUpdates standalone (no storage) must produce the same
 	// final state as applying its inputs sequentially.
 	src := doc.NewDocWithOptions(doc.Options{ClientID: 1300})
@@ -561,7 +618,7 @@ func TestMergeUpdates_PreservesState(t *testing.T) {
 	}
 }
 
-func TestMergeUpdates_EmptyInput(t *testing.T) {
+func testMergeUpdates_EmptyInput(t *testing.T) {
 	got, err := persist.MergeUpdates(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -571,7 +628,7 @@ func TestMergeUpdates_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestCrossDocIsolation(t *testing.T) {
+func testCrossDocIsolation(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -601,7 +658,7 @@ func TestCrossDocIsolation(t *testing.T) {
 	}
 }
 
-func TestStoreUpdate_ConcurrentAppends(t *testing.T) {
+func testStoreUpdate_ConcurrentAppends(t *testing.T) {
 	// SQLite serializes writes at the file lock. We verify the
 	// persist contract under contention: every StoreUpdate must
 	// either succeed or return error, and the final stored count
@@ -638,11 +695,8 @@ func TestStoreUpdate_ConcurrentAppends(t *testing.T) {
 	}
 }
 
-func TestClose_Idempotent(t *testing.T) {
-	s, err := sqlite.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+func testClose_Idempotent(t *testing.T) {
+	s := openStore(t)
 	if err := s.Close(); err != nil {
 		t.Errorf("first Close: %v", err)
 	}
@@ -666,7 +720,7 @@ func bytesEqual(a, b []byte) bool {
 // A doc loaded with a fixed ClientID that the log wrote under takes a new
 // random ID, as yjs does when it loads its own history, so its next edits
 // cannot collide with the stored ones; with another ID it keeps it.
-func TestLoadDoc_FixedClientIDInTheLogIsReplaced(t *testing.T) {
+func testLoadDoc_FixedClientIDInTheLogIsReplaced(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 7, "k", "v")); err != nil {
@@ -685,5 +739,334 @@ func TestLoadDoc_FixedClientIDInTheLogIsReplaced(t *testing.T) {
 	}
 	if d.ClientID() != 8 {
 		t.Fatalf("a doc loaded with an ID the log does not use got %d", d.ClientID())
+	}
+}
+
+// From persist/versions_test.go.
+
+// readKey loads the "settings" root map value for key from d.
+func readKey(d *doc.Doc, key string) any {
+	return types.NewMap(d.Branch("settings")).Get(key)
+}
+
+func testSaveVersion_RoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 100, "a", "one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 101, "b", "two")); err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := persist.SaveVersion(ctx, s, "doc", "checkpoint")
+	if err != nil {
+		t.Fatalf("SaveVersion: %v", err)
+	}
+
+	infos, err := s.ListVersions(ctx, "doc")
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("got %d versions, want 1", len(infos))
+	}
+	if infos[0].ID != id || infos[0].Label != "checkpoint" || infos[0].Size == 0 {
+		t.Errorf("info = %+v, want ID %d label %q non-zero size", infos[0], id, "checkpoint")
+	}
+	if infos[0].CreatedAt.IsZero() {
+		t.Error("CreatedAt is zero")
+	}
+
+	v, err := persist.LoadVersion(ctx, s, "doc", id, doc.Options{})
+	if err != nil {
+		t.Fatalf("LoadVersion: %v", err)
+	}
+	if got := readKey(v, "a"); got != "one" {
+		t.Errorf("a = %v, want one", got)
+	}
+	if got := readKey(v, "b"); got != "two" {
+		t.Errorf("b = %v, want two", got)
+	}
+}
+
+func testSaveVersion_UnknownDocument(t *testing.T) {
+	s := newTestStore(t)
+	_, err := persist.SaveVersion(context.Background(), s, "ghost", "")
+	if !errors.Is(err, persist.ErrUnknownDocument) {
+		t.Errorf("err = %v, want ErrUnknownDocument", err)
+	}
+}
+
+// testVersions_SurviveFlushAndClear locks the independence contract:
+// the live log can be compacted or cleared without touching history.
+func testVersions_SurviveFlushAndClear(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 110, "k", "v")); err != nil {
+		t.Fatal(err)
+	}
+	id, err := persist.SaveVersion(ctx, s, "doc", "kept")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Flush(ctx, "doc"); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if err := s.ClearDocument(ctx, "doc"); err != nil {
+		t.Fatalf("ClearDocument: %v", err)
+	}
+
+	v, err := persist.LoadVersion(ctx, s, "doc", id, doc.Options{})
+	if err != nil {
+		t.Fatalf("LoadVersion after clear: %v", err)
+	}
+	if got := readKey(v, "k"); got != "v" {
+		t.Errorf("k = %v, want v", got)
+	}
+}
+
+func testRestoreVersion_RewindsLiveLog(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 120, "k", "old")); err != nil {
+		t.Fatal(err)
+	}
+	id, err := persist.SaveVersion(ctx, s, "doc", "before")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 121, "k", "new")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RestoreVersion(ctx, "doc", id); err != nil {
+		t.Fatalf("RestoreVersion: %v", err)
+	}
+
+	d, err := persist.LoadDoc(ctx, s, "doc", doc.Options{})
+	if err != nil {
+		t.Fatalf("LoadDoc: %v", err)
+	}
+	if got := readKey(d, "k"); got != "old" {
+		t.Errorf("k = %v, want old (post-version update rewound)", got)
+	}
+	updates, err := s.GetUpdates(ctx, "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 {
+		t.Errorf("log has %d blobs after restore, want 1", len(updates))
+	}
+}
+
+func testRestoreVersion_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	err := s.RestoreVersion(context.Background(), "doc", 999)
+	if !errors.Is(err, persist.ErrVersionNotFound) {
+		t.Errorf("err = %v, want ErrVersionNotFound", err)
+	}
+}
+
+func testGetVersionState_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.GetVersionState(context.Background(), "doc", 999)
+	if !errors.Is(err, persist.ErrVersionNotFound) {
+		t.Errorf("err = %v, want ErrVersionNotFound", err)
+	}
+}
+
+func testDeleteVersion_Idempotent(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.DeleteVersion(context.Background(), "doc", 999); err != nil {
+		t.Errorf("deleting unknown version: %v", err)
+	}
+}
+
+func testPruneVersions_KeepsNewest(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 130, "k", "v")); err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for i := 0; i < 5; i++ {
+		id, err := persist.SaveVersion(ctx, s, "doc", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+
+	deleted, err := persist.PruneVersions(ctx, s, "doc", 2)
+	if err != nil {
+		t.Fatalf("PruneVersions: %v", err)
+	}
+	if deleted != 3 {
+		t.Errorf("deleted = %d, want 3", deleted)
+	}
+	infos, err := s.ListVersions(ctx, "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 || infos[0].ID != ids[3] || infos[1].ID != ids[4] {
+		t.Errorf("survivors = %+v, want IDs %d, %d", infos, ids[3], ids[4])
+	}
+
+	// Idempotent: nothing more to prune.
+	deleted, err = persist.PruneVersions(ctx, s, "doc", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Errorf("second prune deleted %d, want 0", deleted)
+	}
+}
+
+func testSaveVersion_EmptyStateRejected(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.SaveVersion(context.Background(), "doc", "x", nil)
+	if !errors.Is(err, persist.ErrEmptyUpdate) {
+		t.Errorf("err = %v, want ErrEmptyUpdate", err)
+	}
+}
+
+// LoadVersion with a fixed ClientID that the version's state wrote under
+// gives the loaded doc a new random ID, as LoadDoc does.
+func testLoadVersion_FixedClientIDInTheStateIsReplaced(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.StoreUpdate(ctx, "doc", applyMapSet(t, 7, "k", "v")); err != nil {
+		t.Fatal(err)
+	}
+	id, err := persist.SaveVersion(ctx, s, "doc", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := persist.LoadVersion(ctx, s, "doc", id, doc.Options{ClientID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ClientID() == 7 {
+		t.Fatal("the loaded version kept client ID 7, which its state wrote under")
+	}
+}
+
+// From persist/incomplete_log_test.go.
+
+// Two consecutive transaction updates captured from real yjs@13.6.32
+// (doc.on("update") on a Y.Doc with clientID=42: push "A", then push "B").
+// uB carries ONLY B's block, whose origin references A's - the exact shape a
+// y-websocket client broadcasts. A log holding uB without uA is causally
+// incomplete: reachable in the server because an update is applied and
+// broadcast BEFORE it is persisted, so a fast peer's dependent edit can
+// reach the Store first.
+const (
+	danglingUA = "01012a000801056974656d730177014100"
+	danglingUB = "01012a01882a000177014200"
+)
+
+func mustHex(t *testing.T, h string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func itemsLen(t *testing.T, blobs ...[]byte) int {
+	t.Helper()
+	d := ygo.NewDoc()
+	for _, b := range blobs {
+		if len(b) == 0 {
+			continue
+		}
+		if err := ygo.ApplyUpdate(d, b); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+	}
+	arr := ygo.NewArray(d, "items")
+	rt := d.ReadTxn()
+	defer rt.Close()
+	return int(arr.Len())
+}
+
+// testMergeUpdates_RefusesIncompleteLog is the data-loss regression: before
+// the fix, MergeUpdates of a log holding only the dependent update returned
+// an EMPTY snapshot (the pending block was silently dropped), and the
+// destructive replace in Flush then erased the original bytes forever. Now
+// it refuses with ErrIncompleteLog, and the complete log still compacts.
+func testMergeUpdates_RefusesIncompleteLog(t *testing.T) {
+	uA, uB := mustHex(t, danglingUA), mustHex(t, danglingUB)
+	if got := itemsLen(t, uB, uA); got != 2 {
+		t.Fatalf("sanity: out-of-order replay len=%d, want 2", got)
+	}
+
+	if _, err := persist.MergeUpdates([][]byte{uB}); !errors.Is(err, persist.ErrIncompleteLog) {
+		t.Fatalf("MergeUpdates(dangling) err=%v, want ErrIncompleteLog", err)
+	}
+
+	snap, err := persist.MergeUpdates([][]byte{uB, uA})
+	if err != nil {
+		t.Fatalf("MergeUpdates(complete) err=%v", err)
+	}
+	if got := itemsLen(t, snap); got != 2 {
+		t.Fatalf("compacted complete log replays len=%d, want 2", got)
+	}
+}
+
+// testFlush_IncompleteLogSurvives drives the same shape through the
+// store: a Flush over the causally incomplete log must refuse, leave
+// the original bytes in place, and succeed once the ancestor lands.
+func testFlush_IncompleteLogSurvives(t *testing.T) {
+	uA, uB := mustHex(t, danglingUA), mustHex(t, danglingUB)
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// An unrelated, self-contained update from another client: the log needs
+	// two entries because Flush short-circuits a single-update log without
+	// merging (already optimal - and, usefully, incapable of losing anything).
+	other := ygo.NewDocWithOptions(ygo.Options{ClientID: 7})
+	om := ygo.NewMap(other, "other")
+	otxn := other.WriteTxn()
+	om.Set(otxn, "k", "v")
+	otxn.Commit()
+	uC := ygo.EncodeStateAsUpdate(other)
+
+	if err := s.StoreUpdate(ctx, "d", uB); err != nil { // dependent, ancestor absent
+		t.Fatal(err)
+	}
+	if err := s.StoreUpdate(ctx, "d", uC); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Flush(ctx, "d"); !errors.Is(err, persist.ErrIncompleteLog) {
+		t.Fatalf("Flush(incomplete) err=%v, want ErrIncompleteLog", err)
+	}
+	got, err := s.GetUpdates(ctx, "d")
+	if err != nil || len(got) != 2 || itemsLen(t, got[0], got[1], uA) != 2 {
+		t.Fatalf("refused flush must leave the log intact: n=%d err=%v", len(got), err)
+	}
+
+	if err := s.StoreUpdate(ctx, "d", uA); err != nil { // ancestor lands
+		t.Fatal(err)
+	}
+	if err := s.Flush(ctx, "d"); err != nil {
+		t.Fatalf("Flush(complete) err=%v", err)
+	}
+	got, err = s.GetUpdates(ctx, "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2 := itemsLen(t, got...); got2 != 2 {
+		t.Fatalf("post-flush replay len=%d, want 2 (compaction lost a dependent update)", got2)
+	}
+	if len(got) != 1 {
+		t.Fatalf("complete log compacted into %d blobs, want 1", len(got))
 	}
 }

@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Deln0r/ygo/internal/anyval"
-	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo"
 )
 
 // jsonToValue decodes one JSON value into the any the CRDT stores —
@@ -25,10 +24,10 @@ func jsonToValue(b []byte) (any, error) {
 // dedicated GetMap / GetArray / GetText accessors instead.
 func valueToJSON(v any) []byte {
 	switch v.(type) {
-	case *types.Map, *types.Array, *types.Text:
+	case *ygo.Map, *ygo.Array, *ygo.Text:
 		return []byte("null")
 	}
-	b, err := json.Marshal(anyval.ForJSON(v))
+	b, err := json.Marshal(ygo.JSONValue(v))
 	if err != nil {
 		return []byte("null")
 	}

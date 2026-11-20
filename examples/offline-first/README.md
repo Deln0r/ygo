@@ -9,12 +9,13 @@ server on the next successful connect.
 
 ```sh
 # No server reachable: the log persists locally across restarts.
-go run ./examples/offline-first -store notes.db -add "first note"
-go run ./examples/offline-first -store notes.db -add "second note"
-go run ./examples/offline-first -store notes.db              # lists both
+cd examples/offline-first       # a module of its own (it uses persist/sqlite)
+go run . -store notes.db -add "first note"
+go run . -store notes.db -add "second note"
+go run . -store notes.db              # lists both
 
 # With a server (e.g. the collab-server example), offline edits sync up:
-go run ./examples/offline-first -store notes.db -url ws://localhost:8080/collab
+go run . -store notes.db -url ws://localhost:8080/collab
 ```
 
 ## What it shows

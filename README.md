@@ -5,7 +5,7 @@
 [![Coverage](https://coveralls.io/repos/github/Deln0r/ygo/badge.svg?branch=main)](https://coveralls.io/github/Deln0r/ygo?branch=main)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Deln0r/ygo.svg)](https://pkg.go.dev/github.com/Deln0r/ygo)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg)](go.mod)
+[![Go Version](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg)](go.mod)
 [![Yjs Protocol](https://img.shields.io/badge/Yjs%20protocol-V1%20%2B%20V2-7c3aed.svg)](https://github.com/yjs/yjs)
 [![Live Demo](https://img.shields.io/badge/live%20demo-ygo.deln0r.com-22c55e.svg)](https://ygo.deln0r.com)
 [![Codeberg Mirror](https://img.shields.io/badge/codeberg-mirror-2185d0?logo=codeberg&logoColor=white)](https://codeberg.org/Deln0r/ygo)
@@ -17,7 +17,7 @@ Ygo speaks the **Yjs V1 and V2 wire formats** byte for byte, apart from whole-nu
 ## Highlights
 
 - **Byte-level wire compatibility, verified in both directions.** 533 cross-language fixture scenarios (generated from `yjs@13.6.33`) cover the V1 and V2 update formats, snapshots, subdocuments, undo, observers, relative positions, GC, awareness, the sync protocol, and the Any values JavaScript has and Go does not (undefined, BigInt, -0), JS to Go and Go to JS, plus 56 lib0 primitive vectors. The suite runs in CI on every push to `main` and every pull request, so a regression in either direction fails the build. The exceptions are the Any values listed under [Strings and values](#strings-and-values).
-- **Pure Go, no CGO.** The CRDT core, the sync client and the server compile with `CGO_ENABLED=0` for all 47 targets in `go tool dist list`, `js/wasm` and `wasip1/wasm` included. The SQLite-backed store in [`persist/sqlite`](persist/sqlite), and with it `yserve`, builds only where `modernc.org/sqlite` does: not on wasm, AIX, DragonFly, illumos, Plan 9, Solaris, MIPS or big-endian ppc64 Linux, NetBSD other than amd64, or OpenBSD other than amd64 and arm64. Elsewhere, supply your own [`persist.Store`](persist) (it is a seven-method interface). `gomobile bind` produces an Android AAR (built in CI on every push to `main` and every pull request) and an iOS xcframework (built by hand on 2026-11-10) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
+- **Pure Go, no CGO.** The CRDT core, the sync client and the server compile with `CGO_ENABLED=0` for all 47 targets in `go tool dist list`, `js/wasm` and `wasip1/wasm` included. The core module needs Go 1.23. The SQLite-backed store in [`persist/sqlite`](persist/sqlite), and with it `yserve` and the mobile SDK, is a module of its own that needs Go 1.26, and builds only where `modernc.org/sqlite` does: not on wasm, AIX, DragonFly, illumos, Plan 9, Solaris, MIPS or big-endian ppc64 Linux, NetBSD other than amd64, or OpenBSD other than amd64 and arm64. Elsewhere, supply your own [`persist.Store`](persist) (it is a seven-method interface). `gomobile bind` produces an Android AAR (built in CI on every push to `main` and every pull request) and an iOS xcframework (built by hand on 2026-11-10) carrying a full mobile SDK: editable Text / Map, undo, cursors, and a built-in background sync client (WebSocket + reconnect), so a Swift / Kotlin app only renders UI. No V8, no embedded JavaScript engine, no Rust FFI bridge.
 - **Embeddable sync client, offline-first.** The [`client`](client) package is a Go-native `y-websocket` provider, and with `Options.Hocuspocus` a Hocuspocus one: handshake, incremental updates, awareness, reconnect with backoff, and a liveness check that redials a connection which went silent. With a `LocalStore` it persists the document to disk (pure-Go SQLite), loads it before any network so the app works offline, and syncs edits made offline up on reconnect. The building block for bots, CLI tools, server-side agents, and the mobile SDK (`EnableOfflineStore`).
 - **The Yjs shared types.** Map, Array, Text (rich-text formatting, Quill deltas, embeds), XML types, Awareness, UndoManager, Snapshots / time-travel, and Subdocuments. Not implemented: the legacy `XmlHook`, observers on `XmlFragment` and `XmlElement`, and `Text.ObserveDeep`.
 - **Change observers.** `Map.Observe` / `Array.Observe` / `Text.Observe` deliver Quill-style deltas of exactly what changed; `ObserveDeep` bubbles events from nested types with their path. Semantic parity with yjs's YMapEvent / YArrayEvent / YTextEvent. On mobile, `ObserveChanges` hands a native editor the delta as JSON.
@@ -32,6 +32,11 @@ Ygo speaks the **Yjs V1 and V2 wire formats** byte for byte, apart from whole-nu
 **Live demo:** open [ygo.deln0r.com](https://ygo.deln0r.com) in two browser tabs and start typing. The page runs a stock `y-websocket` client in JavaScript against a pure-Go server.
 
 ## Quick start
+
+```bash
+go get github.com/Deln0r/ygo                  # Go 1.23 or later
+go get github.com/Deln0r/ygo/persist/sqlite   # the SQLite store, a module of its own (Go 1.26)
+```
 
 ```go
 package main
@@ -312,6 +317,8 @@ Runnable examples in [examples/](examples):
 - [offline-first](examples/offline-first) — client-side offline persistence with a `LocalStore`: usable with no network, edits survive restarts and sync up on reconnect.
 
 The core CRDT API also has output-verified [runnable examples on pkg.go.dev](https://pkg.go.dev/github.com/Deln0r/ygo#pkg-examples) (Map, Array, Text, two-document sync, per-transaction updates, UndoManager).
+
+Each example is a module of its own (`cd examples/collab-server && go run .`); `collab-client` is part of the core module (`go run ./examples/collab-client`).
 
 ## Documentation
 

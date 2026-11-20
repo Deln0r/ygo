@@ -225,11 +225,12 @@ go install golang.org/x/mobile/cmd/gomobile@latest
 go install golang.org/x/mobile/cmd/gobind@latest
 $(go env GOPATH)/bin/gomobile init
 
-# In a fresh checkout of github.com/Deln0r/ygo:
+# In a fresh checkout of github.com/Deln0r/ygo (gomobile is a module of
+# its own, Go 1.26; see "Note on go.mod" for binding an unreleased core):
+cd gomobile
 go get golang.org/x/mobile/bind   # gomobile build dependency
 $(go env GOPATH)/bin/gomobile bind -target=ios,iossimulator \
-    -o /tmp/Ygo.xcframework \
-    github.com/Deln0r/ygo/gomobile
+    -o /tmp/Ygo.xcframework .
 ```
 
 Produces a `.xcframework` containing:
@@ -263,13 +264,13 @@ $SDK/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-21"
 # Per-build:
 export ANDROID_HOME=$SDK
 export ANDROID_NDK_HOME=$SDK/ndk/27.0.12077973
+cd gomobile
 go get golang.org/x/mobile/bind   # gomobile build dependency
 
 $(go env GOPATH)/bin/gomobile bind \
     -target=android \
     -androidapi 21 \
-    -o /tmp/ygo.aar \
-    github.com/Deln0r/ygo/gomobile
+    -o /tmp/ygo.aar .
 ```
 
 Produces an `.aar` (Android archive) containing native JNI libraries
@@ -299,8 +300,16 @@ in service.
 
 ## Note on `go.mod`
 
+Since 1.47.0 `gomobile` is a module of its own (it uses the SQLite store,
+which needs Go 1.26; the core module needs 1.23), using only the core's
+public API, and requiring the core and `persist/sqlite` at the version it
+was released with. To bind a checkout whose core is not released yet, point
+the module at it first: `go mod edit -replace github.com/Deln0r/ygo=..
+-replace github.com/Deln0r/ygo/persist/sqlite=../persist/sqlite` (CI does
+this; do not commit it).
+
 `gomobile bind` requires `golang.org/x/mobile/bind` to be present
-in the module's dependency graph at build time. The main `go.mod`
+in the module's dependency graph at build time. The gomobile `go.mod`
 deliberately does NOT carry this dep, so adopters who never touch
 mobile pull nothing extra. Adopters running their own
 `gomobile bind` should `go get golang.org/x/mobile/bind` in

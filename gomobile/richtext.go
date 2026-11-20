@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Deln0r/ygo/internal/types"
+	"github.com/Deln0r/ygo"
 )
 
 // ApplyDelta applies a Quill-style delta to the text in one
@@ -81,11 +81,11 @@ func (t *Text) InsertEmbed(index int, embedJSON []byte) error {
 
 // parseAttrs unmarshals a JSON object into the format-attribute map.
 // Empty input means no attributes.
-func parseAttrs(b []byte) (types.Attrs, error) {
+func parseAttrs(b []byte) (ygo.Attrs, error) {
 	if len(b) == 0 {
 		return nil, nil
 	}
-	var attrs types.Attrs
+	var attrs ygo.Attrs
 	if err := json.Unmarshal(b, &attrs); err != nil {
 		return nil, fmt.Errorf("gomobile: parse attributes: %w", err)
 	}
@@ -94,14 +94,14 @@ func parseAttrs(b []byte) (types.Attrs, error) {
 
 // parseQuillDelta converts a Quill-style JSON delta into the internal
 // op slice ApplyDelta consumes.
-func parseQuillDelta(b []byte) ([]types.DeltaOp, error) {
+func parseQuillDelta(b []byte) ([]ygo.DeltaOp, error) {
 	var raw []map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, fmt.Errorf("gomobile: parse delta: %w", err)
 	}
-	ops := make([]types.DeltaOp, 0, len(raw))
+	ops := make([]ygo.DeltaOp, 0, len(raw))
 	for i, m := range raw {
-		var op types.DeltaOp
+		var op ygo.DeltaOp
 		switch {
 		case m["insert"] != nil:
 			// Decode once into any, then classify: a JSON string is a text
@@ -134,7 +134,7 @@ func parseQuillDelta(b []byte) ([]types.DeltaOp, error) {
 			op.Delete = n
 		}
 		if a := m["attributes"]; a != nil {
-			var attrs types.Attrs
+			var attrs ygo.Attrs
 			if err := json.Unmarshal(a, &attrs); err != nil {
 				return nil, fmt.Errorf("gomobile: delta op[%d] attributes: %w", i, err)
 			}

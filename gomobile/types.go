@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Deln0r/ygo/internal/block"
-	"github.com/Deln0r/ygo/internal/types"
-	"github.com/Deln0r/ygo/internal/undo"
-	"github.com/Deln0r/ygo/internal/utf16"
+	"github.com/Deln0r/ygo"
 )
 
 // Text is the gomobile-bindable handle for a shared text type: the
@@ -17,7 +14,7 @@ import (
 // mobile bridge clean).
 type Text struct {
 	d         *Doc
-	inner     *types.Text
+	inner     *ygo.Text
 	observeMu sync.Mutex // serializes ObserveChanges' replace step
 	unobserve func()
 }
@@ -73,23 +70,23 @@ func (t *Text) EncodeCursor(index, assoc int) ([]byte, error) {
 		return nil, fmt.Errorf("gomobile: negative index %d", index)
 	}
 	rtxn := t.d.inner.ReadTxn()
-	rpos, err := types.CreateRelativePositionFromTypeIndex(t.inner, uint64(index), int64(assoc))
+	rpos, err := ygo.CreateRelativePositionFromTypeIndex(t.inner, uint64(index), int64(assoc))
 	rtxn.Close()
 	if err != nil {
 		return nil, err
 	}
-	return types.EncodeRelativePosition(rpos)
+	return ygo.EncodeRelativePosition(rpos)
 }
 
 // ResolveCursor resolves an encoded relative position back to a
 // current index in this text. Returns -1 when the anchor is unknown
 // to this replica, garbage-collected, or belongs to another type.
 func (t *Text) ResolveCursor(encoded []byte) int {
-	rpos, err := types.DecodeRelativePosition(encoded)
+	rpos, err := ygo.DecodeRelativePosition(encoded)
 	if err != nil {
 		return -1
 	}
-	abs, ok := types.CreateAbsolutePositionFromRelativePosition(t.d.inner, rpos)
+	abs, ok := ygo.CreateAbsolutePositionFromRelativePosition(t.d.inner, rpos)
 	if !ok || abs.Branch != t.inner.Branch() {
 		return -1
 	}
@@ -102,7 +99,7 @@ func (t *Text) ResolveCursor(encoded []byte) int {
 // read back as empty strings; use the bytes-level Doc API for those.
 type Map struct {
 	d         *Doc
-	inner     *types.Map
+	inner     *ygo.Map
 	observeMu sync.Mutex // serializes ObserveChanges' replace step
 	unobserve func()
 }
@@ -154,7 +151,7 @@ func (m *Map) Len() int {
 // UndoManager is the gomobile-bindable scoped undo/redo handle.
 // Construct via Doc.NewTextUndoManager / Doc.NewMapUndoManager.
 type UndoManager struct {
-	inner *undo.UndoManager
+	inner *ygo.UndoManager
 }
 
 // NewTextUndoManager returns an UndoManager watching the shared text
@@ -163,7 +160,7 @@ type UndoManager struct {
 // origin, which includes updates applied with plain ApplyUpdate.
 func (d *Doc) NewTextUndoManager(name string) *UndoManager {
 	t := rootText(d, name)
-	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{t.Branch()}, d.undoOptions())}
+	return &UndoManager{inner: ygo.NewUndoManagerWithOptions(d.inner, d.undoOptions(), t)}
 }
 
 // NewMapUndoManager returns an UndoManager watching the shared map
@@ -171,42 +168,34 @@ func (d *Doc) NewTextUndoManager(name string) *UndoManager {
 // NewTextUndoManager does.
 func (d *Doc) NewMapUndoManager(name string) *UndoManager {
 	m := rootMap(d, name)
-	return &UndoManager{inner: undo.NewUndoManager(d.inner, []*block.Branch{m.Branch()}, d.undoOptions())}
+	return &UndoManager{inner: ygo.NewUndoManagerWithOptions(d.inner, d.undoOptions(), m)}
 }
 
 // rootText, rootMap, rootArray and rootXmlFragment find and type a root
 // under the document's write lock (Doc.WithRoot), so a transaction on
 // another goroutine never sees it half typed.
-func rootText(d *Doc, name string) *types.Text {
-	var t *types.Text
-	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { t = types.NewText(b) })
-	return t
+func rootText(d *Doc, name string) *ygo.Text {
+	return ygo.NewText(d.inner, name)
 }
 
-func rootMap(d *Doc, name string) *types.Map {
-	var m *types.Map
-	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { m = types.NewMap(b) })
-	return m
+func rootMap(d *Doc, name string) *ygo.Map {
+	return ygo.NewMap(d.inner, name)
 }
 
-func rootArray(d *Doc, name string) *types.Array {
-	var a *types.Array
-	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { a = types.NewArray(b) })
-	return a
+func rootArray(d *Doc, name string) *ygo.Array {
+	return ygo.NewArray(d.inner, name)
 }
 
-func rootXmlFragment(d *Doc, name string) *types.XmlFragment {
-	var f *types.XmlFragment
-	d.inner.WithRoot(utf16.ValidString(name), func(b *block.Branch) { f = types.NewXmlFragment(b) })
-	return f
+func rootXmlFragment(d *Doc, name string) *ygo.XmlFragment {
+	return ygo.NewXmlFragment(d.inner, name)
 }
 
 // undoOptions tracks the handle's origin; the zero Options track nil.
-func (d *Doc) undoOptions() undo.Options {
+func (d *Doc) undoOptions() ygo.UndoManagerOptions {
 	if d.origin == "" {
-		return undo.Options{}
+		return ygo.UndoManagerOptions{}
 	}
-	return undo.Options{TrackedOrigins: map[any]struct{}{d.origin: {}}}
+	return ygo.UndoManagerOptions{TrackedOrigins: map[any]struct{}{d.origin: {}}}
 }
 
 // AddTrackedOrigin makes the manager also capture transactions with this

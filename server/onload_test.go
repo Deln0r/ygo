@@ -11,9 +11,9 @@ import (
 
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/encoding"
+	"github.com/Deln0r/ygo/internal/memstore"
 	syncpkg "github.com/Deln0r/ygo/internal/sync"
 	"github.com/Deln0r/ygo/internal/types"
-	"github.com/Deln0r/ygo/persist/sqlite"
 	"github.com/Deln0r/ygo/server"
 )
 
@@ -97,7 +97,7 @@ func TestServer_OnLoadDocument_StableSeed_SurvivesEvictionWithStore(t *testing.T
 	seed := encoding.EncodeStateAsUpdate(src)
 
 	dbPath := filepath.Join(t.TempDir(), "onload.db")
-	store, err := sqlite.Open(dbPath)
+	store, err := memstore.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

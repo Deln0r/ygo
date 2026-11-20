@@ -3,6 +3,9 @@ name: test
 on:
   push:
     branches: [main]
+    # The nested modules' tags too: the published-dependencies job checks
+    # each module against the versions it requires once they are out.
+    tags: ["v*", "persist/sqlite/v*", "gomobile/v*", "cmd/yserve/v*", "cmd/ygo-server/v*"]
   pull_request:
     branches: [main]
 
@@ -23,11 +26,15 @@ jobs:
         # the cost is that a new Go release can turn this red without a
         # commit, which for a library is the early warning we want.
         #
-        # The floor stays pinned because it is a promise: go.mod says 1.26.
-        # It moved up from 1.25 when modernc.org/sqlite 1.60 started to
-        # require 1.26, after 1.25 had left upstream support with the 1.27
-        # release. Raising it again is a separate, adopter-visible decision.
-        go: ["1.26", "stable"]
+        # The floor stays pinned because it is a promise: the core's go.mod
+        # says 1.23 (since 1.47.0, when SQLite and its users moved to nested
+        # modules that say 1.26). The jobs run the core module alone (no
+        # go.work in a checkout), and the floor leg keeps the toolchain it
+        # was given (GOTOOLCHAIN=local), so nothing newer can pass for it.
+        go: ["1.23", "stable"]
+    env:
+      GOWORK: "off"
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -35,6 +42,11 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: go mod download
         run: go mod download
+      - name: go.mod and go.sum are tidy at the floor
+        if: matrix.go != 'stable'
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
       - name: go vet
         run: go vet ./...
       - name: go test
@@ -45,7 +57,9 @@ jobs:
         # Coverage counts every library package from every test binary
         # (-coverpkg), not only each package's own tests: much of
         # internal/... is exercised through the public API tests in the
-        # root package. Commands, examples and benchmarks are left out.
+        # root package. Commands, examples and benchmarks are left out, and
+        # since 1.47.0 so are the nested modules (persist/sqlite, gomobile,
+        # the server commands): their tests run in the nested-modules job.
         run: |
           pkgs=$(go list ./... | grep -v -E '/(cmd|examples|benchmarks)(/|$)' | paste -sd, -)
           go test -race -coverpkg="$pkgs" -coverprofile=coverage.txt -covermode=atomic ./...
@@ -68,6 +82,58 @@ jobs:
           # docs-only commit red with every test passing: a missing upload
           # must not fail the build.
           fail-on-error: false
+
+  nested-modules:
+    name: nested modules (persist/sqlite, gomobile, commands, examples)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: in the workspace, against this checkout of the core
+        run: |
+          ./tools/go-work.sh
+          ./tools/check-modules.sh
+          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+            echo "== $d"
+            (cd "$d" && go vet ./... && go test -race ./...)
+          done
+      - name: the examples, through their replace directives
+        env:
+          GOWORK: "off"
+        run: |
+          for d in examples/collab-server examples/offline-first; do
+            echo "== $d"
+            (cd "$d" && go vet ./... && go test -race ./...)
+          done
+
+  published-dependencies:
+    name: nested modules against the published versions they require
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: tidy, build and vet outside the workspace
+        # What an adopter resolves: each module with the core (and
+        # persist/sqlite) at the versions its go.mod requires, from the
+        # proxy. Between a core tag and the nested ones those versions may
+        # not be out yet; on a branch that is a notice, on a tag a failure.
+        run: |
+          v=$(awk '$1 == "github.com/Deln0r/ygo" { print $2; exit }' persist/sqlite/go.mod)
+          if ! go list -m "github.com/Deln0r/ygo@$v" > /dev/null 2>&1 || ! go list -m "github.com/Deln0r/ygo/persist/sqlite@$v" > /dev/null 2>&1; then
+            if [ "${GITHUB_REF_TYPE}" = tag ]; then echo "required $v is not published"; exit 1; fi
+            echo "::notice::the core or persist/sqlite $v is not published yet; skipped"
+            exit 0
+          fi
+          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+            echo "== $d"
+            (cd "$d" && go mod tidy && git diff --exit-code -- go.mod go.sum && go build ./... && go vet ./...)
+          done
 
   backplane-nats:
     name: backplane-nats (nested module)
@@ -99,13 +165,19 @@ jobs:
           go build ./...
 
   cross-compile:
-    name: cross-compile (the targets the README claims)
+    name: cross-compile (the targets the README claims, go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.23", "stable"]
+    env:
+      GOWORK: "off"
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: stable
+          go-version: ${{ matrix.go }}
       # Build-only, no tests: this job exists so the portability claim on the
       # README cannot rot silently. Nothing else in CI cross-compiles, which is
       # how the wasm caveat below went unnoticed until someone tried it by hand.
@@ -122,14 +194,14 @@ jobs:
           # consumes there anyway.
           for t in ios/arm64 android/amd64; do
             echo "== $t"
-            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist/... ./client ./server/... ./gomobile ./internal/...
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist/... ./client ./server/... ./internal/...
           done
-      - name: wasm, minus the SQLite store
+      - name: wasm
         run: |
-          # persist/sqlite is deliberately excluded: modernc.org/sqlite is
-          # transpiled C and modernc.org/libc has no wasm build. A browser
-          # adopter supplies its own persist.Store, so everything else must
-          # keep compiling for wasm.
+          # The SQLite store is a nested module (modernc.org/sqlite is
+          # transpiled C and modernc.org/libc has no wasm build); a browser
+          # adopter supplies its own persist.Store, so the core must keep
+          # compiling for wasm.
           for t in js/wasm wasip1/wasm; do
             echo "== $t"
             GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist ./client ./server ./internal/...
@@ -151,7 +223,9 @@ jobs:
       # paste, rooms with a slash, a restart with a store, -path-prefix.
       # Two bugs lived behind passing fixtures until it existed.
       - name: build yserve
-        run: go build -o "$RUNNER_TEMP/yserve" ./cmd/yserve
+        run: |
+          ./tools/go-work.sh
+          go build -o "$RUNNER_TEMP/yserve" ./cmd/yserve
       - name: install the clients
         working-directory: testdata/e2e
         run: npm ci
@@ -172,6 +246,7 @@ jobs:
           node-version: "22"
       - name: build the server and hook fixture
         run: |
+          ./tools/go-work.sh
           go build -o "$RUNNER_TEMP/yserve" ./cmd/yserve
           go build -o "$RUNNER_TEMP/hpserver" ./testdata/e2e/hpserver
       - name: install the providers
@@ -225,9 +300,14 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile@$MOBILE
           go install golang.org/x/mobile/cmd/gobind@$MOBILE
           gomobile init
+          # gomobile is a module of its own; bind it against this checkout
+          # through replace directives (CI-only edits, not committed).
+          cd gomobile
+          export GOWORK=off
+          go mod edit -replace github.com/Deln0r/ygo=.. -replace github.com/Deln0r/ygo/persist/sqlite=../persist/sqlite
           go get golang.org/x/mobile/bind@$MOBILE
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          gomobile bind -target=android -androidapi 21 -o "$RUNNER_TEMP/ygo.aar" ./gomobile
+          gomobile bind -target=android -androidapi 21 -o "$RUNNER_TEMP/ygo.aar" .
           unzip -l "$RUNNER_TEMP/ygo.aar" | grep -q 'jni/arm64-v8a/libgojni.so'
 
   matrix-transport:
@@ -302,6 +382,13 @@ jobs:
           # produce identical results. Bump deliberately. See
           # docs/tech-debt.md for the lint-not-enforced history.
           version: v2.12.2
+      - name: lint the nested modules (in the workspace)
+        run: |
+          ./tools/go-work.sh
+          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+            echo "== $d"
+            (cd "$d" && golangci-lint run)
+          done
 
   fixtures:
     name: fixtures (cross-language)

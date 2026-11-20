@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Deln0r/ygo/internal/anyval"
 	"github.com/Deln0r/ygo/internal/awareness"
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -334,6 +335,10 @@ func CreateAbsolutePositionFromRelativePosition(d *Doc, rpos RelativePosition) (
 // passed at construction. Embedders typically pair an Awareness
 // with a Doc and use d.ClientID() as the awareness clientID.
 type Awareness = awareness.Awareness
+
+// AwarenessSummary is what an Awareness.OnChange callback is told: the
+// clients whose state was added, updated or removed by one change.
+type AwarenessSummary = awareness.Summary
 
 // NewAwareness returns a fresh Awareness for the given local
 // clientID, typically d.ClientID(). The awareness keeps that ID when
@@ -833,3 +838,10 @@ func DiffUpdate(update, remoteSV []byte) ([]byte, error) {
 	}
 	return EncodeDiff(d, remoteSV)
 }
+
+// JSONValue returns v as JSON.stringify sees it, for encoding/json: an
+// undefined object entry is dropped, an undefined anywhere else is null,
+// -0 is 0, and a BigInt is a JSON number with all its digits (where
+// JSON.stringify throws). Containers are copied; v is not changed. Values
+// that are not Any trees pass through.
+func JSONValue(v any) any { return anyval.ForJSON(v) }
