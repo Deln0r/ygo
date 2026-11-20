@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -148,5 +149,34 @@ func TestInvalidatePositionalMarkers_OnlyStale(t *testing.T) {
 	}
 	if !w.PositionalChanged(a) || !w.PositionalChanged(b) {
 		t.Fatal("the transaction no longer reports a positional change")
+	}
+}
+
+// TestFollowUp_CommitIsRunByItsOpener: a follow-up committed by hand is
+// left to the Commit that opened it, which runs it once, after the
+// transaction that opened it; committing it would run it twice and release
+// the lock twice.
+func TestFollowUp_CommitIsRunByItsOpener(t *testing.T) {
+	d := NewDoc()
+	var order []any
+	d.OnAfterTransaction(func(tr *TransactionMut) {
+		order = append(order, tr.Origin)
+		if tr.Origin == "root" {
+			f := OpenFollowUp(tr)
+			f.Origin = "follow-up"
+			f.Commit()
+		}
+	})
+	w := d.WriteTxn()
+	w.Origin = "root"
+	w.Commit()
+	if fmt.Sprint(order) != "[root follow-up]" {
+		t.Fatalf("after-transaction order %v, want [root follow-up]", order)
+	}
+	// The lock is free again: a second transaction opens and commits.
+	w = d.WriteTxn()
+	w.Commit()
+	if f := OpenFollowUp(w); f != nil {
+		t.Fatal("a follow-up opened after its opener's Commit finished")
 	}
 }

@@ -370,3 +370,39 @@ func TestClear_FromUpdateHandlerBeforeDeltaReadFollowUp(t *testing.T) {
 		t.Fatalf("%d steps after the Clear, want the getter's deletion", steps)
 	}
 }
+
+// TestUndo_FollowUpWithAnOrigin: a tracked transaction run after the
+// manager's own Undo transaction (opened from its after-transaction
+// handler) goes to the redo stack whatever its origin, as yjs cleans it
+// up within undo() with its undoing flag set (yjs 13.6.33: stacks 0 and
+// 2, text "x"; repro probe_undo_followup.mjs).
+func TestUndo_FollowUpWithAnOrigin(t *testing.T) {
+	d := doc.NewDoc()
+	txt := types.NewText(d.Branch("t"))
+	um := NewUndoManager(d, []*block.Branch{txt.Branch()}, Options{
+		CaptureTimeout: -1,
+		TrackedOrigins: map[any]struct{}{nil: {}, "callback": {}},
+	})
+	w := d.WriteTxn()
+	txt.Insert(w, 0, "a")
+	w.Commit()
+	fired := false
+	d.OnAfterTransaction(func(tr *doc.TransactionMut) {
+		if tr.Origin == um && !fired {
+			fired = true
+			f := doc.OpenFollowUp(tr)
+			f.Origin = "callback"
+			txt.Insert(f, 0, "x")
+		}
+	})
+	um.Undo()
+	um.mu.Lock()
+	undo, redo := len(um.undoStack), len(um.redoStack)
+	um.mu.Unlock()
+	r := d.ReadTxn()
+	s := txt.String()
+	r.Close()
+	if undo != 0 || redo != 2 || s != "x" {
+		t.Fatalf("stacks %d and %d, text %q; yjs has 0 and 2, \"x\"", undo, redo, s)
+	}
+}

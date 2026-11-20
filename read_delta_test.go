@@ -139,3 +139,36 @@ func TestReadDelta_AfterTheCommit(t *testing.T) {
 		t.Fatalf("reading after the commit changed the document (%d updates)", updates)
 	}
 }
+
+// TestReadDelta_OnAnotherGoroutineAfterTheCommit: events handed to another
+// goroutine and read there after the commit returned change nothing and
+// race with nothing (run under -race).
+func TestReadDelta_OnAnotherGoroutineAfterTheCommit(t *testing.T) {
+	d := ygo.NewDocWithOptions(ygo.Options{ClientID: 99})
+	ch := make(chan *ygo.TextEvent, 8)
+	ygo.NewText(d, "t").Observe(func(e *ygo.TextEvent) { ch <- e })
+	for _, u := range concurrentBold(t, false) {
+		if err := ygo.ApplyUpdateV2(d, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(ch)
+	before := string(ygo.EncodeStateAsUpdateV2(d))
+	done := make(chan []string)
+	go func() {
+		var got []string
+		for e := range ch {
+			got = append(got, fmt.Sprint(e.ReadDelta()), fmt.Sprint(e.Delta))
+		}
+		done <- got
+	}()
+	got := <-done
+	for i := 0; i < len(got); i += 2 {
+		if got[i] != got[i+1] {
+			t.Fatalf("event %d: ReadDelta %s, Delta %s", i/2, got[i], got[i+1])
+		}
+	}
+	if string(ygo.EncodeStateAsUpdateV2(d)) != before {
+		t.Fatal("reading after the commit changed the document")
+	}
+}

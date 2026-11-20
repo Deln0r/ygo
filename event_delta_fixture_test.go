@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/Deln0r/ygo"
@@ -21,10 +22,11 @@ type eventDeltaReceiver struct {
 	Trace  []any `json:"trace"`
 	Deltas []any `json:"deltas"`
 	Stacks []struct {
-		Step  string `json:"step"`
-		Undo  int    `json:"undo"`
-		Redo  int    `json:"redo"`
-		State string `json:"state"`
+		Step    string `json:"step"`
+		Changed *bool  `json:"changed"`
+		Undo    int    `json:"undo"`
+		Redo    int    `json:"redo"`
+		State   string `json:"state"`
 	} `json:"stacks"`
 	State string `json:"state"`
 }
@@ -122,20 +124,30 @@ func replayEventDeltaReceiver(t *testing.T, s eventDeltaScenario, want eventDelt
 		trace = append(trace, map[string]any{"origin": origin, "local": tr.Local, "deleted": deleted})
 	})
 	deltas := []any{}
-	// readDelta is ReadDelta, checked against the Delta field: both are
-	// the getter's delta.
-	readDelta := func(e *ygo.TextEvent) []any {
+	// readDelta is ReadDelta; read in the event's own callback it is the
+	// Delta field (both are the getter's delta at that point).
+	readDelta := func(e *ygo.TextEvent, own bool) []any {
 		got := markDelta(e.ReadDelta())
-		if g, w := normalize(t, markDelta(e.Delta)), normalize(t, got); !reflect.DeepEqual(g, w) {
+		if g, w := normalize(t, markDelta(e.Delta)), normalize(t, got); own && !reflect.DeepEqual(g, w) {
 			t.Errorf("Delta %v, ReadDelta %v", g, w)
 		}
 		return got
 	}
-	reader := func(name string) func(*ygo.TextEvent) {
-		return func(e *ygo.TextEvent) {
-			deltas = append(deltas, map[string]any{"text": name, "delta": readDelta(e), "keys": keysRead(e.Keys)})
-		}
+	read := func(name string, e *ygo.TextEvent, own bool) {
+		deltas = append(deltas, map[string]any{"text": name, "delta": readDelta(e, own), "keys": keysRead(e.Keys)})
 	}
+	reader := func(name string) func(*ygo.TextEvent) {
+		return func(e *ygo.TextEvent) { read(name, e, true) }
+	}
+	// delayed: a remote transaction's event kept unread, and read from
+	// the next callback of a transaction its commit runs after it. The
+	// remote's after-transaction handler runs after its observers.
+	remoteDone := false
+	d.OnAfterTransaction(func(tr *ygo.TransactionMut) {
+		if tr.Origin == "remote" {
+			remoteDone = true
+		}
+	})
 	observe := func(name string, txt *ygo.Text) {
 		switch want.Mode {
 		case "silent":
@@ -145,6 +157,17 @@ func replayEventDeltaReceiver(t *testing.T, s eventDeltaScenario, want eventDelt
 		case "oneOfTwo":
 			txt.Observe(func(*ygo.TextEvent) {})
 			txt.Observe(reader(name))
+		case "delayed":
+			var pending *ygo.TextEvent
+			txt.Observe(func(e *ygo.TextEvent) {
+				if pending != nil && remoteDone {
+					read(name, pending, false)
+					pending = nil
+				}
+				if !remoteDone {
+					pending = e
+				}
+			})
 		}
 	}
 	// Root texts, in the order the generator types them.
@@ -181,7 +204,7 @@ func replayEventDeltaReceiver(t *testing.T, s eventDeltaScenario, want eventDelt
 		m.ObserveDeep(func(evs []any) {
 			for _, ev := range evs {
 				if e, ok := ev.(*ygo.TextEvent); ok {
-					deltas = append(deltas, map[string]any{"text": "", "path": append([]any{}, e.Path...), "delta": readDelta(e), "keys": keysRead(e.Keys)})
+					deltas = append(deltas, map[string]any{"text": "", "path": append([]any{}, e.Path...), "delta": readDelta(e, true), "keys": keysRead(e.Keys)})
 				}
 			}
 		})
@@ -194,6 +217,7 @@ func replayEventDeltaReceiver(t *testing.T, s eventDeltaScenario, want eventDelt
 		if err != nil {
 			t.Fatal(err)
 		}
+		remoteDone = false
 		if err := ygo.ApplyUpdateV2WithOrigin(d, b, "remote"); err != nil {
 			t.Fatalf("update %d: %v", i, err)
 		}
@@ -208,10 +232,19 @@ func replayEventDeltaReceiver(t *testing.T, s eventDeltaScenario, want eventDelt
 		}
 	}
 	if um != nil {
-		steps := []func() bool{nil, um.Undo, um.Redo, um.Undo}
-		for i, w := range want.Stacks {
-			if steps[i] != nil {
-				steps[i]()
+		// The steps yjs took, then both stacks emptied a step at a time:
+		// a step that changes nothing returns false (yjs: null) and ends
+		// it, so the stacks' contents are compared step by step.
+		for _, w := range want.Stacks {
+			var changed bool
+			switch strings.TrimSuffix(w.Step, " until empty") {
+			case "undo":
+				changed = um.Undo()
+			case "redo":
+				changed = um.Redo()
+			}
+			if w.Changed != nil && changed != *w.Changed {
+				t.Errorf("%s: changed %v, yjs %v", w.Step, changed, *w.Changed)
 			}
 			if um.CanUndo() != (w.Undo > 0) || um.CanRedo() != (w.Redo > 0) {
 				t.Errorf("after %s: CanUndo %v CanRedo %v, yjs's stacks hold %d and %d", w.Step, um.CanUndo(), um.CanRedo(), w.Undo, w.Redo)

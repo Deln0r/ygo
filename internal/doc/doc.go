@@ -65,8 +65,9 @@ type Doc struct {
 	// a commit that finds the ID in use elsewhere.
 	clientID atomic.Uint64
 	// followUps are the transactions the running Commit has yet to run
-	// (TransactionMut.OpenFollowUp), under the write lock.
+	// (OpenFollowUp), under the write lock and followMu.
 	followUps    []*TransactionMut
+	followMu     sync.Mutex
 	guid         string
 	store        *store.BlockStore
 	gc           bool

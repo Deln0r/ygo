@@ -507,19 +507,33 @@ type textRead struct {
 // effect, and an older marker whose value is the attribute an added one
 // set. That transaction is committed after the delivering one (its update
 // and events come after), and opened whether or not it deletes anything.
-// After that commit ReadDelta deletes nothing and returns Delta: yjs would
-// open a transaction of its own then.
+//
+// Delta is the delta when the event was first given out; ReadDelta's is
+// computed at its first call, as yjs's getter's is. Read in the event's
+// own callback they are the same; read later in the commit (from the
+// callback of a transaction run after it, say the format cleanup's), it
+// sees what ran in between. After that commit ReadDelta deletes nothing
+// and returns Delta: yjs would open a transaction of its own then.
+//
+// Call it from the goroutine running the commit (an observer or handler
+// of the commit, or of a transaction it runs after it). From another
+// goroutine while the commit runs it races with the commit, as any use
+// of the document there does; after the commit it is safe.
 func (e *TextEvent) ReadDelta() []DeltaOp {
 	r := e.read
 	if r == nil {
 		return e.Delta
 	}
 	r.once.Do(func() {
-		if !r.txn.Delivering() {
+		f := (*doc.TransactionMut)(nil)
+		if doc.Delivering(r.txn) {
+			f = doc.OpenFollowUp(r.txn)
+		}
+		if f == nil {
 			r.ops = e.Delta
 			return
 		}
-		r.ops = buildTextDeltaWith(r.txn, r.br, r.txn.OpenFollowUp())
+		r.ops = buildTextDeltaWith(r.txn, r.br, f)
 	})
 	return r.ops
 }

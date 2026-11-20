@@ -67,8 +67,8 @@ type TransactionMut struct {
 	doc    *Doc
 	closed bool
 
-	// opener is the transaction whose Commit runs this one as a
-	// follow-up (OpenFollowUp), nil for a transaction opened by WriteTxn.
+	// opener is the transaction opened by WriteTxn whose Commit runs this
+	// one as a follow-up (OpenFollowUp), nil for one opened by WriteTxn.
 	opener *TransactionMut
 	// delivered is set on a transaction opened by WriteTxn when its Commit
 	// has run it and every follow-up (Delivering).
@@ -212,7 +212,10 @@ func (d *Doc) newLockedTxn() *TransactionMut {
 // update after this transaction's) runs after step 8. Both run under
 // this one lock hold, so no other writer comes between them.
 func (t *TransactionMut) Commit() {
-	if t.closed {
+	// A follow-up is run by the Commit that drains it, under that
+	// Commit's lock hold; committing it here would run it twice and
+	// release a lock it does not hold.
+	if t.closed || t.opener != nil {
 		return
 	}
 	d := t.doc
@@ -223,15 +226,23 @@ func (t *TransactionMut) Commit() {
 	// cleanup, then those their own observers open. Work an update or
 	// subdoc handler queued (an UndoManager Clear, say) is done before
 	// each one's observers, as yjs's synchronous Clear would have done it.
-	for len(d.followUps) > 0 {
+	for {
+		d.followMu.Lock()
+		if len(d.followUps) == 0 {
+			// Delivered under the queue's lock, so a follow-up is either
+			// queued before this point and run, or refused.
+			d.followUps = nil
+			t.delivered.Store(true)
+			d.followMu.Unlock()
+			break
+		}
 		f := d.followUps[0]
 		d.followUps[0] = nil
 		d.followUps = d.followUps[1:]
+		d.followMu.Unlock()
 		d.runQueued(f)
 		f.commitLocked()
 	}
-	d.followUps = nil
-	t.delivered.Store(true)
 	d.mu.Unlock()
 }
 
@@ -240,27 +251,35 @@ func (t *TransactionMut) Commit() {
 // the lock that Commit holds, as yjs's transact opens one when it is
 // called while transactions are being cleaned up (an event's delta read
 // from an observer, the format cleanup). Its changes apply at once; its
-// lifecycle (observers, handlers, update) comes after t's. Only valid
-// while t's commit runs (from its observers and handlers, or those of
-// its follow-ups).
-func (t *TransactionMut) OpenFollowUp() *TransactionMut {
-	f := t.doc.newLockedTxn()
-	f.opener = t.Opener()
-	if f.opener == nil {
-		f.opener = t
+// lifecycle (observers, handlers, update) comes after t's. It returns nil
+// once that Commit has run every follow-up (Delivering is false): the
+// caller then changes nothing. Call it only from the goroutine running
+// the Commit (its observers and handlers, or those of its follow-ups).
+func OpenFollowUp(t *TransactionMut) *TransactionMut {
+	root := t
+	if t.opener != nil {
+		root = t.opener
 	}
-	t.doc.followUps = append(t.doc.followUps, f)
+	d := t.doc
+	d.followMu.Lock()
+	defer d.followMu.Unlock()
+	if root.delivered.Load() {
+		return nil
+	}
+	f := d.newLockedTxn()
+	f.opener = root
+	d.followUps = append(d.followUps, f)
 	return f
 }
 
 // Opener returns the transaction opened by WriteTxn whose Commit runs t
 // as a follow-up (OpenFollowUp), or nil when t is not a follow-up.
-func (t *TransactionMut) Opener() *TransactionMut { return t.opener }
+func Opener(t *TransactionMut) *TransactionMut { return t.opener }
 
 // Delivering reports whether the Commit that runs t (t's own, or its
 // opener's when t is a follow-up) has not yet finished running it and
-// its follow-ups: while it has not, OpenFollowUp may be called.
-func (t *TransactionMut) Delivering() bool {
+// its follow-ups.
+func Delivering(t *TransactionMut) bool {
 	root := t
 	if t.opener != nil {
 		root = t.opener
@@ -307,7 +326,7 @@ func (t *TransactionMut) commitLocked() {
 	// merges change what was deleted and where (see Commit).
 	if !t.Local && FormatCleanupHook != nil {
 		if run := FormatCleanupHook(t); run != nil {
-			run(t.OpenFollowUp())
+			run(OpenFollowUp(t))
 		}
 	}
 	// Garbage-collect deleted content (free payloads, merge deleted

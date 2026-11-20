@@ -139,11 +139,15 @@ function build(sc) {
 //   observed  an observer reading every delta (and the changed keys)
 //   oneOfTwo  two observers, the second reads
 //   deep      a deep observer on the parent reading every text delta
+//   delayed   an observer that keeps a remote transaction's event unread and
+//             reads it from the next callback of a transaction run after it
+//             (the format cleanup's, a delta read's)
 //   undo      observed, with an UndoManager on the text (remote origin not
-//             tracked, no grouping), then undo, redo, undo
+//             tracked, no grouping), then undo, redo, undo, then undo until
+//             the stack is empty and redo until it is
 // xml has no "deep": ygo has no XmlFragment.ObserveDeep yet.
 const MODES = {
-  root: ["untyped", "typed", "silent", "observed", "oneOfTwo"],
+  root: ["untyped", "typed", "silent", "observed", "oneOfTwo", "delayed"],
   map: ["typed", "observed", "deep"],
   xml: ["typed", "observed"],
   depth: ["typed", "deep"],
@@ -171,6 +175,16 @@ function receive(sc, updates, mode) {
       t.observe(() => {});
       t.observe(reader(name));
     }
+    if (mode === "delayed") {
+      let pending = null;
+      t.observe((e) => {
+        if (pending && e.transaction.local) {
+          reader(name)(pending);
+          pending = null;
+        }
+        if (!e.transaction.local) pending = e;
+      });
+    }
   };
   if (mode !== "untyped") {
     if (sc.shape === "root") for (const n of names) observe(n, r.getText(n));
@@ -196,11 +210,20 @@ function receive(sc, updates, mode) {
     if (i === 0 && sc.shape !== "root") observe(null, shape.text(r));
   });
   if (um) {
-    const step = (name) => stacks.push({ step: name, undo: um.undoStack.length, redo: um.redoStack.length, state: toHex(Y.encodeStateAsUpdateV2(r)) });
+    const step = (name, changed) => stacks.push({ step: name, ...(changed === undefined ? {} : { changed }), undo: um.undoStack.length, redo: um.redoStack.length, state: toHex(Y.encodeStateAsUpdateV2(r)) });
     step("received");
     for (const s of ["undo", "redo", "undo"]) {
       um[s]();
       step(s);
+    }
+    // Empty both stacks, a step at a time, as Undo / Redo replay them.
+    // A step that changes nothing returns null (ygo: false) and ends it.
+    for (const s of ["undo", "redo"]) {
+      for (let i = 0; i < 20; i++) {
+        const changed = um[s]() !== null;
+        step(`${s} until empty`, changed);
+        if (!changed) break;
+      }
     }
   }
   return { mode, events, trace, deltas, ...(um ? { stacks } : {}), state: toHex(Y.encodeStateAsUpdateV2(r)) };
