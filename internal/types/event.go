@@ -2,6 +2,7 @@ package types
 
 import (
 	"sort"
+	"sync"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -106,15 +107,21 @@ func dispatchEvents(t *doc.TransactionMut) {
 		}
 		var build func() any
 		if keys := t.ChangedKeys(br); len(keys) > 0 {
-			build = func() any { return buildMapEvent(t, br, keys) }
+			// A text with changed attributes gets a text event too, as
+			// yjs YText._callObserver always builds a YTextEvent.
+			if isTextBranch(br) {
+				build = func() any { return newTextEvent(t, br, keys) }
+			} else {
+				build = func() any { return buildMapEvent(t, br, keys) }
+			}
 		} else if t.PositionalChanged(br) {
 			// Positional change: Text (tagged TypeRefText by NewText) or
 			// XmlText, whose Observe takes a TextEvent too, vs Array (the
 			// default). Root branches otherwise share TypeRef
 			// zero, so we cannot rely on it for arrays; the Text tag is the
 			// one reliable discriminator.
-			if br.TypeRef == block.TypeRefText || br.TypeRef == block.TypeRefXmlText {
-				build = func() any { return &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br)} }
+			if isTextBranch(br) {
+				build = func() any { return newTextEvent(t, br, nil) }
 			} else {
 				build = func() any { return &ArrayEvent{Target: &Array{branch: br}, Delta: buildPositionalDelta(t, br)} }
 			}
@@ -457,12 +464,64 @@ func (a *Array) ObserveDeep(fn func([]any)) func() {
 // transaction that changed the text. Delta is the Quill-style,
 // formatting-aware change description (the same DeltaOp shape ToDelta
 // produces). Mirrors yjs YTextEvent.
+//
+// Delta is computed when the event is first given out and changes
+// nothing. yjs's event.delta getter also deletes the format markers it
+// finds redundant (one added equal to the attribute in effect, or an
+// older one equal to the attribute an added one sets), in a transaction
+// of its own; ReadDelta is that getter. A receiver that never reads
+// event.delta in yjs ends as one that reads only Delta here.
 type TextEvent struct {
 	Target *Text
 	// Path locates Target relative to the ObserveDeep type firing;
 	// empty for shallow Observe.
 	Path  []any
 	Delta []DeltaOp
+	// Keys maps each attribute of the text changed by the transaction
+	// (yjs YText.setAttribute, an XmlText's attributes) to how it changed,
+	// as MapEvent.Keys does; nil when none changed.
+	Keys map[string]KeyChange
+
+	// read is shared by the copies of the event given to deep observers,
+	// as yjs gives them one event object and caches its delta on it.
+	read *textRead
+}
+
+// textRead is a TextEvent's ReadDelta state.
+type textRead struct {
+	once sync.Once
+	txn  *doc.TransactionMut
+	br   *block.Branch
+	ops  []DeltaOp
+}
+
+// ReadDelta returns the event's delta as yjs's event.delta getter does,
+// computed on the first call (by this event or a copy of it given to
+// another observer) and the same on every later call.
+//
+// A first call during the commit that delivered the event, from its
+// observers or those of the transactions that commit runs after it,
+// opens a local transaction with Origin nil, as the getter's transact
+// does, which deletes the format markers the walk finds redundant: a
+// marker the transaction added whose value is the attribute already in
+// effect, and an older marker whose value is the attribute an added one
+// set. That transaction is committed after the delivering one (its update
+// and events come after), and opened whether or not it deletes anything.
+// After that commit ReadDelta deletes nothing and returns Delta: yjs would
+// open a transaction of its own then.
+func (e *TextEvent) ReadDelta() []DeltaOp {
+	r := e.read
+	if r == nil {
+		return e.Delta
+	}
+	r.once.Do(func() {
+		if !r.txn.Delivering() {
+			r.ops = e.Delta
+			return
+		}
+		r.ops = buildTextDeltaWith(r.txn, r.br, r.txn.OpenFollowUp())
+	})
+	return r.ops
 }
 
 // Observe registers fn to run after every transaction that changes
@@ -490,12 +549,39 @@ func observeDeep(br *block.Branch, fn func([]any)) func() {
 	return br.AddDeepObserver(fn)
 }
 
-// buildTextDelta is a faithful port of yjs YTextEvent.delta: it walks
+// isTextBranch reports whether br is a Text or an XmlText (tagged by
+// NewText / the XmlText constructors and the content type).
+func isTextBranch(br *block.Branch) bool {
+	return br.TypeRef == block.TypeRefText || br.TypeRef == block.TypeRefXmlText
+}
+
+// newTextEvent builds the TextEvent for br in t, with the attributes in
+// keys when some changed.
+func newTextEvent(t *doc.TransactionMut, br *block.Branch, keys map[string]struct{}) *TextEvent {
+	e := &TextEvent{Target: &Text{branch: br}, Delta: buildTextDelta(t, br), read: &textRead{txn: t, br: br}}
+	if len(keys) > 0 {
+		e.Keys = buildMapEvent(t, br, keys).Keys
+	}
+	return e
+}
+
+// buildTextDelta is buildTextDeltaWith without deleting: the walk steps
+// over the markers yjs's getter deletes as if they were deleted, so the
+// delta is the getter's.
+func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
+	return buildTextDeltaWith(txn, br, nil)
+}
+
+// buildTextDeltaWith is a faithful port of yjs YTextEvent.delta: it walks
 // the text's items tracking the formatting active at the cursor
 // (currentAttrs), and emits insert (string or embed) / delete / retain
 // ops, where retain ops carry the attribute changes a format marker
 // introduced. Trailing retains without attribute changes are dropped.
-func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
+// The getter deletes, in its own transaction, an added marker whose value
+// is the attribute in effect and an older one whose value is the
+// attribute an added one set; del is that transaction, or nil to step
+// over those markers without deleting them.
+func buildTextDeltaWith(txn *doc.TransactionMut, br *block.Branch, del *doc.TransactionMut) []DeltaOp {
 	var delta []DeltaOp
 	currentAttrs := Attrs{}
 	oldAttrs := Attrs{}
@@ -590,6 +676,9 @@ func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
 			if len(it.Content.Anys) > 0 {
 				value = it.Content.Anys[0]
 			}
+			// redundant: yjs's getter deletes the marker here, so the rest
+			// of the walk sees it deleted.
+			redundant := false
 			if adds(txn, it) {
 				if !deletes(txn, it) {
 					if !attrValuesEqual(orNull(currentAttrs[key]), value) {
@@ -601,6 +690,8 @@ func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
 						} else {
 							attributes[key] = value
 						}
+					} else if value != nil {
+						redundant = true
 					}
 				}
 			} else if deletes(txn, it) {
@@ -623,10 +714,15 @@ func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
 						} else {
 							attributes[key] = value
 						}
+					} else if attr != nil {
+						redundant = true
 					}
 				}
 			}
-			if !it.IsDeleted() {
+			if redundant && del != nil {
+				del.Delete(it)
+			}
+			if !it.IsDeleted() && !redundant {
 				if action == "insert" {
 					addOp()
 				}

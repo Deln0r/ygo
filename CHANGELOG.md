@@ -14,6 +14,27 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.46.0] - 2026-11-20
+
+**Upgrade impact**:
+
+- **New `(*TextEvent).ReadDelta()`**, yjs's `event.delta` getter: its first call for an event, during the commit that delivered it, opens a local transaction with origin nil, which deletes the format markers the walk finds redundant (a marker the transaction added whose value is the attribute already in effect, and an older one whose value is the attribute an added one set), and is committed after the delivering one, with its own update and events. A yjs receiver whose observer reads `event.delta` (y-quill, Lexical's binding) ends with those markers deleted; with `ReadDelta` ygo ends there too. Opt-in: the `Delta` field is unchanged and changes nothing, so an existing observer behaves as before, as a yjs observer that never reads the delta.
+- **gomobile `Text.ObserveChanges` reads through `ReadDelta`**, as a yjs editor binding reads `event.delta`: a receiver of concurrent formatting now deletes a duplicate marker in one extra local transaction (and update), as a yjs editor does.
+- **A Text or XmlText whose attributes change gets a `TextEvent`**, with the new `Keys` field, as yjs always builds a `YTextEvent`. It got a `MapEvent`, which `Text.Observe` dropped; a deep observer got a `MapEvent` for it.
+- **`Delta` steps over the markers yjs's getter deletes**, as if they were deleted, so it is the getter's delta: an insert no longer splits at such a marker.
+
+### Fixed
+
+- **A receiver reading text deltas ended elsewhere than yjs.** Two peers bolding the same character: yjs's getter deletes the duplicate, ygo's after-transaction cleanup deleted the first marker, so the states, the extra update and which marker survived differed. The getter's transaction runs where yjs runs it, before the cleanup's, one per event read, also from deep observers (one per event, shared with the copies they get).
+- **During Undo and Redo, a transaction run after the manager's own** (a delta read deleting a marker the undo restored) cleared the redo stack and became a new undo step; it goes to the stack yjs puts it on.
+- **A remote change to a text's attributes did not reach `Text.Observe`.**
+
+### Tests
+
+- New fixtures from yjs 13.6.33 (`testdata/event-delta-fixtures.json`, `testdata/gen/gen-event-delta.mjs`, in CI): 33 scenarios of concurrent formatting from two and three peers (the same character bolded twice and three times, an older run made redundant, two texts in one update, texts at two depths under one deep observer, a duplicate next to a deletion, values that differ, an undefined attribute, an unbold, an XmlText, a text attribute with and without a duplicate, 12 from a seeded random search, and 3 delivered as one merged update where the getter deletes a marker right after inserted text), each delivered to receivers whose text is untyped, typed, observed without reading, read by one observer of two, read by an observer, read by a deep observer of the parent, and read under undo, redo and undo again: 154 receivers, each compared on every update event and whether it is local, the after-transaction trace, every delta and changed key read, the undo and redo stacks and the state after each step, and the final state.
+- `ReadDelta` reads once per event, also with the copies deep observers get, and deletes nothing after the commit; queued work (an UndoManager `Clear` from an update handler) runs before the getter's transaction.
+- Controls: 13, each failing these tests.
+
 ## [1.45.0] - 2026-11-20
 
 **Upgrade impact**:

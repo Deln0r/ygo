@@ -56,8 +56,10 @@ func (t *Text) ObserveChanges(l TextChangeListener) {
 	if l == nil {
 		return
 	}
+	// Read as a yjs binding reads event.delta (ReadDelta), so the
+	// document ends where a yjs editor's would.
 	t.unobserve = t.inner.Observe(func(e *types.TextEvent) {
-		l.OnTextChange(marshalTextDelta(e.Delta))
+		l.OnTextChange(marshalTextDelta(e.ReadDelta()))
 	})
 }
 

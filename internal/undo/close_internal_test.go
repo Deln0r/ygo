@@ -302,3 +302,71 @@ func TestClear_FromUpdateHandlerBeforeFormatCleanup(t *testing.T) {
 		t.Fatalf("%d steps after the Clear, want the cleanup's", steps)
 	}
 }
+
+// TestClear_FromUpdateHandlerBeforeDeltaReadFollowUp: with an observer that
+// reads the delta, the remote transaction is followed by the getter's
+// transaction (it deletes the duplicate marker) and then the format
+// cleanup; a Clear from the remote's update handler releases what the
+// dropped step kept before the first follow-up's observers run, as yjs's
+// clear does inside the remote's update emit. The getter's deletion is
+// then the one step captured.
+func TestClear_FromUpdateHandlerBeforeDeltaReadFollowUp(t *testing.T) {
+	a := doc.NewDocWithOptions(doc.Options{ClientID: 3141592653})
+	b := doc.NewDocWithOptions(doc.Options{ClientID: 271828182})
+	ta, tb := types.NewText(a.Branch("t")), types.NewText(b.Branch("t"))
+	txn := a.WriteTxn()
+	txn.Origin = "setup"
+	ta.Insert(txn, 0, "xyz")
+	txn.Commit()
+	if err := encoding.ApplyUpdate(b, encoding.EncodeStateAsUpdate(a)); err != nil {
+		t.Fatal(err)
+	}
+	um := NewUndoManager(a, []*block.Branch{ta.Branch()})
+	txn = a.WriteTxn()
+	ta.Delete(txn, 2, 1)
+	txn.Commit()
+	var z *block.Item
+	for it := ta.Branch().Start; it != nil; it = it.Right {
+		if it.IsDeleted() {
+			z = it
+		}
+	}
+	if z == nil || !z.IsKeep() {
+		t.Fatal("the tracked delete of z kept nothing")
+	}
+	txn = a.WriteTxn()
+	txn.Origin = "setup"
+	ta.Format(txn, 0, 2, types.Attrs{"bold": true})
+	txn.Commit()
+	txn = b.WriteTxn()
+	tb.Format(txn, 0, 2, types.Attrs{"bold": true})
+	txn.Commit()
+
+	var keptAtEvent []bool
+	ta.Observe(func(e *types.TextEvent) {
+		keptAtEvent = append(keptAtEvent, z.IsKeep())
+		e.ReadDelta()
+	})
+	var origins []any
+	a.OnUpdate(func(_ []byte, origin any) {
+		origins = append(origins, origin)
+		if origin == "remote" {
+			um.Clear()
+		}
+	})
+	if err := encoding.ApplyUpdateWithOrigin(a, encoding.EncodeStateAsUpdate(b), "remote"); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(keptAtEvent) != "[true false]" {
+		t.Fatalf("z kept at the remote and the getter's event: %v, want [true false]", keptAtEvent)
+	}
+	if fmt.Sprint(origins) != "[remote <nil>]" {
+		t.Fatalf("update origins %v, want the remote one and the getter's deletion", origins)
+	}
+	um.mu.Lock()
+	steps := len(um.undoStack)
+	um.mu.Unlock()
+	if steps != 1 {
+		t.Fatalf("%d steps after the Clear, want the getter's deletion", steps)
+	}
+}

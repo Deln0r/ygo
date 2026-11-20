@@ -386,6 +386,9 @@ jobs:
       - name: regenerate dense V2 fixtures
         working-directory: testdata/gen
         run: node gen-v2-dense.mjs
+      - name: regenerate event delta fixtures
+        working-directory: testdata/gen
+        run: node gen-event-delta.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff

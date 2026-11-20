@@ -63,7 +63,10 @@ type Options struct {
 type Doc struct {
 	// clientID is read outside the doc lock (Doc.ClientID) and written by
 	// a commit that finds the ID in use elsewhere.
-	clientID     atomic.Uint64
+	clientID atomic.Uint64
+	// followUps are the transactions the running Commit has yet to run
+	// (TransactionMut.OpenFollowUp), under the write lock.
+	followUps    []*TransactionMut
 	guid         string
 	store        *store.BlockStore
 	gc           bool

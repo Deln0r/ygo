@@ -179,7 +179,10 @@ func (um *UndoManager) onAfterTransaction(mut *doc.TransactionMut) {
 	// Only the manager's own Undo / Redo transaction goes to the opposite
 	// stack: while Undo waits for the doc lock, another goroutine's commit
 	// runs this handler with the flag already set, and is an ordinary edit.
-	own := mut.Origin == um
+	// So do the follow-ups its commit runs (a text event's delta read from
+	// an observer deletes in one): yjs cleans them up within undo(), with
+	// its undoing flag set.
+	own := mut.Origin == um || (mut.Origin == nil && mut.Opener() != nil && mut.Opener().Origin == um)
 	undoing, redoing := um.undoing && own, um.redoing && own
 	var dropped []*StackItem
 	if !undoing && !redoing {

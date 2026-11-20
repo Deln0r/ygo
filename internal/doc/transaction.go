@@ -2,6 +2,7 @@ package doc
 
 import (
 	"sort"
+	"sync/atomic"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/store"
@@ -65,6 +66,13 @@ func (t *Transaction) PendingState() any { return t.doc.pendingState }
 type TransactionMut struct {
 	doc    *Doc
 	closed bool
+
+	// opener is the transaction whose Commit runs this one as a
+	// follow-up (OpenFollowUp), nil for a transaction opened by WriteTxn.
+	opener *TransactionMut
+	// delivered is set on a transaction opened by WriteTxn when its Commit
+	// has run it and every follow-up (Delivering).
+	delivered atomic.Bool
 
 	// Origin is an opaque caller-supplied value attached to this
 	// transaction. Mirrors yrs Origin (transaction.rs:1210-1288).
@@ -207,21 +215,62 @@ func (t *TransactionMut) Commit() {
 	if t.closed {
 		return
 	}
-	cleanup := t.commitLocked()
-	if cleanup != nil {
-		// Work an update or subdoc handler queued (an UndoManager Clear,
-		// say) is done before the cleanup's observers, as yjs's
-		// synchronous Clear would have done it.
-		t.doc.runQueued(cleanup)
-		cleanup.commitLocked() // local: never asks for another cleanup
+	d := t.doc
+	t.commitLocked()
+	// The follow-ups, in the order they were opened, as yjs cleans up
+	// transactionCleanups: those opened while this transaction's
+	// observers ran (an event's delta read, ReadDelta), its format
+	// cleanup, then those their own observers open. Work an update or
+	// subdoc handler queued (an UndoManager Clear, say) is done before
+	// each one's observers, as yjs's synchronous Clear would have done it.
+	for len(d.followUps) > 0 {
+		f := d.followUps[0]
+		d.followUps[0] = nil
+		d.followUps = d.followUps[1:]
+		d.runQueued(f)
+		f.commitLocked()
 	}
-	t.doc.mu.Unlock()
+	d.followUps = nil
+	t.delivered.Store(true)
+	d.mu.Unlock()
+}
+
+// OpenFollowUp opens a transaction that the Commit running t runs after
+// t and after the follow-ups opened before it: local, Origin nil, under
+// the lock that Commit holds, as yjs's transact opens one when it is
+// called while transactions are being cleaned up (an event's delta read
+// from an observer, the format cleanup). Its changes apply at once; its
+// lifecycle (observers, handlers, update) comes after t's. Only valid
+// while t's commit runs (from its observers and handlers, or those of
+// its follow-ups).
+func (t *TransactionMut) OpenFollowUp() *TransactionMut {
+	f := t.doc.newLockedTxn()
+	f.opener = t.Opener()
+	if f.opener == nil {
+		f.opener = t
+	}
+	t.doc.followUps = append(t.doc.followUps, f)
+	return f
+}
+
+// Opener returns the transaction opened by WriteTxn whose Commit runs t
+// as a follow-up (OpenFollowUp), or nil when t is not a follow-up.
+func (t *TransactionMut) Opener() *TransactionMut { return t.opener }
+
+// Delivering reports whether the Commit that runs t (t's own, or its
+// opener's when t is a follow-up) has not yet finished running it and
+// its follow-ups: while it has not, OpenFollowUp may be called.
+func (t *TransactionMut) Delivering() bool {
+	root := t
+	if t.opener != nil {
+		root = t.opener
+	}
+	return root.closed && !root.delivered.Load()
 }
 
 // commitLocked runs the lifecycle of Commit with the write lock held and
-// does not release it. It returns the format cleanup transaction it
-// opened, if any, whose own lifecycle the caller runs.
-func (t *TransactionMut) commitLocked() (cleanup *TransactionMut) {
+// does not release it; the follow-ups it opens are run by Commit.
+func (t *TransactionMut) commitLocked() {
 	t.closed = true
 	// Snapshot the post-mutation state vector before any handlers fire
 	// so observers see a stable afterState. Together with beforeState
@@ -258,8 +307,7 @@ func (t *TransactionMut) commitLocked() (cleanup *TransactionMut) {
 	// merges change what was deleted and where (see Commit).
 	if !t.Local && FormatCleanupHook != nil {
 		if run := FormatCleanupHook(t); run != nil {
-			cleanup = t.doc.newLockedTxn()
-			run(cleanup)
+			run(t.OpenFollowUp())
 		}
 	}
 	// Garbage-collect deleted content (free payloads, merge deleted
@@ -287,7 +335,6 @@ func (t *TransactionMut) commitLocked() (cleanup *TransactionMut) {
 	// and the struct merge: the bytes describe the final layout.
 	t.doc.fireUpdateHandlers(t)
 	t.doc.fireSubdocsHandlers(t)
-	return cleanup
 }
 
 // trackSubdocs records the subdocument lifecycle changes this
