@@ -122,7 +122,9 @@ func TestPending_mergeBlocks_QueuedItemsAsRead(t *testing.T) {
 // TestMergeQueue_MatchesTheWholeMerge: merging only the clients a leftover
 // shares with the queue gives what yjs's loop over the whole queue gives,
 // on random queues and leftovers of GC runs and items that start at the
-// same clocks, touch and overlap, across clients the two share in part.
+// same clocks, touch and overlap, are empty (yjs's reader keeps an empty
+// struct, and one of a higher client changes the order at the next tie),
+// across clients the two share in part.
 func TestMergeQueue_MatchesTheWholeMerge(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
 	letters := "abcdefghijklmnopqrstuvwxyz"
@@ -130,7 +132,7 @@ func TestMergeQueue_MatchesTheWholeMerge(t *testing.T) {
 		var out []Block
 		clock := uint64(rng.IntN(3))
 		for range 1 + rng.IntN(3) {
-			n := uint64(1 + rng.IntN(4))
+			n := uint64(rng.IntN(5))   // 0: an empty struct
 			out = append(out, Block{}) // kind and client set below
 			out[len(out)-1] = Block{Kind: WireBlockGC, ID: block.ID{Clock: clock}, Len: n}
 			if rng.IntN(2) == 0 {
@@ -146,7 +148,7 @@ func TestMergeQueue_MatchesTheWholeMerge(t *testing.T) {
 	}
 	side := func() map[uint64][]Block {
 		m := map[uint64][]Block{}
-		for _, c := range []uint64{1, 2, 3, 4, 5, 6} {
+		for _, c := range []uint64{1, 2, 3, 4, 5, 6, 7, 8} {
 			if rng.IntN(2) == 0 {
 				continue
 			}

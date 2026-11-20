@@ -158,6 +158,16 @@ scenario("two adjacent GC runs in one update", [gcRuns(1, 2, 2, 2)], [svOf([]), 
 scenario("a GC run, then two adjacent ones touching it", [gcRuns(1, 2, 2), gcRuns(1, 4, 2, 2)], [svOf([]), svOf([[1, 5]]), svOf([[1, 6]])], gcRuns(1, 0, 2));
 scenario("GC runs with a gap between them", [gcRuns(1, 2, 2), gcRuns(1, 5, 2)], [svOf([]), svOf([[1, 4]]), svOf([[1, 5]])], gcRuns(1, 0, 2));
 
+// An empty GC run of a higher client (a malformed update yjs accepts): its
+// reader keeps it, so the leftover is in front from client 2 on, and at
+// client 1 the item queued before wins the tie with the GC run.
+{
+  const fromHex = (h) => Uint8Array.from(Buffer.from(h, "hex"));
+  const item = fromHex("01010101840100014100"); // client 1, clock 1, "A" after 1:0
+  const emptyThenGC = fromHex("020102010000010101000100"); // client 2: GC of length 0; client 1: GC 1:1
+  scenario("an empty GC run of a higher client", [item, emptyThenGC], [svOf([]), svOf([[1, 1]]), svOf([[2, 1]])], u0);
+}
+
 // The same clocks as an item and as GC: the second decoder wins.
 {
   const it = Y.decodeUpdate(u1).structs[0];

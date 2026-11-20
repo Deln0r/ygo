@@ -164,15 +164,21 @@ func mergeQueue(q, r map[uint64][]Block) {
 		rc = append(rc, c)
 	}
 	slices.Sort(rc)
-	// prevQ[i]: the queue's lowest client above rc[i], the one the queue
-	// reader writes just before it reaches rc[i]; one pass over the queue,
-	// before the leftover's own clients join it.
-	prevQ := make([]uint64, len(rc))
-	hasPrevQ := make([]bool, len(rc))
-	for x := range q {
-		for i, c := range rc {
-			if x > c && (!hasPrevQ[i] || x < prevQ[i]) {
-				prevQ[i], hasPrevQ[i] = x, true
+	// between[i]: the queue has a client strictly between rc[i] and
+	// rc[i+1]. That is all the order needs: the leftover's previous client
+	// for rc[i] is rc[i+1], and the queue's is lower (the queue arrives
+	// later) exactly when one lies between. One pass over the queue's
+	// clients, before the leftover's own join it, and none for a leftover
+	// of one client.
+	between := make([]bool, len(rc))
+	shared := make([]bool, len(rc)) // rc[i] is a queue client too
+	for i, c := range rc {
+		_, shared[i] = q[c]
+	}
+	if len(rc) > 1 {
+		for x := range q {
+			if j, found := slices.BinarySearch(rc, x); !found && j > 0 && j < len(rc) {
+				between[j-1] = true
 			}
 		}
 	}
@@ -180,8 +186,8 @@ func mergeQueue(q, r map[uint64][]Block) {
 	for i := len(rc) - 1; i >= 0; i-- {
 		c := rc[i]
 		rl := r[c]
-		ql, inQ := q[c]
-		if !inQ {
+		ql := q[c]
+		if !shared[i] {
 			if wellFormed(rl) {
 				q[c] = rl
 			} else {
@@ -189,20 +195,18 @@ func mergeQueue(q, r map[uint64][]Block) {
 			}
 			continue
 		}
-		hasPrevR := i+1 < len(rc)
 		var qFront bool
 		switch {
-		case !hasPrevQ[i] && !hasPrevR:
+		case i+1 == len(rc):
+			// The leftover starts here: the queue either starts here too
+			// (yjs merges [queue, leftover]) or comes from a higher client.
 			qFront = true
-		case !hasPrevQ[i]:
-			qFront = false
-		case !hasPrevR:
+		case between[i]:
 			qFront = true
-		case prevQ[i] != rc[i+1]:
-			qFront = prevQ[i] < rc[i+1]
 		default:
-			// Both come from the client before, which they share.
-			qFront = lastQ
+			// The queue comes from rc[i+1] too (both ran out of it, the
+			// one that did last arrives later), or from a client above it.
+			qFront = shared[i+1] && lastQ
 		}
 		var merged []Block
 		var last int
@@ -319,8 +323,8 @@ func mergeWith(cw *Block, right Block) bool {
 }
 
 // clientStream lists blocks by client as a merge reads an update: clients
-// descending, each client's blocks in their order, without Skips or empty
-// blocks.
+// descending, each client's blocks in their order, without Skips (empty
+// blocks stay, as yjs's reader keeps them).
 func clientStream(blocks map[uint64][]Block) []Block {
 	clients := make([]uint64, 0, len(blocks))
 	n := 0
@@ -332,7 +336,7 @@ func clientStream(blocks map[uint64][]Block) []Block {
 	out := make([]Block, 0, n)
 	for i := len(clients) - 1; i >= 0; i-- {
 		for _, b := range blocks[clients[i]] {
-			if b.Kind == WireBlockSkip || blockLen(b) == 0 || (b.Kind == WireBlockItem && b.Item == nil) {
+			if b.Kind == WireBlockSkip || (b.Kind == WireBlockItem && b.Item == nil) {
 				continue
 			}
 			out = append(out, b)

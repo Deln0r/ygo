@@ -109,7 +109,14 @@ func TestPending_mergeBlocks_CutPieceOwnsItsValues(t *testing.T) {
 	if len(list) != 2 || list[1].Item.ID.Clock != 10 || len(list[1].Item.Content.Anys) != 995 {
 		t.Fatalf("queued %v, want the 1000-value block cut to 10..1004", list)
 	}
-	if &list[1].Item.Content.Anys[0] == &vals[10] { // clock 10 is value 10 of the decoded block
+	// The piece starts at clock 10, value 5 of the block decoded at clock 5.
+	cut := uintptr(unsafe.Pointer(&list[1].Item.Content.Anys[0]))
+	lo, hi := uintptr(unsafe.Pointer(&vals[0])), uintptr(unsafe.Pointer(&vals[len(vals)-1]))
+	if cut >= lo && cut <= hi {
 		t.Fatal("the cut piece still points into the decoded values")
+	}
+	vals[5] = "changed"
+	if list[1].Item.Content.Anys[0] != float64(5) {
+		t.Fatalf("a write to the decoded values reached the queued piece: %v", list[1].Item.Content.Anys[0])
 	}
 }

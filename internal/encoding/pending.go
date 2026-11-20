@@ -229,7 +229,9 @@ func (p *Pending) mergeBlocks(blocks map[uint64][]Block) {
 	for client, list := range blocks {
 		var kept []Block
 		for _, b := range list {
-			if b.Kind == WireBlockSkip || blockLen(b) == 0 || (b.Kind == WireBlockItem && b.Item == nil) {
+			// Empty blocks stay: yjs's reader keeps them, and one of a higher
+			// client changes which reader is in front at the next tie.
+			if b.Kind == WireBlockSkip || (b.Kind == WireBlockItem && b.Item == nil) {
 				continue
 			}
 			kept = append(kept, b)
