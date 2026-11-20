@@ -26,6 +26,11 @@ const (
 // time). For WireBlockGC and WireBlockSkip only ID and Len matter.
 type Block struct {
 	Kind BlockKind
+	// read marks an item of a merge's store stream (buildMergePlan): it is
+	// written as yjs's update reader leaves an item, which takes the key
+	// only from an item without origins. Set instead of a copy without
+	// ParentSub, since the store's items must not change.
+	read bool
 	Item *block.Item // WireBlockItem
 	ID   block.ID    // WireBlockGC, WireBlockSkip
 	Len  uint64      // WireBlockGC, WireBlockSkip
@@ -184,7 +189,23 @@ func encodeCell(buf []byte, cell store.BlockCell) []byte {
 
 // encodeItem writes a full Item record (no slicing).
 func encodeItem(buf []byte, it *block.Item) []byte {
+	return encodeItemInfo(buf, it, it.Info())
+}
+
+// readInfo is the info byte of it as yjs's update reader leaves the item
+// (Block.read): one with an origin or a right origin has no key, so no key
+// bit.
+func readInfo(it *block.Item) byte {
 	info := it.Info()
+	if info&(block.InfoHasOrigin|block.InfoHasRightOrigin) != 0 {
+		info &^= block.InfoHasParentSub
+	}
+	return info
+}
+
+// encodeItemInfo writes it with the given info byte, which differs from
+// it.Info() only in the key bit (readInfo).
+func encodeItemInfo(buf []byte, it *block.Item, info byte) []byte {
 	cantCopyParentInfo := info&(block.InfoHasOrigin|block.InfoHasRightOrigin) == 0
 	buf = append(buf, info)
 	if it.Origin != nil {

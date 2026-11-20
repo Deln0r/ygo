@@ -377,6 +377,9 @@ jobs:
       - name: regenerate pending state fixtures
         working-directory: testdata/gen
         run: node gen-pending-state.mjs
+      - name: regenerate pending merge fixtures
+        working-directory: testdata/gen
+        run: node gen-pending-merge.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff

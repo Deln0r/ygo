@@ -447,8 +447,8 @@ var ErrSnapshotGC = errors.New("ygo: RestoreSnapshot requires the source Doc to 
 // bytes are those of Y.encodeStateAsUpdate(doc, sv): the updates d's
 // pending buffer holds are appended from sv on, as yjs appends them,
 // and the delete set is the whole document's with the pending deletes.
-// Where waiting updates overlap each other, or leave adjacent GC runs
-// that yjs merges, the bytes can differ (docs/tech-debt.md).
+// The store and the waiting updates are merged as yjs merges them, so
+// where waiting updates cover the same clocks, the one yjs keeps is kept.
 // For one transaction's changes alone, use Doc.OnUpdate, which never
 // carries the pending buffer.
 //
@@ -650,6 +650,14 @@ func MissingSV(d *Doc) []byte {
 //
 // A single update comes back as it is, once it decodes, as yjs
 // mergeUpdates returns it.
+//
+// Unlike yjs mergeUpdates, which merges the updates' bytes without
+// integrating them, MergeUpdates integrates them into a scratch document
+// and writes its state: what integrates comes out as the document holds
+// it (one run of a client's consecutive characters, say, where yjs keeps
+// the runs the updates had), and what waits comes out as yjs's merge of
+// the updates two at a time, which can differ from its merge of three or
+// more at once where they cover the same clocks (docs/tech-debt.md).
 //
 // Used by persistence layers for compaction (Flush) and by transports
 // that want to batch-coalesce updates before sending.

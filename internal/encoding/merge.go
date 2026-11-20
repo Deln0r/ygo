@@ -1,7 +1,7 @@
 package encoding
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
@@ -31,32 +31,63 @@ import (
 // clock-ascending order, with `Skip` (ref 10) covering any clocks in between
 // that nobody has. yjs emits `item, Skip(5), item`; so does this.
 
-// mergeRecord is one emittable block, normalised so the V1 and V2 emitters can
-// walk the same plan.
-type mergeRecord struct {
-	clock  uint64
-	length uint64
-	kind   BlockKind
-	item   *block.Item // WireBlockItem only
+// mergeSection is one client run of a merged update: the client, then
+// its structs in clock order, Skips included, as yjs's LazyStructWriter
+// writes a run.
+type mergeSection struct {
+	client uint64
+	blocks []Block
 }
 
-// buildMergePlan orders every block the document can speak for - integrated
-// and queued alike - by client and clock, from sv on (nil: everything), as
-// yjs writes the store from the target state vector and the pending structs
-// diffed against it. Returns nil when nothing is queued, which tells the
-// caller to use the ordinary encoder and keep the common path byte-identical
-// to what the fixtures pin.
-func buildMergePlan(bs *store.BlockStore, pending *Pending, sv store.StateVector) ([]uint64, map[uint64][]mergeRecord) {
+// buildMergePlan is what yjs encodeStateAsUpdateV2 merges when the
+// document holds updates that wait: the store part written from sv, read
+// back as an update (storeStream), merged with the queue diffed against sv
+// (diffUpdateV2, queueStream), by mergeStructs. ok is false when nothing is
+// queued (structs or deletes), which tells the caller to use the ordinary
+// encoder and keep the common path byte-identical to what the fixtures pin.
+func buildMergePlan(bs *store.BlockStore, pending *Pending, sv store.StateVector) (plan []mergeSection, ok bool) {
 	if pending.IsEmpty() {
-		return nil, nil
+		return nil, false
 	}
-	byClient := map[uint64][]mergeRecord{}
+	merged := mergeStructs(storeStream(bs, sv), queueStream(pending.Blocks, sv))
+	plan = []mergeSection{}
+	for i := 0; i < len(merged); {
+		c := blockClient(&merged[i])
+		j := i + 1
+		for j < len(merged) && blockClient(&merged[j]) == c {
+			j++
+		}
+		plan = append(plan, mergeSection{client: c, blocks: merged[i:j]})
+		i = j
+	}
+	return plan, true
+}
 
-	for client := range bs.GetStateVector() {
+// storeStream lists what EncodeDiff writes from sv, client by client
+// (descending), the first struct cut at sv, as yjs's merge reads it back:
+// an item with an origin, the cut one included, carries no key (marked
+// read; the store's items are not touched). So once anything waits, a map
+// value that overwrote another is written without the key bit, as yjs
+// writes it, though a plain diff keeps it.
+func storeStream(bs *store.BlockStore, sv store.StateVector) []Block {
+	clients := make([]uint64, 0)
+	for client, clock := range bs.GetStateVector() {
+		if clock > sv[client] {
+			clients = append(clients, client)
+		}
+	}
+	slices.Sort(clients)
+	n := 0
+	for _, client := range clients {
+		n += bs.GetClient(client).Len()
+	}
+	out := make([]Block, 0, n)
+	for i := len(clients) - 1; i >= 0; i-- {
+		client := clients[i]
 		list := bs.GetClient(client)
 		from := sv[client]
-		for i := 0; i < list.Len(); i++ {
-			cell, ok := list.Get(i)
+		for j := 0; j < list.Len(); j++ {
+			cell, ok := list.Get(j)
 			if !ok {
 				continue
 			}
@@ -64,151 +95,56 @@ func buildMergePlan(bs *store.BlockStore, pending *Pending, sv store.StateVector
 			if end <= from {
 				continue // the remote has it
 			}
-			rec := mergeRecord{clock: start, length: end - start}
+			off := uint64(0)
+			if start < from {
+				off = from - start
+			}
 			switch cell.Kind {
 			case store.CellKindItem:
-				rec.kind, rec.item = WireBlockItem, cell.Item
+				it := cell.Item
+				if off > 0 {
+					it = itemFrom(it, off)
+				}
+				out = append(out, Block{Kind: WireBlockItem, Item: it, read: true})
 			case store.CellKindGC:
-				rec.kind = WireBlockGC
-			default:
-				continue
+				out = append(out, Block{Kind: WireBlockGC, ID: block.ID{Client: client, Clock: start + off}, Len: end - start - off})
 			}
-			if start < from {
-				// The first struct of the run, written from the remote's
-				// clock, as EncodeDiff writes it (encodeCellFrom).
-				off := from - start
-				if rec.kind == WireBlockItem {
-					rec.item = itemFrom(cell.Item, off)
-				}
-				rec.clock, rec.length = from, rec.length-off
-			}
-			byClient[client] = append(byClient[client], rec)
 		}
-	}
-
-	for client, blocks := range pending.Blocks {
-		// What the store has is written above, from sv; what the remote
-		// has is left out (yjs diffUpdateV2 of the pending structs).
-		known := max(bs.GetClock(client), sv[client])
-		for _, b := range blocks {
-			rec := mergeRecord{kind: b.Kind, item: b.Item}
-			switch b.Kind {
-			case WireBlockItem:
-				if b.Item == nil {
-					continue
-				}
-				rec.clock, rec.length = b.Item.ID.Clock, b.Item.Len
-			case WireBlockGC, WireBlockSkip:
-				rec.clock, rec.length = b.ID.Clock, b.Len
-			default:
-				continue
-			}
-			// Below the store clock the block is already represented by the
-			// integrated records above, or superseded by them; below sv the
-			// remote has it. Emitting it as well would overlap the run and
-			// corrupt the receiver's list. A queued block can still reach
-			// past the store clock: one that waits on another client is
-			// queued as it came, not cut to what is new (yjs checks its
-			// references before the cut). Its unknown part is carried, cut on
-			// a COPY, since the record points into the live pending buffer.
-			if rec.length == 0 || rec.clock+rec.length <= known {
-				continue
-			}
-			if rec.clock < known {
-				off := known - rec.clock
-				if rec.kind == WireBlockItem {
-					cp := *rec.item
-					if err := sliceWireItemRight(&cp, off); err != nil {
-						continue
-					}
-					rec.item = &cp
-				}
-				rec.clock, rec.length = known, rec.length-off
-			}
-			byClient[client] = append(byClient[client], rec)
-		}
-	}
-
-	clients := make([]uint64, 0, len(byClient))
-	for c, recs := range byClient {
-		if len(recs) > 0 {
-			clients = append(clients, c)
-		}
-	}
-	// Descending clientID, matching EncodeDiff and yrs gotcha 1.
-	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
-	for _, c := range clients {
-		recs := byClient[c]
-		sort.Slice(recs, func(i, j int) bool { return recs[i].clock < recs[j].clock })
-		byClient[c] = reconcile(recs)
-	}
-	return clients, byClient
-}
-
-// reconcile removes overlap from one client's clock-sorted records.
-//
-// This is not tidiness, it is the difference between a correct update and a
-// silently corrupt one. Neither wire format carries a per-block clock: a
-// receiver derives each block's clock by accumulating lengths from the run's
-// declared start. So two records covering overlapping clocks cannot both be
-// emitted - the second would be RELABELLED at the end of the first, landing on
-// clocks its client never minted, duplicating content and shifting every later
-// block in the run. Both ygo and yjs accept the result without complaint,
-// which is what makes it dangerous.
-//
-// Overlap is ordinary in a merge set rather than exotic: one peer publishes a
-// client's run whole while another, having spliced into the middle of it,
-// publishes the same run split in two. Above a causal hole neither integrates,
-// so both reach the plan. Measured before this existed: merging those two
-// diffs produced "cccccXccc" where every other path gives "ccXccc".
-//
-// Fully covered records are dropped; a record straddling what is already
-// covered is sliced, on a COPY, because Content.Split mutates its receiver and
-// the records point into the document's live pending buffer.
-func reconcile(recs []mergeRecord) []mergeRecord {
-	if len(recs) < 2 {
-		return recs
-	}
-	out := make([]mergeRecord, 0, len(recs))
-	covered := recs[0].clock
-	for _, r := range recs {
-		if r.clock+r.length <= covered {
-			continue // wholly inside what is already emitted
-		}
-		if r.clock < covered {
-			off := covered - r.clock
-			if r.kind == WireBlockItem {
-				cp := *r.item
-				if err := sliceWireItemRight(&cp, off); err != nil {
-					// Non-splittable content at a partial boundary. Dropping
-					// the record would lose data, so keep the wider one that
-					// already covers this span and skip only the overlap.
-					continue
-				}
-				r.item = &cp
-			}
-			r.clock += off
-			r.length -= off
-		}
-		out = append(out, r)
-		covered = r.clock + r.length
 	}
 	return out
 }
 
-// countWithSkips returns how many blocks a client's run will emit once the
-// holes are filled with Skip records. The count is written before the blocks,
-// so it has to be known up front.
-func countWithSkips(recs []mergeRecord) uint64 {
-	n := uint64(len(recs))
-	next := recs[0].clock
-	for _, r := range recs {
-		if r.clock > next {
-			n++
+// queueStream is yjs diffUpdateV2 of the queue against sv, as the merge
+// reads it: per client (descending), the blocks that end at or before sv
+// left out, the first one past it written from sv (an item then has an
+// origin and comes back without parent and key), the rest as they are.
+// The queue's items are not touched.
+func queueStream(queue map[uint64][]Block, sv store.StateVector) []Block {
+	all := clientStream(queue)
+	out := make([]Block, 0, len(all))
+	for i := 0; i < len(all); {
+		client := blockClient(&all[i])
+		svClock := sv[client]
+		for i < len(all) && blockClient(&all[i]) == client && blockStartClock(all[i])+blockLen(all[i]) <= svClock {
+			i++
 		}
-		next = r.clock + r.length
+		first := true
+		for ; i < len(all) && blockClient(&all[i]) == client; i++ {
+			b := all[i]
+			if start := blockStartClock(b); first && start < svClock {
+				off := svClock - start
+				if b.Kind == WireBlockItem {
+					b = Block{Kind: WireBlockItem, Item: asRead(itemFrom(b.Item, off))}
+				} else {
+					b.ID.Clock += off
+					b.Len -= off
+				}
+			}
+			first = false
+			out = append(out, b)
+		}
 	}
-	return n
+	return out
 }
 
 // EncodeStateAsUpdateWithPending is EncodeStateAsUpdate plus the pending
@@ -221,40 +157,36 @@ func EncodeStateAsUpdateWithPending(d *doc.Doc) []byte {
 
 // EncodeDiffWithPending is EncodeDiff plus the pending buffer from sv on, in
 // the caller's transaction: the bytes of yjs encodeStateAsUpdate(doc, sv),
-// except where pending updates overlap or leave adjacent GC runs yjs merges
-// (docs/tech-debt.md "State encodings ignore the pending buffer").
+// the store part and the queue merged as yjs merges them (buildMergePlan).
+// Where the store itself is laid out differently from yjs's (docs/tech-debt.md),
+// so is this.
 func EncodeDiffWithPending(d *doc.Doc, txn *doc.Transaction, sv store.StateVector) []byte {
 	bs := txn.Store()
-	clients, byClient := buildMergePlan(bs, GetPending(txn), sv)
-	if clients == nil { // nothing pending
+	plan, ok := buildMergePlan(bs, GetPending(txn), sv)
+	if !ok { // nothing pending
 		return EncodeDiff(d, txn, sv)
 	}
 
-	buf := lib0.WriteVarUint(nil, uint64(len(clients)))
-	for _, client := range clients {
-		recs := byClient[client]
-		buf = lib0.WriteVarUint(buf, countWithSkips(recs))
-		buf = lib0.WriteVarUint(buf, client)
-		buf = lib0.WriteVarUint(buf, recs[0].clock)
-
-		next := recs[0].clock
-		for _, r := range recs {
-			if r.clock > next {
-				buf = lib0.WriteVarUint(buf, 10) // BLOCK_SKIP_REF_NUMBER
-				buf = lib0.WriteVarUint(buf, r.clock-next)
-			}
-			switch r.kind {
+	buf := lib0.WriteVarUint(nil, uint64(len(plan)))
+	for _, sec := range plan {
+		buf = lib0.WriteVarUint(buf, uint64(len(sec.blocks)))
+		buf = lib0.WriteVarUint(buf, sec.client)
+		buf = lib0.WriteVarUint(buf, blockStartClock(sec.blocks[0]))
+		for _, b := range sec.blocks {
+			switch b.Kind {
 			case WireBlockItem:
-				buf = encodeItem(buf, r.item)
-			default: // GC and Skip share the shape: ref number, then length.
-				ref := uint64(0)
-				if r.kind == WireBlockSkip {
-					ref = 10
+				if b.read {
+					buf = encodeItemInfo(buf, b.Item, readInfo(b.Item))
+				} else {
+					buf = encodeItem(buf, b.Item)
 				}
-				buf = lib0.WriteVarUint(buf, ref)
-				buf = lib0.WriteVarUint(buf, r.length)
+			case WireBlockSkip:
+				buf = lib0.WriteVarUint(buf, 10) // BLOCK_SKIP_REF_NUMBER
+				buf = lib0.WriteVarUint(buf, b.Len)
+			default:
+				buf = lib0.WriteVarUint(buf, 0) // BLOCK_GC_REF_NUMBER
+				buf = lib0.WriteVarUint(buf, b.Len)
 			}
-			next = r.clock + r.length
 		}
 	}
 	return mergedDeleteSet(bs, GetPending(txn)).Encode(buf)
@@ -273,36 +205,32 @@ func EncodeStateAsUpdateV2WithPending(d *doc.Doc) []byte {
 // EncodeDiffV2WithPending is the V2 twin of EncodeDiffWithPending.
 func EncodeDiffV2WithPending(d *doc.Doc, txn *doc.Transaction, sv store.StateVector) []byte {
 	bs := txn.Store()
-	clients, byClient := buildMergePlan(bs, GetPending(txn), sv)
-	if clients == nil { // nothing pending
+	plan, ok := buildMergePlan(bs, GetPending(txn), sv)
+	if !ok { // nothing pending
 		return EncodeDiffV2(d, txn, sv)
 	}
 
 	enc := NewEncoderV2()
-	enc.WriteVarUint(uint64(len(clients)))
-	for _, client := range clients {
-		recs := byClient[client]
-		enc.WriteVarUint(countWithSkips(recs))
-		enc.WriteClient(client)
-		enc.WriteVarUint(recs[0].clock)
-
-		next := recs[0].clock
-		for _, r := range recs {
-			if r.clock > next {
-				enc.WriteInfo(10)
-				enc.WriteVarUint(r.clock - next)
-			}
-			switch r.kind {
+	enc.WriteVarUint(uint64(len(plan)))
+	for _, sec := range plan {
+		enc.WriteVarUint(uint64(len(sec.blocks)))
+		enc.WriteClient(sec.client)
+		enc.WriteVarUint(blockStartClock(sec.blocks[0]))
+		for _, b := range sec.blocks {
+			switch b.Kind {
 			case WireBlockItem:
-				encodeItemV2(enc, r.item)
+				if b.read {
+					encodeItemInfoV2(enc, b.Item, readInfo(b.Item))
+				} else {
+					encodeItemV2(enc, b.Item)
+				}
 			case WireBlockSkip:
 				enc.WriteInfo(10)
-				enc.WriteVarUint(r.length)
+				enc.WriteVarUint(b.Len)
 			default:
 				enc.WriteInfo(0)
-				enc.WriteLen(r.length)
+				enc.WriteLen(b.Len)
 			}
-			next = r.clock + r.length
 		}
 	}
 	writeDeleteSetV2(enc, mergedDeleteSet(bs, GetPending(txn)))

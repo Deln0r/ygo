@@ -14,6 +14,26 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.43.0] - 2026-11-20
+
+**Upgrade impact**:
+
+- **Updates that wait for a dependency join the pending buffer as yjs merges them.** Where they cover the same clocks, the buffer keeps what yjs's keeps: at an equal start usually the block that arrived first, the later one cut to what it adds (it kept the longer one); for a GC run and an item at the same clocks the one that arrived second; GC runs that touch or overlap become one. The document once the missing update arrives, and every state written while something waits (`EncodeStateAsUpdate*`, `EncodeDiff*`, `persist.GetDiff`, the server's SyncStep2, `MergeUpdates` of waiting inputs), are then yjs's.
+- **The cost of a waiting update still depends on the clients it shares with the buffer**, not on the whole buffer: with 10,000 waiting blocks over 100 clients, 1,000 more one-block updates take about what they took in 1.42.0 (3.2 ms against 3.1 ms on the same machine) with less memory (4.9 MB against 8.7 MB). Writing the state of a 20,000-item document while something waits takes about the same time with half the memory.
+
+### Fixed
+
+- **Waiting updates that covered the same clocks left a different document than yjs.** An item and a GC run for the same clocks, arriving from two peers before their dependency: yjs keeps the one that arrived second, ygo kept the first, so once the dependency arrived the text read "habcde" where yjs's read "h", or the other way round.
+- **Where waiting updates overlapped, an item ended elsewhere than in yjs.** "abcde" and then "abcdef" for the same clocks: yjs queues "abcde" and "f", ygo queued "abcdef" (yjs keeps "abcdef" only when the second update also holds a higher client, which puts it in front). The state written while they waited differed from yjs's.
+- **A cut piece of a nested type's first item waited for the parent.** yjs reads its queue back from bytes, and an item with an origin comes back without its parent, so the piece integrates once its origin is there; ygo kept the parent and the piece stayed queued.
+- **A map value that overwrote another was written with the key bit while anything waited** (info `0xa8` where yjs writes `0x88`; since 1.42.0, also with only deletes waiting). Peers read both the same way.
+
+### Tests
+
+- New fixtures from yjs 13.6.33 (`testdata/pending-merge-fixtures.json`, `testdata/gen/gen-pending-merge.mjs`, in CI): 62 documents holding waiting updates that cover the same clocks in different ways (a shorter and a longer block at one start in either order and with a higher client in either update; three at one start; the same clocks live and deleted, as an item and as GC; GC runs that touch, overlap and lie apart; a cut through a surrogate pair; array values; map values overwritten while a GC run or a delete waits; a waiting keyed run cut by the state vector; a nested first item cut by GC; a retry that leaves part of the queue). Each is written whole and as diffs against state vectors around every boundary, then the missing update arrives and the document and that transaction's update events are compared; each replays from V1 and from V2 updates: 124 subtests, 76 of them fail on 1.42.0. The generator refuses to write them from a runtime that sorts two elements differently from V8.
+- The merge loop: GC runs, GC and an item at one clock, pieces with and without their key, a first leftover with overlapping blocks; the merge of the clients a leftover shares with the buffer against the merge of the whole buffer, on 20,000 random buffers and leftovers; cut pieces own their text and values.
+- Controls: 15, each failing these tests.
+
 ## [1.42.0] - 2026-11-19
 
 **Upgrade impact**:

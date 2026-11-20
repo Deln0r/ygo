@@ -113,7 +113,11 @@ func encodeCellV2From(enc *EncoderV2, cell store.BlockCell, offset uint64) {
 // Mirrors Item.write in yjs/src/structs/Item.js but routes field
 // writes per the V2 column layout.
 func encodeItemV2(enc *EncoderV2, it *block.Item) {
-	info := it.Info()
+	encodeItemInfoV2(enc, it, it.Info())
+}
+
+// encodeItemInfoV2 is the V2 twin of encodeItemInfo.
+func encodeItemInfoV2(enc *EncoderV2, it *block.Item, info byte) {
 	cantCopyParentInfo := info&(block.InfoHasOrigin|block.InfoHasRightOrigin) == 0
 	enc.WriteInfo(info)
 	if it.Origin != nil {

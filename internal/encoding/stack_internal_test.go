@@ -72,7 +72,10 @@ func TestPending_mergeBlocks_DropsSkips(t *testing.T) {
 func TestPending_mergeBlocks_CutPieceOwnsItsText(t *testing.T) {
 	long := strings.Repeat("y", 1000)
 	p := NewPending()
-	p.mergeBlocks(map[uint64][]Block{9: {strItem(9, 0, "aaaaaaaaaa", nil), strItem(9, 5, long, nil)}})
+	// Two arrivals: the first leftover is queued as it is, the second is
+	// merged into the queue and cut.
+	p.mergeBlocks(map[uint64][]Block{9: {strItem(9, 0, "aaaaaaaaaa", nil)}})
+	p.mergeBlocks(map[uint64][]Block{9: {strItem(9, 5, long, nil)}})
 	list := p.Blocks[9]
 	if len(list) != 2 || list[1].Item.ID.Clock != 10 || list[1].Item.Len != 995 {
 		t.Fatalf("queued %v, want the 1000-character block cut to 10..1004", list)
@@ -81,5 +84,32 @@ func TestPending_mergeBlocks_CutPieceOwnsItsText(t *testing.T) {
 	start := uintptr(unsafe.Pointer(unsafe.StringData(long)))
 	if at := uintptr(unsafe.Pointer(cut)); at >= start && at < start+uintptr(len(long)) {
 		t.Fatal("the cut piece still points into the decoded text")
+	}
+}
+
+// The same for array values: the cut piece's values are a slice of its own.
+func TestPending_mergeBlocks_CutPieceOwnsItsValues(t *testing.T) {
+	vals := make([]any, 1000)
+	for i := range vals {
+		vals[i] = float64(i)
+	}
+	mk := func(clock uint64, v []any) Block {
+		return Block{Kind: WireBlockItem, Item: &block.Item{
+			ID:      block.ID{Client: 9, Clock: clock},
+			Content: block.Content{Kind: block.KindAny, Anys: v},
+			Len:     uint64(len(v)),
+			Parent:  block.Parent{Kind: block.ParentNamed, Named: "a"},
+			Flags:   block.FlagCountable,
+		}}
+	}
+	p := NewPending()
+	p.mergeBlocks(map[uint64][]Block{9: {mk(0, vals[:10:10])}})
+	p.mergeBlocks(map[uint64][]Block{9: {mk(5, vals)}})
+	list := p.Blocks[9]
+	if len(list) != 2 || list[1].Item.ID.Clock != 10 || len(list[1].Item.Content.Anys) != 995 {
+		t.Fatalf("queued %v, want the 1000-value block cut to 10..1004", list)
+	}
+	if &list[1].Item.Content.Anys[0] == &vals[10] { // clock 10 is value 10 of the decoded block
+		t.Fatal("the cut piece still points into the decoded values")
 	}
 }

@@ -184,12 +184,10 @@
 - **What:** yjs merges only around the transaction's delete set and its `_mergeStructs`, so collecting a type whose children were deleted (and released) earlier can leave several adjacent GC runs; ygo collapses them into one. Peers converge on the same content; the V1/V2 state bytes differ (one GC struct of length 4 where yjs writes 2, 1, 1).
 - **When to address:** if byte-exact state encoding after such histories is needed.
 
-### Pending queue corner cases
+### Pending queue corner cases (resolved in 1.43.0)
 
-- **Where:** `Update.Apply`, `Pending` (`internal/encoding/pending.go`).
-- **What:** When the queue holds two encodings of the same clocks (a live item, then the same clocks as ContentDeleted / GC from a later diff), yjs's merged pending update keeps the later encoding and ygo the first; the delete set then leaves the same document, but with GC off ygo keeps a deleted type and its child where yjs has ContentDeleted and GC, and the update event's delete set covers one more clock.
-- **Resolved since (1.30.0):** yjs's retry rule (formerly item 1): the queue is retried only when an update reaches a clock its missing vector names, so a queued block whose dependency arrived below the recorded clock waits one more update, as in yjs.
-- **When to address:** if a sync scenario needs byte-exact pending behaviour.
+- **Was:** When the queue held two encodings of the same clocks (a live item, then the same clocks as ContentDeleted / GC from a later diff), yjs's merged pending update kept the later encoding and ygo the first; the delete set then left the same document, but with GC off ygo kept a deleted type and its child where yjs had ContentDeleted and GC, and the update event's delete set covered one more clock. With GC for the same clocks the text itself differed once the missing update arrived.
+- **Resolved by:** the queue merges as yjs's does (entry "The pending queue and the state merge as yjs mergeUpdatesV2" below). Since 1.30.0 also yjs's retry rule: the queue is retried only when an update reaches a clock its missing vector names.
 
 ### Subdocument lifecycle events differ from yjs
 
@@ -253,7 +251,19 @@
 
 - **Was:** `EncodeStateAsUpdate*` / `EncodeDiff*`, and the server's SyncStep2, left the pending buffer out, where yjs `encodeStateAsUpdateV2` appends `pendingDs` and the pending structs diffed against the target state vector; a late joiner synced from ygo never got what it held but could not integrate yet.
 - **Resolved by:** `internal/encoding/merge.go` `EncodeDiffWithPending` / `EncodeDiffV2WithPending` (the merge plan from a state vector), used by the public encoders, the sync handler, the client's SyncStep2 and gomobile. The store-only `encoding.EncodeDiff` stays for what yjs sends from its update event, which never carries the pending buffer: the client's routine sends and its local log, a transaction's update, snapshots. Fixtures: `testdata/pending-state-fixtures.json`.
-- **Remaining gap:** the pending buffer keeps a different definition of the same clocks than yjs when queued updates overlap (it keeps the longer block at the same start, where yjs `mergeUpdatesV2` keeps the first and cuts the later one, and yjs merges adjacent GC runs from different updates), so a state with such a queue can still differ from yjs's in where one item ends.
+- **Was also (resolved in 1.43.0):** where queued updates overlapped, the queue kept the longer block at a start, where yjs keeps the first and cuts the later one, and kept GC runs from different updates apart, where yjs merges them; the state with such a queue differed from yjs's in where an item ends. Once anything waited, the store part was also written with the key bit on map values that overwrote another (info `0xa8` where yjs, which reads its store part back before merging, writes `0x88`). Entry below.
+
+### The pending queue and the state merge as yjs mergeUpdatesV2 (resolved in 1.43.0)
+
+- **Was:** the queue merged a leftover by rules of its own (by start clock, the longer block first, overlaps cut), and the state cut the queue at the store's clock.
+- **Resolved by:** `internal/encoding/merge_structs.go`, a port of the struct loop of yjs `mergeUpdatesV2`: the reader in front writes and the other is cut, the one in front at a tie is carried from client to client, a GC run and an item at one clock go to the second reader (yjs's comparator says each goes first, and V8 swaps two such elements), GC runs merge and items never. yjs keeps its queue as one update and merges each leftover into it; ygo merges the clients the leftover shares with the queue (`mergeQueue`, which works out from the clients before each which reader is in front, as the whole loop would; a randomized test checks it against the whole loop), and takes the first leftover as it is. Queued items are as yjs reads them back (no parent and no key on an item with an origin), and the state is the merge of the store part, read the same way, with the queue diffed against the state vector (`buildMergePlan`). Fixtures: `testdata/pending-merge-fixtures.json`.
+- **Not covered:** (1) Store layouts that already differ from yjs's (GC runs after a type's deletion above; undo cutting at the ranges in its scope below) differ in the merged state as well. (2) A malformed update whose blocks wait on each other in a cycle leaves a different leftover in yjs, which keeps one item of a client on the stack twice (`addStackToRestSS`); not a causal history. (3) The public `MergeUpdates`, entry below.
+
+### MergeUpdates integrates instead of merging bytes
+
+- **Where:** `ygo.MergeUpdates`, `ygo.MergeUpdatesV2`.
+- **What:** yjs `mergeUpdates` merges the updates' structs without integrating them, all readers at once. ygo applies the updates to a scratch document and writes its state: what integrates comes out as the document holds it (a client's consecutive characters squashed into one run, where yjs keeps the runs the updates had), and what waits comes out as yjs's merge of the updates two at a time, which can differ from its merge of three or more at once where they cover the same clocks (three readers tie differently than two). Peers that apply either result reach the same document, apart from those ties.
+- **When to address:** if a consumer needs yjs's bytes from a merge, as an n-way port of the merge loop with V8's sort of more than two readers.
 
 ### Item.Repair ParentID (resolved)
 

@@ -80,6 +80,10 @@ type Pending struct {
 	// whether the queue is retried; MissingSV, what to ask a peer for, is
 	// computed separately.
 	Missing map[uint64]uint64
+
+	// raw is set while Blocks holds a first leftover that is not
+	// well-formed, queued as it came (mergeBlocks).
+	raw bool
 }
 
 // NewPending returns an empty buffer.
@@ -195,79 +199,89 @@ func blockLen(b Block) uint64 {
 	return b.Len
 }
 
-// addBlock queues b for client (mergeBlocks with one block).
-func (p *Pending) addBlock(client uint64, b Block) {
-	p.mergeBlocks(map[uint64][]Block{client: {b}})
-}
-
-// mergeBlocks adds blocks to the queue and normalizes each client it
-// touches the way yjs mergeUpdatesV2 merges one client's structs, since
-// yjs's queue is a merged update: by start clock, a longer block before a
-// shorter one at the same start; a block inside what the ones before it
-// cover is dropped; one that straddles their end is cut to its uncovered
-// part, its origin then the client's own previous clock, as yjs
-// sliceStruct leaves it. Without this, the same clocks queued in
-// different splits (peers split a run at different points) piled up:
-// each walled again and none ever left.
+// mergeBlocks adds an update's leftover to the queue as yjs does: yjs keeps
+// its pending structs as one update, takes the first leftover as it is
+// (`store.pendingStructs = restStructs`, also after a retry, which empties
+// the queue first) and merges each later one into it with
+// mergeUpdatesV2([queue, leftover]) (mergeStructs). So at an equal start
+// the block queued first usually stays and the later one is cut to what it
+// adds, GC and an item at one start go to the later one, and GC runs that
+// touch or overlap become one. A cut piece holds storage of its own: a
+// substring of what it was decoded with would keep the whole payload
+// reachable, and runs of N characters starting one clock apart, each
+// walled, kept N² bytes.
+//
+// Every queued item is then as yjs reads it back from the queue's bytes
+// (asRead): one with an origin has no parent and no key, so a cut tail of a
+// nested type's first item waits on its origin only, as in yjs.
 //
 // Skip blocks are never queued: they carry nothing, the next block of
-// their client meets the same hole without them, and a queued Skip could
-// keep out a real block for the same clocks that arrives later.
+// their client meets the same hole without them, and the merge drops them
+// as yjs's reader does.
+//
+// The merge runs on the clients the leftover shares with the queue only
+// (mergeQueue); the rest of the queue comes out of yjs's merge as it went
+// in. A first leftover that is not well-formed (a peer's update with
+// overlapping blocks) is queued as it is, as yjs queues it, and the next
+// merge takes the whole queue through yjs's loop, as yjs does every time.
 func (p *Pending) mergeBlocks(blocks map[uint64][]Block) {
-	for client, add := range blocks {
-		list := p.Blocks[client]
-		touched := false
-		for _, b := range add {
+	add := map[uint64][]Block{}
+	for client, list := range blocks {
+		var kept []Block
+		for _, b := range list {
 			if b.Kind == WireBlockSkip || blockLen(b) == 0 || (b.Kind == WireBlockItem && b.Item == nil) {
 				continue
 			}
-			list = append(list, b)
-			touched = true
+			kept = append(kept, b)
 		}
-		if !touched {
-			continue
-		}
-		sort.SliceStable(list, func(a, b int) bool {
-			sa, sb := blockStartClock(list[a]), blockStartClock(list[b])
-			if sa != sb {
-				return sa < sb
-			}
-			return blockLen(list[a]) > blockLen(list[b])
-		})
-		out := make([]Block, 0, len(list))
-		var covered uint64
-		for k, b := range list {
-			start, n := blockStartClock(b), blockLen(b)
-			if k > 0 && start+n <= covered {
-				continue
-			}
-			if k > 0 && start < covered {
-				off := covered - start
-				if b.Kind == WireBlockItem {
-					if err := sliceWireItemRight(b.Item, off); err != nil {
-						continue // unsplittable: the wider block before it covers the overlap
-					}
-					// The cut keeps a substring or subslice of what the
-					// block was decoded with. Queued, that would hold the
-					// whole decoded payload for its uncovered tail: runs of
-					// N characters starting one clock apart, each walled,
-					// kept N² bytes for clocks already known.
-					ownPayload(&b.Item.Content)
-				} else {
-					b.ID.Clock += off
-					b.Len -= off
-				}
-				start, n = covered, n-off
-			}
-			out = append(out, b)
-			covered = start + n
-		}
-		if len(out) == 0 {
-			delete(p.Blocks, client)
-		} else {
-			p.Blocks[client] = out
+		if len(kept) > 0 {
+			add[client] = kept
 		}
 	}
+	if len(add) == 0 {
+		return
+	}
+	if len(p.Blocks) == 0 {
+		p.raw = false
+		for _, list := range add {
+			p.raw = p.raw || !wellFormed(list)
+		}
+		p.Blocks = add
+	} else if p.raw {
+		merged := map[uint64][]Block{}
+		for _, b := range mergeStructs(clientStream(p.Blocks), clientStream(add)) {
+			if b.Kind != WireBlockSkip {
+				c := blockClient(&b)
+				merged[c] = append(merged[c], b)
+			}
+		}
+		p.Blocks, p.raw = merged, false
+		add = merged
+	} else {
+		mergeQueue(p.Blocks, add)
+		for c := range add {
+			p.Blocks[c] = withoutSkips(p.Blocks[c])
+		}
+	}
+	for c := range add {
+		for _, b := range p.Blocks[c] {
+			if b.Kind == WireBlockItem {
+				asRead(b.Item)
+			}
+		}
+	}
+}
+
+// withoutSkips drops the Skips a merge writes for the gaps (the queue keeps
+// its gaps implicit), in place: every list it gets is the merge's own.
+func withoutSkips(list []Block) []Block {
+	out := list[:0]
+	for _, b := range list {
+		if b.Kind != WireBlockSkip {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // ownPayload gives c storage of its own, so a cut piece no longer keeps
