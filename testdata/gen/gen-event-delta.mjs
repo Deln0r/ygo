@@ -142,12 +142,14 @@ function build(sc) {
 //   delayed   an observer that keeps a remote transaction's event unread and
 //             reads it from the next callback of a transaction run after it
 //             (the format cleanup's, a delta read's)
+//   delayedThenCurrent  as delayed, then reads that callback's own event:
+//             the older read's deletions change the newer delta
 //   undo      observed, with an UndoManager on the text (remote origin not
 //             tracked, no grouping), then undo, redo, undo, then undo until
 //             the stack is empty and redo until it is
 // xml has no "deep": ygo has no XmlFragment.ObserveDeep yet.
 const MODES = {
-  root: ["untyped", "typed", "silent", "observed", "oneOfTwo", "delayed"],
+  root: ["untyped", "typed", "silent", "observed", "oneOfTwo", "delayed", "delayedThenCurrent"],
   map: ["typed", "observed", "deep"],
   xml: ["typed", "observed"],
   depth: ["typed", "deep"],
@@ -183,6 +185,20 @@ function receive(sc, updates, mode) {
           pending = null;
         }
         if (!e.transaction.local) pending = e;
+      });
+    }
+    if (mode === "delayedThenCurrent") {
+      let pending = null;
+      t.observe((e) => {
+        if (!e.transaction.local) {
+          pending = e;
+          return;
+        }
+        if (pending) {
+          reader(name)(pending);
+          pending = null;
+        }
+        reader(name)(e);
       });
     }
   };

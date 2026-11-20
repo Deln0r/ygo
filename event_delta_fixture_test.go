@@ -168,6 +168,22 @@ func replayEventDeltaReceiver(t *testing.T, s eventDeltaScenario, want eventDelt
 					pending = e
 				}
 			})
+		case "delayedThenCurrent":
+			// The older read's deletions change the newer delta, so the
+			// newer one equals Delta only when no older read came first.
+			var pending *ygo.TextEvent
+			txt.Observe(func(e *ygo.TextEvent) {
+				if !remoteDone {
+					pending = e
+					return
+				}
+				own := pending == nil
+				if pending != nil {
+					read(name, pending, false)
+					pending = nil
+				}
+				read(name, e, own)
+			})
 		}
 	}
 	// Root texts, in the order the generator types them.

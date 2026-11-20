@@ -448,6 +448,91 @@
           "state": "0003000300073202720001720002010002010009040046008600410086130e7478626f6c64626f6c64626f6c644100440101010001010301000200787e02007e0101010000"
         },
         {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00000132000001040502747841000101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720001000100034600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "000200020302720001000100034600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "0003000300073202720001720002010002010009040046008600410086130e7478626f6c64626f6c64626f6c644100440101010001010301000200787e02007e0101010000"
+        },
+        {
           "mode": "undo",
           "events": [
             {
@@ -1323,6 +1408,105 @@
             }
           ],
           "state": "00030003020b7200037201027200017200050100040100030242000f04008400c6008600460086004100861e1874616263626f6c64626f6c64626f6c64626f6c64626f6c64410002440301010001010402000200787e0200787e02007e0101010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "000001320000010407047461626301030101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720001040100034600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "000200020302720001040100034600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            },
+            {
+              "update": "0002000203037201020004010203c600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 3,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 3,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "00030003020b7200037201027200017200050100040100030242000f04008400c6008600460086004100861e1874616263626f6c64626f6c64626f6c64626f6c64626f6c64410002440301010001010402000200787e0200787e02007e0101010000"
         }
       ]
     },
@@ -1632,6 +1816,43 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720504000444040202040504008401c6140d7461626364626f6c64626f6c6441000201440001010000010500787e00",
+              "local": false
+            },
+            {
+              "update": "000200020301720001060100034600860b08626f6c64626f6c644400000000010200787e0132010401",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00020002057205017200050004440402030204460904008401c101460086140d7461626364626f6c64626f6c644100020144000101000241000205000200787e0132010401"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720504000444040202040504008401c6140d7461626364626f6c64626f6c6441000201440001010000010500787e00",
@@ -2099,6 +2320,57 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720504030042020204020504008401c6140d7461626364626f6c64626f6c6401024100440001010000010500787e00",
+              "local": false
+            },
+            {
+              "update": "000200020301720001060100034600860b08626f6c64626f6c644400000000010200787e0132010401",
+              "local": false
+            },
+            {
+              "update": "0002000203027201020006010203c600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "000300030108720602720101720008000300420244060004040244420d04008402c101c60086004600861a157461626364626f6c64626f6c64626f6c64626f6c64410344020101000241000306000200787e0200787e0132010401"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720504030042020204020504008401c6140d7461626364626f6c64626f6c6401024100440001010000010500787e00",
@@ -2746,6 +3018,125 @@
             }
           ],
           "state": "0003000303073202720201720204000242020400024202110401460086004600860041008600410086211c74787579626f6c64626f6c64626f6c64626f6c64626f6c64626f6c64410244040101000241000302000400787e787e04007e7e01010200000100"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "000001320000010407047478757941020101000001020000",
+              "local": false
+            },
+            {
+              "update": "00030003010301720202000202000207460086004600861310626f6c64626f6c64626f6c64626f6c644402000000010400787e787e00",
+              "local": false
+            },
+            {
+              "update": "00030003010302720202000202000207460086004600861310626f6c64626f6c64626f6c64626f6c644402000000010400787e787e00",
+              "local": false
+            },
+            {
+              "update": "00000000000001000000000001010200000100",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "u",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "u",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "0003000303073202720201720204000242020400024202110401460086004600860041008600410086211c74787579626f6c64626f6c64626f6c64626f6c64626f6c64626f6c64410244040101000241000302000400787e787e04007e7e01010200000100"
         }
       ]
     },
@@ -3146,6 +3537,52 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "000001320000010407047478797a01030101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720202000202030001c60b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "000200020302720202000202030001c60b08626f6c64626f6c644400000000010200787e0132010200",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "000300030108720102720201720206000242024202040300420207040084008100c61813747879626f6c64626f6c64626f6c64626f6c644101440201010001010303000200787e0200787e0132010200"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "000001320000010407047478797a01030101000001010000",
@@ -3665,6 +4102,91 @@
             }
           ],
           "state": "0003000300073202720001720002010002010009040046008600410086130e7478626f6c64626f6c64626f6c6441004401010100010103010002007701787e02007e0101010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00000132000001040502747841000101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720001000100034600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "000200020302720001000100034600860b08626f6c64626f6c6444000000000102007701787e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": "x"
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": "x"
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "0003000300073202720001720002010002010009040046008600410086130e7478626f6c64626f6c64626f6c6441004401010100010103010002007701787e02007e0101010000"
         }
       ]
     },
@@ -4144,6 +4666,105 @@
                   }
                 }
               ],
+              "keys": []
+            }
+          ],
+          "state": "00030003030e7200027201027200013201720001070100020042030005000200420011040084004600c600c10086004600c1008629217478796974616c69636974616c6963626f6c64626f6c64626f6c646974616c6963410146004401060101000241000302000400787e7e0400787e7e020201020001010100"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "0000013200000104060374787901020101000001010000",
+              "local": false
+            },
+            {
+              "update": "00030003010601320172000103000300020100054600c600861914626f6c646974616c6963626f6c646974616c69630406040600000001040078787e7e00",
+              "local": false
+            },
+            {
+              "update": "0003000301060272010272000300020003000200054600c6018619146974616c69636974616c6963626f6c64626f6c6446004400000000010400787e787e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010100",
+              "local": true
+            },
+            {
+              "update": "0000000000000100000000000102010200",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "italic": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "italic": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [],
               "keys": []
             }
           ],
@@ -4642,6 +5263,95 @@
             }
           ],
           "state": "0003000300073202720001720002010002010009040046008600410086130e7478626f6c64626f6c64626f6c6441004401010100010103010002007f7e02007e0101010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00000132000001040502747841000101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720001000100034600860b08626f6c64626f6c6444000000000102007f7e00",
+              "local": false
+            },
+            {
+              "update": "000200020302720001000100034600860b08626f6c64626f6c6444000000000102007f7e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": {
+                      "$undefined": true
+                    }
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": {
+                      "$undefined": true
+                    }
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "0003000300073202720001720002010002010009040046008600410086130e7478626f6c64626f6c64626f6c6441004401010100010103010002007f7e02007e0101010000"
         }
       ]
     },
@@ -5038,6 +5748,57 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720102000600050600840086110c74626f6c64616263626f6c640104030401010000010300787e00",
+              "local": false
+            },
+            {
+              "update": "00000000000001000000000001320200000300",
+              "local": false
+            },
+            {
+              "update": "000200020302720202030002040201c60b08626f6c64626f6c6444000000000102007e7800",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "0002000205720302720205000301440202040207010084028100c6110c74616263626f6c64626f6c644102440001010002410002050002007e7801320200000300"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720102000600050600840086110c74626f6c64616263626f6c640104030401010000010300787e00",
@@ -6278,6 +7039,91 @@
             }
           ],
           "state": "000300030007320272000172000201000201000b04004600860041008600281a137478626f6c64626f6c64626f6c64746c616e674100440101040101000241000301000200787e03007e7702656e0101010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00000132000001040502747841000101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720001000100054600860028120d626f6c64626f6c64746c616e67440001040101000101010300787e7702656e00",
+              "local": false
+            },
+            {
+              "update": "000200020302720001000100034600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "000300030007320272000172000201000201000b04004600860041008600281a137478626f6c64626f6c64626f6c64746c616e674100440101040101000241000301000200787e03007e7702656e0101010000"
         }
       ]
     },
@@ -6593,6 +7439,42 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "00000132000001040502747841000101000001010000",
+              "local": false
+            },
+            {
+              "update": "00000101000001280805746c616e67010401010001010101007702656e00",
+              "local": false
+            },
+            {
+              "update": "00000102000001280805746c616e6701040101000101010100770264650101010000",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            }
+          ],
+          "deltas": [],
+          "state": "0000033202010000050400280021120c7478746c616e67746c616e67410104010401010002410003010001007702646501000101010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "00000132000001040502747841000101000001010000",
@@ -7059,6 +7941,57 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720504030042020204020504008401c6140d7461626364626f6c64626f6c6401024100440001010000010500787e00",
+              "local": false
+            },
+            {
+              "update": "000200020301720001060100034600860b08626f6c64626f6c644400000000010200787e0132010401",
+              "local": false
+            },
+            {
+              "update": "0002000203027201020006010203c600860b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "000300030108720602720101720008000300420244060004040244420d04008402c101c60086004600861a157461626364626f6c64626f6c64626f6c64626f6c64410344020101000241000306000200787e0200787e0132010401"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720504030042020204020504008401c6140d7461626364626f6c64626f6c6401024100440001010000010500787e00",
@@ -8269,6 +9202,57 @@
           ],
           "deltas": [],
           "state": "00030003030d7201037202037200430101720108000200420200044407044200420100040b04008401c400c6034600c62a217461626371626f6c646974616c6963626f6c646974616c6963626f6c64626f6c64410304060406440001010000030300050078787e7e0200787e00"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "000001320000010407047461626301030101000001010000",
+              "local": false
+            },
+            {
+              "update": "00020002030172010102020004034600c60b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "000300030108037202037200430105024202000405044200420003c400c61b1571626f6c646974616c6963626f6c646974616c6963010406040600000001050078787e7e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003030d7201037202037200430101720108000200420200044407044200420100040b04008401c400c6034600c62a217461626371626f6c646974616c6963626f6c646974616c6963626f6c64626f6c64410304060406440001010000030300050078787e7e0200787e00"
         }
       ]
     },
@@ -8873,6 +9857,71 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720302010002000207040084004600c6130e746162636465626f6c64626f6c644100440101010000010400787e00",
+              "local": false
+            },
+            {
+              "update": "00020002030172000108010a034600860f0c6974616c69636974616c69634600000000010200787e0132010400",
+              "local": false
+            },
+            {
+              "update": "000200020302720403000644030c430003c601c40d09626f6c64626f6c64714400010000000103007701787e0132010600",
+              "local": false
+            },
+            {
+              "update": "000300030005037202033203000442030c460001c614106974616c69636974616c6963626f6c64460004000000010300787e7e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003050d720603720203320272040172000b00030146000441000644060900020a460006430006110400840281004600c100c604c400460086392e7461626364626f6c646974616c69636974616c6963626f6c64626f6c64626f6c64716974616c69636974616c696341030446004401014600010100024100040700780300787e7e03007701787e0200787e01320204000100"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720302010002000207040084004600c6130e746162636465626f6c64626f6c644100440101010000010400787e00",
@@ -9553,6 +10602,71 @@
           ],
           "deltas": [],
           "state": "00030003050d720603720003320372030272020c0003004205004a0003014404080442010005004202130400840081008400c60084008600c600c400c6392e74616264626f6c640a626f6c64626f6c6471626f6c646974616c69636974616c69636974616c69636974616c6963410204014400010446020101000101030700787e0500787e787e0200787e0132010200"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00020002027204040200050001040904008400c600840086150e7461626364626f6c640a626f6c6401420004010401010000010500787e00",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000132010200",
+              "local": false
+            },
+            {
+              "update": "000200020302720202020402080201c60f0c6974616c69636974616c69634600000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "0003000301080372000332037203040100030105020100050005c600c400c61b15626f6c6471626f6c646974616c69636974616c69630401044600000000010500787e787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003050d720603720003320372030272020c0003004205004a0003014404080442010005004202130400840081008400c60084008600c600c400c6392e74616264626f6c640a626f6c64626f6c6471626f6c646974616c69636974616c69636974616c69636974616c6963410204014400010446020101000101030700787e0500787e787e0200787e0132010200"
         }
       ]
     },
@@ -10151,6 +11265,71 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "000200020272030301000601020704008400c60086130d7461626364626f6c64626f6c64410003440001010000010400787e00",
+              "local": false
+            },
+            {
+              "update": "0000030172000102010401c40301710100000001010000",
+              "local": false
+            },
+            {
+              "update": "0002000206027201027200030100060308480a03c400c60d0971626f6c64626f6c64014400000000010300770178780132010400",
+              "local": false
+            },
+            {
+              "update": "00030003010903720143003243003205040044000a040646064205c400c602861b1571626f6c64626f6c646974616c69636974616c696301440046000000000105007e78787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003041472050372014300324300320272010272000172000e0003004406420044000a4a00064409020446064204480a461304008402c1008600c400c6028600c400c601c435287461626364626f6c6471626f6c64626f6c646974616c69636974616c696371626f6c64626f6c647141030401440046000144000101010001010406007e05007e78787e03007701787801000132010400"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "000200020272030301000601020704008400c60086130d7461626364626f6c64626f6c64410003440001010000010400787e00",
@@ -10984,6 +12163,131 @@
             }
           ],
           "state": "000300030410720603720003720003027203017201010d000300420300440442440402440804024601010a4808190400840081008400c10186004600c6014100c100c600c10086302674616264626f6c64626f6c646974616c69636974616c6963626f6c646974616c6963626f6c6441024400460004060401010002410404060004007e78787e03007e03007e7e033202020001010201000101010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "0002000202720504030042020204020504008401c6140d7461626364626f6c64626f6c6401024100440001010000010500787e00",
+              "local": false
+            },
+            {
+              "update": "0003000300040172010103040244010a03c6008614106974616c69636974616c6963626f6c64460004000000010300787e7e0132010500",
+              "local": false
+            },
+            {
+              "update": "000200020302720302044403000a48054600c100c60b08626f6c64626f6c644400000001010103007701787e023201040002010100",
+              "local": false
+            },
+            {
+              "update": "00030003010703720003720003030644040201010586004600c61914626f6c64626f6c646974616c69636974616c6963440046000000000104007e78787e0132010200",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000102010000",
+              "local": true
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true,
+                    "italic": true
+                  }
+                },
+                {
+                  "retain": 2,
+                  "attributes": {
+                    "italic": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [],
+              "keys": []
+            }
+          ],
+          "state": "000300030410720603720003720003027203017201010d000300420300440442440402440804024601010a4808190400840081008400c10186004600c6014100c100c600c10086302674616264626f6c64626f6c646974616c69636974616c6963626f6c646974616c6963626f6c6441024400460004060401010002410404060004007e78787e03007e03007e7e033202020001010201000101010000"
         }
       ]
     },
@@ -11441,6 +12745,57 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720302010002000207040084004600c6100b746162626f6c64626f6c644101440001010000010400787e00",
+              "local": false
+            },
+            {
+              "update": "0002000204013241000302420200058600840086110d6974616c6963716974616c6963060106000000010300787e00",
+              "local": false
+            },
+            {
+              "update": "000200020702720002720002040646030002020007c100c6008100860f0c6974616c69636974616c696346000000024100010400787e02320200000101020200000100",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 5
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003010d7203027200027200020132410009010006460300410002040002010011010084004100c101c60081008601840086221b74626974616c69636974616c69636974616c6963716974616c69634100460101060101000241030304000400787e0300787e02320200000101020200000100"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720302010002000207040084004600c6100b746162626f6c64626f6c644101440001010000010400787e00",
@@ -12137,6 +13492,133 @@
             }
           ],
           "state": "00030003020e72020332037200030272010172020a0003004406424406440204010003011501008400810084004600c1008601c1008600c100c6231b746264626f6c64626f6c646974616c69636974616c6963626f6c64410144004600040101000241030404000400787e7e02007e02007e04320200000100030101000201000001010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00000132000001040805746162636401040101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020301720202030002040201c60b08626f6c64626f6c644400000000010200787e0132010000",
+              "local": false
+            },
+            {
+              "update": "0002000203027201020006010203c600860f0c6974616c69636974616c69634600000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "00030003010603320372000303000642020100054600c600861914626f6c646974616c6963626f6c646974616c69630406040600000001040078787e7e0132010200",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000103010100",
+              "local": true
+            },
+            {
+              "update": "000000000000010000000000020201000001010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true,
+                    "italic": true
+                  }
+                },
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "italic": true
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 2,
+                  "attributes": {
+                    "italic": null
+                  }
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 2,
+                  "attributes": {
+                    "italic": null
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "00030003020e72020332037200030272010172020a0003004406424406440204010003011501008400810084004600c1008601c1008600c100c6231b746264626f6c64626f6c646974616c69636974616c6963626f6c64410144004600040101000241030404000400787e7e02007e02007e04320200000100030101000201000001010000"
         }
       ]
     },
@@ -12630,6 +14112,57 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0002000202720302040002000607040084004600c6140e746162636465626f6c64626f6c64010302440001010000010400787e00",
+              "local": false
+            },
+            {
+              "update": "0002000206017200017200030c4c0802060005c100c600860f0c6974616c69636974616c6963460000000101010300787e0101010000",
+              "local": false
+            },
+            {
+              "update": "000300030004027206020506024300080408044a0007c1008600c400c61611626f6c64716974616c69636974616c696304014600000001010105007e787e023201060002010000",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003030c7205027206020172000172000c000402420300430008044c0808000602044a00040013040084024600c1018600c400c601c100c600863227746162636465626f6c64626f6c64716974616c69636974616c69636974616c69636974616c6963410002410044000146020101000241010306007805007e787e0300787e03320106000201000001010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0002000202720302040002000607040084004600c6140e746162636465626f6c64626f6c64010302440001010000010400787e00",
@@ -13188,6 +14721,57 @@
           ],
           "deltas": [],
           "state": "000300030108720203720202720006000300440402030204460b040081008401c601460086211c746163646974616c69636974616c69636974616c69636974616c69634102460201010001010304000200787e0200787e0132010100"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "00000132000001040805746162636401040101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020302720001060100034600860f0c6974616c69636974616c69634600000000010200787e0132010100",
+              "local": false
+            },
+            {
+              "update": "000200020303720202000402020401c60f0c6974616c69636974616c69634600000000010200787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "000300030108720203720202720006000300440402030204460b040081008401c601460086211c746163646974616c69636974616c69636974616c69636974616c69634102460201010001010304000200787e0200787e0132010100"
         }
       ]
     },
@@ -13677,6 +15261,97 @@
             }
           ],
           "state": "0003000300097200027203020172010501000200420502420242020f04008400c10086004600c4004100c61710746162626f6c64626f6c6471626f6c6441014400010401010002410003020004007e7802007e020201000001010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "0000013200000104060374616201020101000001010000",
+              "local": false
+            },
+            {
+              "update": "00020002030172010100020002034600c60b08626f6c64626f6c644400000000010200787e00",
+              "local": false
+            },
+            {
+              "update": "000200020402720302030002000302420207c10086004600c40d09626f6c64626f6c6471440001000001010104007e780102010000",
+              "local": false
+            },
+            {
+              "update": "0000000000000100000000000101010000",
+              "local": true
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                },
+                {
+                  "retain": 1
+                },
+                {
+                  "insert": "q"
+                }
+              ],
+              "keys": []
+            },
+            {
+              "text": "t",
+              "delta": [
+                {
+                  "retain": 1,
+                  "attributes": {
+                    "bold": true
+                  }
+                }
+              ],
+              "keys": []
+            }
+          ],
+          "state": "0003000300097200027203020172010501000200420502420242020f04008400c10086004600c4004100c61710746162626f6c64626f6c6471626f6c6441014400010401010002410003020004007e7802007e020201000001010000"
         }
       ]
     },
@@ -14091,6 +15766,52 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "000001320000010407047461626301030101000001010000",
+              "local": false
+            },
+            {
+              "update": "000200020701720001320132030242020304010005c600c400c60d09626f6c6471626f6c64040104000000010300787e00",
+              "local": false
+            },
+            {
+              "update": "00030003010702720102720002030242020400044402034600c61914626f6c64626f6c646974616c69636974616c696344004600000000010400787e787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003031072000272010272000201720001320132070200420200420207000444030001000b040084004600c603c400c62c2174616263626f6c64626f6c646974616c69636974616c6963626f6c6471626f6c6401020144004600040104010100000302000400787e787e0300787e00"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "000001320000010407047461626301030101000001010000",
@@ -14654,6 +16375,57 @@
           ],
           "deltas": [],
           "state": "000300030309720302720102017202070100044200044405000242044211040081004600c100c60086014400c600862d237461626f6c646974616c69636974616c6963626f6c64716974616c69636974616c6963410004460004014600010100024100030400780300787e7e0300787e01320201000100"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "0002000202720302010002000207040084004600c6100b746162626f6c64626f6c644101440001010000010400787e00",
+              "local": false
+            },
+            {
+              "update": "0002000203017202020644020442054400c60086110d716974616c69636974616c6963014600000000010300787e00",
+              "local": false
+            },
+            {
+              "update": "0003000300040272010203044200010003c6008614106974616c69636974616c6963626f6c64460004000000010300787e7e01320201000100",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 2
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "000300030309720302720102017202070100044200044405000242044211040081004600c100c60086014400c600862d237461626f6c646974616c69636974616c6963626f6c64716974616c69636974616c6963410004460004014600010100024100030400780300787e7e0300787e01320201000100"
         }
       ]
     },
@@ -15056,6 +16828,43 @@
           ],
           "deltas": [],
           "state": "000300030110720403720003324301320272000172020a0002420848000200420207000201020204440d040084014600c100c401c602c4231974616263626f6c647171626f6c64626f6c64626f6c647171714102044100440101020101000101040500780400787e01007e02000132010400"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "0002000202720302010002000207040084004600c6120c74616263626f6c64626f6c64410002440001010000010400787e00",
+              "local": false
+            },
+            {
+              "update": "00030003000e037200033243013202720001720207084800020042020602010102044405c401c602c418117171626f6c64626f6c64626f6c64717171410044010102000000030400787e01007e02000132010400",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "000300030110720403720003324301320272000172020a0002420848000200420207000201020204440d040084014600c100c401c602c4231974616263626f6c647171626f6c64626f6c64626f6c647171714102044100440101020101000101040500780400787e01007e02000132010400"
         }
       ]
     },
@@ -15416,6 +17225,38 @@
           ],
           "deltas": [],
           "state": "00030003031472010372000332430132027202017200013201320b000242010002420242000407020102024201000b04008401c401c604c400c62720746162637171626f6c64626f6c64626f6c64626f6c64626f6c647171626f6c64410444030204010100000403000400787e0200787e0300787e00"
+        },
+        {
+          "mode": "delayedThenCurrent",
+          "events": [
+            {
+              "update": "000001320000010407047461626301030101000001010000",
+              "local": false
+            },
+            {
+              "update": "000300030312037200033243013202720201720001320132080101024202420004070201020242010007c401c604c400c6231c7171626f6c64626f6c64626f6c64626f6c64626f6c647171626f6c64410044030204000000030400787e0200787e0300787e00",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "00030003031472010372000332430132027202017200013201320b000242010002420242000407020102024201000b04008401c401c604c400c62720746162637171626f6c64626f6c64626f6c64626f6c64626f6c647171626f6c64410444030204010100000403000400787e0200787e0300787e00"
         }
       ]
     },
@@ -15743,6 +17584,38 @@
         },
         {
           "mode": "delayed",
+          "events": [
+            {
+              "update": "0000013200000104060374616201020101000001010000",
+              "local": false
+            },
+            {
+              "update": "0003000301070272020172020105000242024204024202420bc10086004600c6008600c41511626f6c64626f6c64626f6c64626f6c6471440201000001010203007e780300787e0102010000",
+              "local": false
+            }
+          ],
+          "trace": [
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 0
+            },
+            {
+              "origin": "remote",
+              "local": false,
+              "deleted": 1
+            },
+            {
+              "origin": null,
+              "local": true,
+              "deleted": 0
+            }
+          ],
+          "deltas": [],
+          "state": "0003000301097200027202017202010601000242024204024202420f04008400c10086004600c6008600c41a14746162626f6c64626f6c64626f6c64626f6c64714101440201010100010103020003007e780300787e0102010000"
+        },
+        {
+          "mode": "delayedThenCurrent",
           "events": [
             {
               "update": "0000013200000104060374616201020101000001010000",

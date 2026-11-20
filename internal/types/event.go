@@ -509,10 +509,11 @@ type textRead struct {
 // and events come after), and opened whether or not it deletes anything.
 //
 // Delta is the delta when the event was first given out; ReadDelta's is
-// computed at its first call, as yjs's getter's is. Read in the event's
-// own callback they are the same; read later in the commit (from the
-// callback of a transaction run after it, say the format cleanup's), it
-// sees what ran in between. After that commit ReadDelta deletes nothing
+// computed at its first call, as yjs's getter's is, so it sees what
+// changed the text in between: the deletions of another event's first
+// read, a transaction run after this one (the format cleanup's). Read
+// before anything changed the text since the event was given out, they
+// are the same. After that commit ReadDelta deletes nothing
 // and returns Delta: yjs would open a transaction of its own then.
 //
 // Call it from the goroutine running the commit (an observer or handler
