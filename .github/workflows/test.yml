@@ -133,7 +133,12 @@ jobs:
             skip=""
             for dep in $(awk '$1 ~ /^github.com\/Deln0r\/ygo/ && $2 ~ /^v/ { print $1 "@" $2 }' "$d/go.mod"); do
               if ! out=$(go list -m "$dep" 2>&1); then
-                if [ "${GITHUB_REF_TYPE}" != tag ] && [ "${dep##*@}" = "$release" ] && echo "$out" | grep -qF "invalid version: unknown revision $release"; then
+                # The proxy names a nested module's revision by its tag:
+                # persist/sqlite/v1.47.0 for github.com/Deln0r/ygo/persist/sqlite.
+                mod="${dep%@*}"
+                rev="$release"
+                [ "$mod" = github.com/Deln0r/ygo ] || rev="${mod#github.com/Deln0r/ygo/}/$release"
+                if [ "${GITHUB_REF_TYPE}" != tag ] && [ "${dep##*@}" = "$release" ] && echo "$out" | grep -qF "invalid version: unknown revision $rev"; then
                   skip="$dep"
                   break
                 fi
