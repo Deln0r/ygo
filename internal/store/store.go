@@ -21,6 +21,9 @@ type BlockStore struct {
 	// TakeSplits: the commit tries to merge each one back with its
 	// neighbours, as yjs does with transaction._mergeStructs.
 	splits []block.ID
+	// cells counts the cells of every client's list, kept by the lists
+	// themselves (Cells).
+	cells int
 }
 
 // NewBlockStore returns an empty store.
@@ -44,11 +47,16 @@ func (s *BlockStore) GetClientMut(c uint64) *ClientBlockList {
 	l, ok := s.clients[c]
 	if !ok {
 		l = NewClientBlockList()
+		l.cells = &s.cells
 		s.clients[c] = l
 		s.order = append(s.order, c)
 	}
 	return l
 }
+
+// Cells returns the number of cells across all clients' lists: the
+// structs the store holds. It is kept as the lists change, not counted.
+func (s *BlockStore) Cells() int { return s.cells }
 
 // ClientOrder returns the clients in the order their first block arrived,
 // as yjs iterates store.clients: the order of a yjs state vector, and so of

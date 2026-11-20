@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -24,6 +25,11 @@ func TestV2Dense_Fixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	var f struct {
+		Queued struct {
+			A                string `json:"a"`
+			B                string `json:"b"`
+			AMergedWithEmpty string `json:"aMergedWithEmpty"`
+		} `json:"queued"`
 		Pairs []struct {
 			Name    string `json:"name"`
 			A       string `json:"a"`
@@ -45,6 +51,25 @@ func TestV2Dense_Fixtures(t *testing.T) {
 	if len(f.Scenarios) == 0 || len(f.Pairs) == 0 {
 		t.Fatal("no scenarios or no pairs")
 	}
+	// Updates whose structs are all queued (each lacks its first): one
+	// merged with an empty update gives yjs's bytes; two of 599,999 queued
+	// structs each are past the bound together.
+	t.Run("merge queued", func(t *testing.T) {
+		a, _ := hex.DecodeString(f.Queued.A)
+		b, _ := hex.DecodeString(f.Queued.B)
+		empty := ygo.EncodeStateAsUpdateV2(ygo.NewDoc())
+		merged, err := ygo.MergeUpdatesV2([][]byte{a, empty})
+		if err != nil {
+			t.Fatalf("one queued update: %v", err)
+		}
+		if got := hex.EncodeToString(merged); got != f.Queued.AMergedWithEmpty {
+			t.Fatalf("merged %d bytes, yjs %d", len(got)/2, len(f.Queued.AMergedWithEmpty)/2)
+		}
+		// Refused while they are held, before any output is written.
+		if _, err := ygo.MergeUpdatesV2([][]byte{a, b}); !errors.Is(err, ygo.ErrUpdateTooDense) || !strings.Contains(err.Error(), "the inputs hold") {
+			t.Fatalf("two queued updates: %v, want ErrUpdateTooDense from what the inputs hold", err)
+		}
+	})
 	// MergeUpdatesV2 of two dense updates of different clients: the merge
 	// applies as the two do, and holds no more than one update of both
 	// inputs' bytes may (max(bytes, 1<<20) structs).
@@ -65,16 +90,32 @@ func TestV2Dense_Fixtures(t *testing.T) {
 				// Bytes that do not survive the merge (an input given
 				// twice) raise the inputs' allowance, not the output's:
 				// a merge ApplyUpdateV2 would refuse is refused.
-				big := ygo.NewDocWithOptions(ygo.Options{ClientID: 3})
-				txt := ygo.NewText(big, "big")
-				w := big.WriteTxn()
-				if err := txt.Insert(w, 0, strings.Repeat("x", 700000)); err != nil {
-					t.Fatal(err)
+				text := func(n int) []byte {
+					d := ygo.NewDocWithOptions(ygo.Options{ClientID: 3})
+					txt := ygo.NewText(d, "big")
+					w := d.WriteTxn()
+					if err := txt.Insert(w, 0, strings.Repeat("x", n)); err != nil {
+						t.Fatal(err)
+					}
+					w.Commit()
+					return ygo.EncodeStateAsUpdateV2(d)
 				}
-				w.Commit()
-				c := ygo.EncodeStateAsUpdateV2(big)
-				if _, err := ygo.MergeUpdatesV2([][]byte{a, b, c, c}); !errors.Is(err, ygo.ErrUpdateTooDense) {
-					t.Fatalf("a merge past its own budget: %v, want ErrUpdateTooDense", err)
+				c := text(700000)
+				if _, err := ygo.MergeUpdatesV2([][]byte{a, b, c, c}); !errors.Is(err, ygo.ErrUpdateTooDense) || !strings.Contains(err.Error(), "the merged update") {
+					t.Fatalf("a merge past its own budget: %v, want ErrUpdateTooDense from the merged update", err)
+				}
+				// Past the floor, bytes that do survive (a text of 1.3 MB)
+				// carry the structs, as one update of them may.
+				merged, err := ygo.MergeUpdatesV2([][]byte{a, b, text(1300000)})
+				if err != nil {
+					t.Fatalf("a merge past the floor its bytes carry: %v", err)
+				}
+				m := ygo.NewDocWithOptions(ygo.Options{ClientID: 99})
+				if err := ygo.ApplyUpdateV2(m, merged); err != nil {
+					t.Fatalf("applying it: %v", err)
+				}
+				if got := ygo.NewText(m, "big").String(); len(got) != 1300000 {
+					t.Fatalf("the merged text has %d characters, want 1300000", len(got))
 				}
 				return
 			}
@@ -145,5 +186,37 @@ func TestV2Dense_Fixtures(t *testing.T) {
 				t.Errorf("MergeUpdatesV2 of the state twice:\n got %s\nwant %s", got, s.RoundTrip)
 			}
 		})
+	}
+}
+
+// TestMergeUpdatesV2_ManyInputs: 100,000 updates, each of its own client
+// and root type, merge in time linear in their number. Two things made it
+// quadratic: the held bound counted the store per input (a state vector of
+// every client so far), and every applied update reset the search markers
+// of every type changed so far in the merge's transaction. No time is
+// asserted here; a quadratic merge takes minutes.
+func TestMergeUpdatesV2_ManyInputs(t *testing.T) {
+	const n = 100000
+	updates := make([][]byte, 0, n)
+	for i := range n {
+		d := ygo.NewDocWithOptions(ygo.Options{ClientID: uint64(i + 1)})
+		txt := ygo.NewText(d, fmt.Sprintf("t%d", i))
+		w := d.WriteTxn()
+		if err := txt.Insert(w, 0, "x"); err != nil {
+			t.Fatal(err)
+		}
+		w.Commit()
+		updates = append(updates, ygo.EncodeStateAsUpdateV2(d))
+	}
+	merged, err := ygo.MergeUpdatesV2(updates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := ygo.NewDoc()
+	if err := ygo.ApplyUpdateV2(d, merged); err != nil {
+		t.Fatal(err)
+	}
+	if got := ygo.NewText(d, fmt.Sprintf("t%d", n-1)).String(); got != "x" {
+		t.Fatalf("the last root reads %q", got)
 	}
 }

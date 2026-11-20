@@ -121,5 +121,22 @@ pair("600k deleted characters each, past the budget together", prepends(600000),
   u.delete(0, u.length);
 }, true);
 
-writeFileSync(outPath, JSON.stringify({ generator: "gen-v2-dense.mjs (yjs 13.6.33)", scenarios, pairs }, null, 2) + "\n");
+// Updates that are all queued: the 600k deleted characters of client 1 and
+// of client 2 from clock 1 (diffUpdateV2), each missing its first struct,
+// and yjs's merge of the first with an empty update.
+const suffix = (client, build) => {
+  const d = new Y.Doc();
+  d.clientID = client;
+  build(d);
+  return Y.diffUpdateV2(Y.encodeStateAsUpdateV2(d), Y.encodeStateVector(new Map([[client, 1]])));
+};
+const sa = suffix(1, prepends(600000));
+const sb = suffix(2, (d) => {
+  const u = d.getText("u");
+  for (let i = 0; i < 600000; i++) u.insert(0, "y");
+  u.delete(0, u.length);
+});
+const queued = { a: toHex(sa), b: toHex(sb), aMergedWithEmpty: toHex(Y.mergeUpdatesV2([sa, Y.encodeStateAsUpdateV2(new Y.Doc())])) };
+
+writeFileSync(outPath, JSON.stringify({ generator: "gen-v2-dense.mjs (yjs 13.6.33)", scenarios, pairs, queued }, null, 2) + "\n");
 console.log(`wrote ${scenarios.length} scenarios to ${outPath}`);

@@ -84,6 +84,10 @@ type Pending struct {
 	// raw is set while Blocks holds a first leftover that is not
 	// well-formed, queued as it came (mergeBlocks).
 	raw bool
+
+	// queued counts the blocks in Blocks, kept by mergeBlocks (and reset
+	// with Blocks on a retry), so a bound on what is held costs nothing.
+	queued int
 }
 
 // NewPending returns an empty buffer.
@@ -118,6 +122,15 @@ func (p *Pending) IsEmpty() bool {
 // BlockCount returns the total number of queued blocks across all
 // clients. Useful for tests and observability ("how many items are
 // stuck waiting?").
+// queuedBlocks is BlockCount without counting: the blocks mergeBlocks
+// queued.
+func (p *Pending) queuedBlocks() int {
+	if p == nil {
+		return 0
+	}
+	return p.queued
+}
+
 func (p *Pending) BlockCount() int {
 	if p == nil {
 		return 0
@@ -226,6 +239,7 @@ func blockLen(b Block) uint64 {
 // merge takes the whole queue through yjs's loop, as yjs does every time.
 func (p *Pending) mergeBlocks(blocks map[uint64][]Block) {
 	add := map[uint64][]Block{}
+	added := 0
 	for client, list := range blocks {
 		var kept []Block
 		for _, b := range list {
@@ -238,6 +252,7 @@ func (p *Pending) mergeBlocks(blocks map[uint64][]Block) {
 		}
 		if len(kept) > 0 {
 			add[client] = kept
+			added += len(kept)
 		}
 	}
 	if len(add) == 0 {
@@ -248,21 +263,28 @@ func (p *Pending) mergeBlocks(blocks map[uint64][]Block) {
 		for _, list := range add {
 			p.raw = p.raw || !wellFormed(list)
 		}
-		p.Blocks = add
+		p.Blocks, p.queued = add, added
 	} else if p.raw {
 		merged := map[uint64][]Block{}
+		n := 0
 		for _, b := range mergeStructs(clientStream(p.Blocks), clientStream(add)) {
 			if b.Kind != WireBlockSkip {
 				c := blockClient(&b)
 				merged[c] = append(merged[c], b)
+				n++
 			}
 		}
-		p.Blocks, p.raw = merged, false
+		p.Blocks, p.raw, p.queued = merged, false, n
 		add = merged
 	} else {
+		// mergeQueue replaces the entries of add's clients only.
+		for c := range add {
+			p.queued -= len(p.Blocks[c])
+		}
 		mergeQueue(p.Blocks, add)
 		for c := range add {
 			p.Blocks[c] = withoutSkips(p.Blocks[c])
+			p.queued += len(p.Blocks[c])
 		}
 	}
 	for c := range add {

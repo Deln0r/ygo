@@ -281,21 +281,15 @@ func DecodeUpdateV2(buf []byte) (*Update, error) {
 func StateStructBound(d *doc.Doc) int {
 	txn := d.ReadTxn()
 	defer txn.Close()
-	return storeStructBound(txn.Store(), GetPending(txn))
+	return txn.Store().Cells() + 2*GetPending(txn).queuedBlocks()
 }
 
-// TxnStructBound is StateStructBound inside a write transaction.
-func TxnStructBound(txn *doc.TransactionMut) int {
+// TxnHeldStructs is the number of structs the transaction's document holds:
+// the store's cells and the queued blocks. Both are kept as they change,
+// so asking costs nothing whatever the number of clients.
+func TxnHeldStructs(txn *doc.TransactionMut) int {
 	p, _ := txn.PendingState().(*Pending)
-	return storeStructBound(txn.Store(), p)
-}
-
-func storeStructBound(bs *store.BlockStore, p *Pending) int {
-	n := 0
-	for client := range bs.GetStateVector() {
-		n += bs.GetClient(client).Len()
-	}
-	return n + 2*p.BlockCount()
+	return txn.Store().Cells() + p.queuedBlocks()
 }
 
 // LooksLikeUpdateV2 reports whether buf decodes as a V2 update holding no
@@ -622,7 +616,7 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 clock diff: %w", err)
 			}
-			if err := checkDeleteRange(dsCurr, clockDiff); err != nil {
+			if err := checkClockRange(dsCurr, clockDiff); err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 clock diff: %w", err)
 			}
 			dsCurr += clockDiff
@@ -635,7 +629,7 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 				return nil, fmt.Errorf("readDeleteSetV2 len: %w: length %d+1 exceeds the %d-clock space", lib0.ErrTruncated, lenMinus1, MaxClock)
 			}
 			l := lenMinus1 + 1
-			if err := checkDeleteRange(start, l); err != nil {
+			if err := checkClockRange(start, l); err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 range: %w", err)
 			}
 			ranges = append(ranges, Range{Start: start, Length: l})

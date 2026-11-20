@@ -107,6 +107,12 @@ type TransactionMut struct {
 	// in the insertion order of transaction.changed.
 	changedOrder []*block.Branch
 
+	// staleMarkers holds the branches whose positional content changed
+	// since the last InvalidatePositionalMarkers (changedSet.stale), so
+	// that a transaction applying many updates (MergeUpdatesV2) resets
+	// what each one moved, not every type changed so far.
+	staleMarkers []*block.Branch
+
 	// deletedByClient is deletedRanges per client, sorted and merged,
 	// built lazily by DeletedThisTxn and gcDeleted and dropped by Delete.
 	deletedByClient map[uint64][]clockRange
@@ -759,6 +765,10 @@ func (t *TransactionMut) AddChangedType(parent *block.Branch, parentSub *string)
 		cs.keys[*parentSub] = struct{}{}
 	} else {
 		cs.positional = true
+		if !cs.stale {
+			cs.stale = true
+			t.staleMarkers = append(t.staleMarkers, parent)
+		}
 	}
 }
 
@@ -779,12 +789,17 @@ func (t *TransactionMut) ChangedKeys(b *block.Branch) map[string]struct{} {
 // it (an update's delete set, an UndoManager step) leave them pointing at
 // old indices, and yjs resets them there too (_callObserver for a remote
 // transaction, popStackItem for undo).
+//
+// A type whose markers were reset and whose positions have not changed
+// since is skipped: its markers are as valid as after the reset.
 func (t *TransactionMut) InvalidatePositionalMarkers() {
-	for _, b := range t.changedOrder {
-		if cs := t.changedTypes[b]; cs != nil && cs.positional {
+	for _, b := range t.staleMarkers {
+		if cs := t.changedTypes[b]; cs != nil && cs.stale {
 			b.Markers.Invalidate()
+			cs.stale = false
 		}
 	}
+	t.staleMarkers = t.staleMarkers[:0]
 }
 
 func (t *TransactionMut) PositionalChanged(b *block.Branch) bool {
@@ -850,6 +865,9 @@ func (t *TransactionMut) deletedRangesOf(client uint64) []clockRange {
 type changedSet struct {
 	keys       map[string]struct{}
 	positional bool
+	// stale: positional content changed since the last
+	// InvalidatePositionalMarkers (TransactionMut.staleMarkers).
+	stale bool
 }
 
 // TypeEventHook, when set, is invoked during Commit (after observers'

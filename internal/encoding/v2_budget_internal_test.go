@@ -1,9 +1,11 @@
 package encoding
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"os"
 	"runtime"
@@ -14,6 +16,7 @@ import (
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/lib0"
+	"github.com/Deln0r/ygo/internal/types"
 )
 
 // formatUpdate writes a V2 update of n format markers in root "t", all
@@ -223,16 +226,164 @@ func TestDeleteRange_Boundary(t *testing.T) {
 	if _, err := DecodeUpdateV2(ds(1, MaxClock)); !errors.Is(err, lib0.ErrTruncated) {
 		t.Errorf("a range one past the space: %v", err)
 	}
-	enc := NewEncoderV2()
-	enc.WriteVarUint(1)
-	enc.WriteVarUint(1)
-	enc.WriteClient(1)
-	enc.WriteVarUint(0)
-	enc.WriteInfo(0)
-	enc.WriteLen(MaxClock)
-	enc.WriteVarUint(0)
-	if _, err := DecodeUpdateV2(enc.Bytes()); err != nil {
-		t.Errorf("a GC run ending at MaxClock: %v", err)
+	// GC runs of client 1 from clock 0: a struct may end at 2^53 too
+	// (its last clock is MaxClock), not past it, alone or added up.
+	gc := func(lengths ...uint64) []byte {
+		enc := NewEncoderV2()
+		enc.WriteVarUint(1)
+		enc.WriteVarUint(uint64(len(lengths)))
+		enc.WriteClient(1)
+		enc.WriteVarUint(0)
+		for _, l := range lengths {
+			enc.WriteInfo(0)
+			enc.WriteLen(l)
+		}
+		enc.WriteVarUint(0)
+		return enc.Bytes()
+	}
+	if _, err := DecodeUpdateV2(gc(MaxClock + 1)); err != nil {
+		t.Errorf("a GC run ending at 2^53: %v", err)
+	}
+	if _, err := DecodeUpdateV2(gc(MaxClock-1, 2)); err != nil {
+		t.Errorf("two GC runs ending at 2^53: %v", err)
+	}
+	for name, b := range map[string][]byte{
+		"a GC run past 2^53":            gc(MaxClock + 2),
+		"two GC runs past 2^53":         gc(MaxClock, 2),
+		"a GC run after the last clock": gc(MaxClock+1, 1),
+	} {
+		if _, err := DecodeUpdateV2(b); !errors.Is(err, lib0.ErrTruncated) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// TestHeldStructs_Counted: the store's cell count and the queue's block
+// count, kept as they change, equal what the lists hold, after every
+// update of a merge (splits, queued blocks, a retry that integrates them)
+// and after its commit (squashes).
+func TestHeldStructs_Counted(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/v2-dense-fixtures.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Scenarios []struct {
+			State   string `json:"state"`
+			Refused bool   `json:"refused"`
+		} `json:"scenarios"`
+		Pairs []struct {
+			A string `json:"a"`
+			B string `json:"b"`
+		} `json:"pairs"`
+		Queued struct {
+			A string `json:"a"`
+			B string `json:"b"`
+		} `json:"queued"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	h := func(s string) []byte {
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	// An edit history with splits: text typed, cut in the middle,
+	// formatted and partly deleted, by two clients.
+	edits := doc.NewDocWithOptions(doc.Options{ClientID: 5})
+	other := doc.NewDocWithOptions(doc.Options{ClientID: 6})
+	txt, ot := types.NewText(edits.Branch("t")), types.NewText(other.Branch("t"))
+	for i := range 200 {
+		w := edits.WriteTxn()
+		_ = txt.Insert(w, uint64(i*7)%(txt.Length()+1), "abc")
+		w.Commit()
+		if i%10 == 0 {
+			if err := ApplyUpdate(other, EncodeStateAsUpdate(edits)); err != nil {
+				t.Fatal(err)
+			}
+			w := other.WriteTxn()
+			_ = ot.Delete(w, ot.Length()/3, ot.Length()/4)
+			w.Commit()
+			if err := ApplyUpdate(edits, EncodeStateAsUpdate(other)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	v1 := []byte("V1:")
+	// A text typed a character at a time, each state applied in turn: a
+	// cell per character, squashed into one by the commit.
+	typer := doc.NewDocWithOptions(doc.Options{ClientID: 7})
+	tt := types.NewText(typer.Branch("t"))
+	var typed [][]byte
+	for range 50 {
+		w := typer.WriteTxn()
+		_ = tt.Insert(w, tt.Length(), "a")
+		w.Commit()
+		typed = append(typed, EncodeStateAsUpdateV2(typer))
+	}
+	// V1, no structs, one delete range of client c, marked V1 by the
+	// prefix v1 (the runs are V2 otherwise).
+	deletes := func(c, start, length uint64) []byte {
+		b := append([]byte(nil), v1...)
+		b = lib0.WriteVarUint(b, 0)
+		for _, v := range []uint64{1, c, 1, start, length} {
+			b = lib0.WriteVarUint(b, v)
+		}
+		return b
+	}
+	runs := [][][]byte{
+		{EncodeStateAsUpdateV2(edits), EncodeStateAsUpdateV2(other)},
+		typed,
+		{typed[49], deletes(7, 10, 5)},   // cuts the typed run twice
+		{h(f.Queued.A), h(f.Pairs[1].A)}, // queued, then its first struct: a retry
+		{h(f.Queued.A), h(f.Queued.A), h(f.Queued.B)}, // merged into the queue
+		// A retry that empties the queue while a delete waits.
+		{h(f.Queued.A), deletes(77, 0, 1), h(f.Pairs[1].A)},
+	}
+	for _, p := range f.Pairs {
+		runs = append(runs, [][]byte{h(p.A), h(p.B), h(p.A)})
+	}
+	for _, s := range f.Scenarios {
+		if !s.Refused {
+			runs = append(runs, [][]byte{h(s.State), h(s.State)})
+		}
+	}
+	for i, run := range runs {
+		d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
+		check := func(stage string, txn *doc.TransactionMut) {
+			bs, cells := txn.Store(), 0
+			for _, c := range bs.ClientOrder() {
+				cells += bs.GetClient(c).Len()
+			}
+			p, _ := txn.PendingState().(*Pending)
+			if bs.Cells() != cells || p.queuedBlocks() != p.BlockCount() {
+				t.Fatalf("run %d, %s: counted %d cells and %d queued, the lists hold %d and %d", i, stage, bs.Cells(), p.queuedBlocks(), cells, p.BlockCount())
+			}
+		}
+		w := d.WriteTxn()
+		for j, u := range run {
+			var upd *Update
+			var err error
+			if rest, ok := bytes.CutPrefix(u, v1); ok {
+				upd, _, err = DecodeUpdate(rest)
+			} else {
+				upd, err = DecodeUpdateV2(u)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := upd.Apply(w); err != nil {
+				t.Fatal(err)
+			}
+			check(fmt.Sprintf("after update %d", j), w)
+		}
+		w.Commit()
+		w = d.WriteTxn()
+		check("after the commit", w)
+		w.Commit()
 	}
 }
 

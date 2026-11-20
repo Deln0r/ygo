@@ -19,6 +19,16 @@ import (
 // See docs/yrs-port-notes/store.md "Internal invariants".
 type ClientBlockList struct {
 	list []BlockCell
+	// cells is the owning store's cell count (BlockStore.Cells), nil for
+	// a list no store owns.
+	cells *int
+}
+
+// count adds n to the owning store's cell count.
+func (l *ClientBlockList) count(n int) {
+	if l.cells != nil {
+		*l.cells += n
+	}
 }
 
 // NewClientBlockList returns an empty list. Capacity is reserved for
@@ -80,6 +90,7 @@ func (l *ClientBlockList) FindPivot(clock uint64) (int, bool) {
 // Mirrors yrs ClientBlockList::push (block_store.rs:84-87).
 func (l *ClientBlockList) Push(cell BlockCell) {
 	l.list = append(l.list, cell)
+	l.count(1)
 }
 
 // Insert places cell at the given index, shifting later cells right.
@@ -92,6 +103,7 @@ func (l *ClientBlockList) Insert(index int, cell BlockCell) {
 	l.list = append(l.list, BlockCell{})
 	copy(l.list[index+1:], l.list[index:])
 	l.list[index] = cell
+	l.count(1)
 }
 
 // SquashFrom merges adjacent same-client item cells at and after
@@ -137,6 +149,7 @@ func (l *ClientBlockList) SquashFrom(startIdx int) int {
 	removed := len(l.list) - (w + 1)
 	clear(l.list[w+1:])
 	l.list = l.list[:w+1]
+	l.count(-removed)
 	return removed
 }
 
@@ -169,6 +182,7 @@ func (l *ClientBlockList) MergeWithLefts(pos int) int {
 			return merged
 		}
 		l.list = append(l.list[:i], l.list[i+1:]...)
+		l.count(-1)
 		merged++
 	}
 	return merged

@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -117,5 +118,35 @@ func TestWriteTxn_StoreMutationVisibleToReadTxn(t *testing.T) {
 	}
 	if it.Content.Str != "hello" {
 		t.Errorf("Content.Str=%q want %q", it.Content.Str, "hello")
+	}
+}
+
+// TestInvalidatePositionalMarkers_OnlyStale: an applied update resets the
+// markers of the types whose positions moved since the last reset, not of
+// every type changed earlier in the transaction (MergeUpdatesV2 applies
+// all its inputs in one, and the reset per input was quadratic).
+func TestInvalidatePositionalMarkers_OnlyStale(t *testing.T) {
+	d := NewDoc()
+	a, b := d.Branch("a"), d.Branch("b")
+	w := d.WriteTxn()
+	defer w.Commit()
+	w.AddChangedType(a, nil)
+	w.AddChangedType(b, nil)
+	w.AddChangedType(a, nil)
+	if !slices.Equal(w.staleMarkers, []*block.Branch{a, b}) {
+		t.Fatalf("stale %v, want a, b once each", w.staleMarkers)
+	}
+	w.InvalidatePositionalMarkers()
+	if len(w.staleMarkers) != 0 {
+		t.Fatalf("stale after the reset: %v", w.staleMarkers)
+	}
+	key := "k"
+	w.AddChangedType(a, &key) // a key, not a position
+	w.AddChangedType(b, nil)
+	if !slices.Equal(w.staleMarkers, []*block.Branch{b}) {
+		t.Fatalf("stale %v, want b alone", w.staleMarkers)
+	}
+	if !w.PositionalChanged(a) || !w.PositionalChanged(b) {
+		t.Fatal("the transaction no longer reports a positional change")
 	}
 }

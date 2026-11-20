@@ -1,6 +1,7 @@
 package ygo_test
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/Deln0r/ygo"
@@ -28,6 +29,15 @@ func gcBlockUpdate(client, clock, length uint64) []byte {
 	return varuintBytes(b, 0) // empty delete set
 }
 
+// hexBytes decodes a hex literal.
+func hexBytes(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 // deleteSetUpdate builds a V1 update with no blocks and one delete range.
 func deleteSetUpdate(client, start, length uint64) []byte {
 	b := varuintBytes(nil, 0)
@@ -45,7 +55,9 @@ func deleteSetUpdate(client, start, length uint64) []byte {
 // "Integer out of Range"; handed 2^40 it accepts (measured against yjs
 // 13.6.32). Accepting what the reference refuses buys nothing, and refusing
 // what it accepts would break interoperability, so the bound sits exactly at
-// Number.MAX_SAFE_INTEGER and the test asserts both sides of it.
+// Number.MAX_SAFE_INTEGER, the last clock (a run may end at 2^53, exact in a
+// JavaScript number; past it yjs rounds), and the test asserts both sides of
+// it (the 2^53 cases measured against yjs 13.6.33).
 func TestDecodeUpdate_RejectsUnrepresentableClockRange(t *testing.T) {
 	const maxSafe = uint64(1)<<53 - 1
 
@@ -54,7 +66,11 @@ func TestDecodeUpdate_RejectsUnrepresentableClockRange(t *testing.T) {
 		raw  []byte
 	}{
 		{"GC block", gcBlockUpdate(99, 0, ^uint64(0))},
-		{"GC block at the boundary", gcBlockUpdate(99, 1, maxSafe)},
+		{"GC block past the boundary", gcBlockUpdate(99, 2, maxSafe)},
+		{"GC block of 2^53+1 clocks", gcBlockUpdate(99, 0, maxSafe+2)},
+		// Each block fits; together they run past the boundary (yjs
+		// reads "abc" with the state-vector clock rounded to 2^53).
+		{"item past the boundary after a GC block", hexBytes("0102630000feffffffffffff0f040101740361626301630100feffffffffffff0f")},
 		{"delete range", deleteSetUpdate(99, 0, ^uint64(0))},
 		// A delete range's end is no state-vector clock, so it may reach
 		// 2^53 (below); one past that, yjs reads with its sum rounded
@@ -83,6 +99,11 @@ func TestDecodeUpdate_RejectsUnrepresentableClockRange(t *testing.T) {
 		// The last clock, MAX_SAFE_INTEGER, may be deleted: yjs reads both
 		// and writes them back unchanged.
 		{"delete range ending at 2^53", deleteSetUpdate(99, 1, maxSafe)},
+		// A struct may end at 2^53 too: yjs holds 2^53 in its state
+		// vector and writes the update back unchanged.
+		{"GC block ending at 2^53", gcBlockUpdate(99, 1, maxSafe)},
+		{"GC block of 2^53 clocks", gcBlockUpdate(99, 0, maxSafe+1)},
+		{"item ending at 2^53 after a GC block", hexBytes("0102630000feffffffffffff0f0401017402616201630100feffffffffffff0f")},
 		{"delete range of the last clock", deleteSetUpdate(99, maxSafe, 1)},
 	} {
 		t.Run("still accepts a representable "+tc.name, func(t *testing.T) {

@@ -316,23 +316,16 @@ func checkDecodeCount(count uint64, remaining int) error {
 // on what that means for untrusted transports.
 const MaxClock = uint64(1)<<53 - 1
 
-// checkClockRange rejects a wire-supplied run that would place a clock beyond
-// what the reference implementation can represent. Overflow-safe: the sum is
-// checked without computing it.
+// checkClockRange rejects a wire-supplied run, of structs or of deletes, that
+// would place a clock beyond what the reference implementation can
+// represent. The last clock is MaxClock, so a run may end at MaxClock+1
+// (2^53, exact in a JavaScript number): yjs reads such a run, holds 2^53 in
+// its state vector and writes the run back unchanged. A run past it, yjs
+// reads with its end rounded. Overflow-safe: the sum is checked without
+// computing it.
 func checkClockRange(start, length uint64) error {
-	if start > MaxClock || length > MaxClock || start > MaxClock-length {
-		return fmt.Errorf("%w: clock range %d+%d exceeds the %d-clock space the wire format can represent", lib0.ErrTruncated, start, length, MaxClock)
-	}
-	return nil
-}
-
-// checkDeleteRange is checkClockRange for a delete-set range, whose end is
-// not a clock any state vector holds: a range may delete the last clock,
-// MaxClock itself (yjs reads such a delete set), so its exclusive end may
-// be MaxClock+1.
-func checkDeleteRange(start, length uint64) error {
 	if start > MaxClock || length > MaxClock+1 || start > MaxClock+1-length {
-		return fmt.Errorf("%w: delete range %d+%d exceeds the %d-clock space the wire format can represent", lib0.ErrTruncated, start, length, MaxClock)
+		return fmt.Errorf("%w: clock range %d+%d exceeds the %d-clock space the wire format can represent", lib0.ErrTruncated, start, length, MaxClock)
 	}
 	return nil
 }
@@ -601,7 +594,7 @@ func (u *Update) Apply(txn *doc.TransactionMut) error {
 	})
 	if retry {
 		queued := p.Blocks
-		p.Blocks = map[uint64][]Block{}
+		p.Blocks, p.queued = map[uint64][]Block{}, 0
 		rest, p.Missing = integrateStack(txn, queued)
 		p.mergeBlocks(rest)
 		p.applyDeletes(txn, false)

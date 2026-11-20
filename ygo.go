@@ -782,7 +782,7 @@ func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 			wtxn.Commit()
 			return nil, err
 		}
-		if encoding.TxnStructBound(wtxn) > held {
+		if encoding.TxnHeldStructs(wtxn) > held {
 			wtxn.Commit()
 			return nil, fmt.Errorf("ygo: MergeUpdatesV2: the inputs hold more than %d structs: %w", held, ErrUpdateTooDense)
 		}
