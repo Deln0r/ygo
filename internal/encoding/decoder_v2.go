@@ -41,6 +41,13 @@ type DecoderV2 struct {
 	// port-note gotcha 5). ReadKey indexes by keyClock value.
 	keys []string
 
+	// keyBudget is how many bytes cached keys may still return when read
+	// again (ReadKey). yjs's encoder writes no cached keys, its decoder
+	// reads them, and a writer of ygo's output writes each key afresh: a
+	// key of L bytes read N times would come out as N*L bytes. Set by
+	// decodeUpdateV2; NewDecoderV2 leaves it at max(len, V2StructFloor).
+	keyBudget int
+
 	// orders shares the key orders of the values read (orderTable).
 	orders orderTable
 }
@@ -132,6 +139,7 @@ func NewDecoderV2(buf []byte) (*DecoderV2, error) {
 		parentInfo: lib0.NewRleDecoder(parentInfoBytes, lib0.ReadUint8Func),
 		typeRef:    lib0.NewUintOptRleDecoder(typeRefBytes),
 		length:     lib0.NewUintOptRleDecoder(lenBytes),
+		keyBudget:  max(len(buf), V2StructFloor),
 	}, nil
 }
 
@@ -271,7 +279,12 @@ func (d *DecoderV2) ReadKey() (string, error) {
 	}
 	idx := int(clock)
 	if idx >= 0 && idx < len(d.keys) {
-		return d.keys[idx], nil
+		k := d.keys[idx]
+		if len(k) > d.keyBudget {
+			return "", fmt.Errorf("ReadKey cached key: %w", ErrUpdateTooDense)
+		}
+		d.keyBudget -= len(k)
+		return k, nil
 	}
 	// Index out of range or larger than current keys — read a
 	// new string and grow the table.

@@ -383,6 +383,9 @@ jobs:
       - name: regenerate format undefined fixtures
         working-directory: testdata/gen
         run: node gen-format-undefined.mjs
+      - name: regenerate dense V2 fixtures
+        working-directory: testdata/gen
+        run: node gen-v2-dense.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff

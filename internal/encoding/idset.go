@@ -34,6 +34,39 @@ type IdSet struct {
 	order []uint64
 }
 
+// insertAll adds ranges for client with the result of calling Insert for
+// each, in O(n log n): the client's ranges and the new ones sorted by
+// start, overlapping and adjacent ranges merged.
+func (s *IdSet) insertAll(client uint64, ranges []Range) {
+	existing, known := s.clients[client]
+	all := make([]Range, 0, len(existing)+len(ranges))
+	all = append(all, existing...)
+	for _, r := range ranges {
+		if r.Length > 0 {
+			all = append(all, r)
+		}
+	}
+	if len(all) == 0 {
+		return
+	}
+	if !known {
+		s.order = append(s.order, client)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Start < all[j].Start })
+	merged := all[:1]
+	for _, r := range all[1:] {
+		last := &merged[len(merged)-1]
+		if r.Start <= last.End() {
+			if r.End() > last.End() {
+				last.Length = r.End() - last.Start
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	s.clients[client] = merged
+}
+
 // NewIdSet returns an empty IdSet.
 func NewIdSet() *IdSet {
 	return &IdSet{clients: map[uint64][]Range{}}
@@ -187,6 +220,7 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 	}
 
 	s := NewIdSet()
+	again := map[uint64][]Range{}
 	for i := uint64(0); i < clientCount; i++ {
 		clientID, n, err := lib0.ReadVarUint(buf)
 		if err != nil {
@@ -224,15 +258,21 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 			continue // yjs readDeleteSet keeps no entry for a client with no ranges
 		}
 		if _, known := s.clients[clientID]; known {
-			// A client written twice keeps both entries' ranges, as yjs
+			// A client written twice keeps every entry's ranges, as yjs
 			// readDeleteSet and readAndApplyDeleteSet read every entry.
-			for _, r := range ranges {
-				s.Insert(clientID, r.Start, r.Length)
-			}
+			// They are sorted in once at the end: inserting each range, or
+			// each entry, was quadratic for descending ranges across
+			// repeated entries.
+			again[clientID] = append(again[clientID], ranges...)
 			continue
 		}
 		s.order = append(s.order, clientID)
 		s.clients[clientID] = ranges
+	}
+	for _, c := range s.order {
+		if extra, ok := again[c]; ok {
+			s.insertAll(c, extra)
+		}
 	}
 	return s, buf, nil
 }

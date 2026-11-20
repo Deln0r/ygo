@@ -601,6 +601,17 @@ var ErrSplitSurrogate = lib0.ErrSplitSurrogate
 // from. Test with errors.Is.
 var ErrNestedTooDeep = encoding.ErrAnyTooDeep
 
+// ErrUpdateTooDense is wrapped by the error ApplyUpdateV2 and
+// MergeUpdatesV2 return for a V2 update that expands past what its length
+// pays for: more structs than max(its length in bytes, 1048576), counted
+// client by client before each client's structs are decoded, or a cached
+// key read again for more bytes than that. V2 run-length encodes most of
+// a struct, so a valid update can hold more structs than bytes (a million
+// deleted characters fit in 42); the floor keeps what such an update may
+// cost to what the largest V1 message the server takes already costs.
+// Test with errors.Is.
+var ErrUpdateTooDense = encoding.ErrUpdateTooDense
+
 // ErrUndefinedEmbed is returned by Text.InsertEmbed and
 // InsertEmbedWithAttributes for an embed that is Undefined{} itself, before
 // anything changes. yjs throws on insertEmbed(undefined). An undefined embed
@@ -640,7 +651,7 @@ func ValidateUpdate(raw []byte) error {
 	// but EMPTY update, so without this the caller is told their V2 bytes are
 	// "concatenated updates" and pointed at MergeUpdates, which cannot help.
 	if len(upd.Blocks) == 0 {
-		if _, v2err := encoding.DecodeUpdateV2(raw); v2err == nil {
+		if encoding.LooksLikeUpdateV2(raw) {
 			return fmt.Errorf("ygo: invalid update: these are V2 wire bytes, not V1 (the V1 decoder read them as an empty update with %d trailing byte(s)); use ApplyUpdateV2, and note there is no strict validator for V2", len(rest))
 		}
 	}

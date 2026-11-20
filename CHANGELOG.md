@@ -14,6 +14,26 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.45.0] - 2026-11-20
+
+**Upgrade impact**:
+
+- **V2 updates that hold more structs than bytes are accepted**, as yjs accepts them. V2 run-length encodes most of a struct, so structs without bytes of their own (GC, deleted content, empty nested types) cost almost nothing: yjs writes 500 empty nested arrays in 32 bytes and a million deleted characters prepended one at a time in 42. `ApplyUpdateV2` and `MergeUpdatesV2` refused them (`lib0: truncated input`).
+- **An update may hold up to max(its length in bytes, 1,048,576) structs**, summed over its clients; past that, and for a cached key read again for more bytes than that, the error wraps the new `ygo.ErrUpdateTooDense` (it wrapped `lib0.ErrTruncated`). Decoding a struct costs about 900 bytes, so the floor keeps a short V2 update to what the largest V1 message the server takes already costs. A valid yjs update with more than a million byteless structs in a run is refused.
+- **`ValidateUpdate` no longer expands V2 bytes it refuses** to tell they are V2: the diagnosis reads them within their length, so a dense V2 update is reported as trailing bytes, not as V2.
+
+### Fixed
+
+- **A V2 update with more structs than bytes was refused.** Such updates come from documents with long runs of deleted content, nested types or GC: a text whose characters were prepended and later deleted, two clients typing in turns, many empty nested arrays or maps.
+- **A delete set writing a client again and again took quadratic time** (V1 and V2): each range went into the client's sorted ranges on its own. A million such sections did not finish in 30 seconds; they are now sorted once per client, in a tenth of a second.
+- **V2 block clocks and delete-set ranges could wrap past the clock space** instead of being refused, as V1 refuses them.
+
+### Tests
+
+- New fixtures from yjs 13.6.33 (`testdata/v2-dense-fixtures.json`, `testdata/gen/gen-v2-dense.mjs`, in CI): 9 V2 states holding more structs than bytes (10,000 empty nested arrays and maps, deleted maps, 100,000 and 1,000,000 deleted characters, two clients typing in turns, a key written once for 50 format markers by an encoder with yjs's key cache on), applied, written back and merged byte for byte, and two past the budget (1.1 million structs, and two clients of 600,000 each), refused, the first before any struct is decoded. `ValidateUpdate` of each allocates under 4 MB.
+- A cached key read past the budget, block and delete-set clocks past the clock space or wrapping, and a million delete-set sections for one client in V1 and V2.
+- Controls: 11, each failing these tests.
+
 ## [1.44.0] - 2026-11-20
 
 **Upgrade impact**:

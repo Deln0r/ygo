@@ -1,6 +1,7 @@
 package encoding
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -270,30 +271,59 @@ func writeDeleteSetV2(enc *EncoderV2, ds *IdSet) {
 // Repair fills those at apply time. Mirrors DecodeUpdate (V1) but
 // pulls per-field bytes from the column decoders.
 func DecodeUpdateV2(buf []byte) (*Update, error) {
-	// Block/client data is pulled from the V2 column streams, which are
-	// all slices of buf. Without a bound, a wire-supplied count drove an
-	// unbounded make()/decode loop on drained columns — a fuzzer
-	// OOM-killed the process from a 69-byte input. The input length is
-	// the bound used, though run-length columns let a valid update hold
-	// more structs than bytes (docs/tech-debt.md "V2 updates with more
-	// structs than bytes"); bytes ygo wrote itself are decoded without it
-	// (DecodeOwnUpdateV2).
-	return decodeUpdateV2(buf, len(buf))
+	return decodeUpdateV2(buf, len(buf), max(len(buf), V2StructFloor))
 }
+
+// LooksLikeUpdateV2 reports whether buf decodes as a V2 update holding no
+// more structs or cached-key bytes than it has bytes: a diagnosis that
+// costs no more than reading buf as V1 would (ValidateUpdate asks it of
+// bytes it refused), where DecodeUpdateV2 may expand a short input to a
+// million structs.
+func LooksLikeUpdateV2(buf []byte) bool {
+	_, err := decodeUpdateV2(buf, len(buf), len(buf))
+	return err == nil
+}
+
+// V2StructFloor is the number of structs a V2 update may hold whatever its
+// length. V2 run-length encodes the info, client, clock, length and type
+// columns, so structs without bytes of their own (GC, deleted content,
+// empty nested types) cost almost nothing and a valid update holds more
+// structs than bytes: yjs writes a million deleted characters prepended
+// one at a time in 42 bytes. Decoding a struct costs about 900 bytes, so
+// an update may hold max(its length, V2StructFloor) structs: a million is
+// what the largest V1 message ygo's server takes (4 MiB, two bytes or more
+// a struct) already decodes to, and past it a V2 update needs a byte a
+// struct, as V1 does. A wire-supplied count with no bound drove an
+// unbounded decode: a fuzzer OOM-killed the process from 69 bytes.
+const V2StructFloor = 1 << 20
+
+// ErrUpdateTooDense is returned for a V2 update that expands past what its
+// length pays for: more structs than max(its length, V2StructFloor), or a
+// cached key read again for more bytes than that (yjs's encoder does not
+// write cached keys; its decoder reads them). The structs are counted
+// before they are decoded, client by client.
+var ErrUpdateTooDense = errors.New("encoding: V2 update expands past max(its length, 1048576) structs or cached-key bytes")
 
 // DecodeOwnUpdateV2 is DecodeUpdateV2 for bytes ygo itself just encoded
 // (a snapshot restored through V2), whose counts are exact: no bound on
 // the number of clients or structs.
 func DecodeOwnUpdateV2(buf []byte) (*Update, error) {
-	return decodeUpdateV2(buf, math.MaxInt)
+	return decodeUpdateV2(buf, math.MaxInt, math.MaxInt)
 }
 
-func decodeUpdateV2(buf []byte, total int) (*Update, error) {
+// decodeUpdateV2 decodes buf with at most maxClients client sections and
+// structBudget structs over all of them. A client section writes its
+// struct count and start clock to the rest stream, a byte or more each, so
+// the input length bounds the number of clients of a valid update; the
+// structs are what run-length columns compress.
+func decodeUpdateV2(buf []byte, maxClients, structBudget int) (*Update, error) {
+	total := maxClients
 
 	dec, err := NewDecoderV2(buf)
 	if err != nil {
 		return nil, fmt.Errorf("DecodeUpdateV2 header: %w", err)
 	}
+	dec.keyBudget = structBudget
 
 	clientCount, err := dec.ReadVarUint()
 	if err != nil {
@@ -309,9 +339,10 @@ func decodeUpdateV2(buf []byte, total int) (*Update, error) {
 		if err != nil {
 			return nil, fmt.Errorf("DecodeUpdateV2 block count: %w", err)
 		}
-		if err := checkDecodeCount(blockCount, total); err != nil {
-			return nil, fmt.Errorf("DecodeUpdateV2 block count: %w", err)
+		if blockCount > uint64(structBudget) {
+			return nil, fmt.Errorf("DecodeUpdateV2 block count: %w", ErrUpdateTooDense)
 		}
+		structBudget -= int(blockCount)
 		client, err := dec.ReadClient()
 		if err != nil {
 			return nil, fmt.Errorf("DecodeUpdateV2 client: %w", err)
@@ -320,11 +351,17 @@ func decodeUpdateV2(buf []byte, total int) (*Update, error) {
 		if err != nil {
 			return nil, fmt.Errorf("DecodeUpdateV2 clock start: %w", err)
 		}
+		if clock > MaxClock {
+			return nil, fmt.Errorf("DecodeUpdateV2 clock start: %w", checkClockRange(clock, 0))
+		}
 
 		blocks := make([]Block, 0, min(blockCount, uint64(len(buf))))
 		for j := uint64(0); j < blockCount; j++ {
 			b, err := decodeBlockV2(dec, block.ID{Client: client, Clock: clock})
 			if err != nil {
+				return nil, fmt.Errorf("DecodeUpdateV2 block %d: %w", j, err)
+			}
+			if err := checkClockRange(clock, b.length()); err != nil {
 				return nil, fmt.Errorf("DecodeUpdateV2 block %d: %w", j, err)
 			}
 			blocks = append(blocks, b)
@@ -540,6 +577,8 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 	if err := checkDecodeCount(clientCount, len(dec.ReadRestBytes())); err != nil {
 		return nil, fmt.Errorf("readDeleteSetV2 client count: %w", err)
 	}
+	sections := map[uint64][]Range{}
+	var order []uint64
 	for i := uint64(0); i < clientCount; i++ {
 		c, err := dec.ReadVarUint()
 		if err != nil {
@@ -553,9 +592,13 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 			return nil, fmt.Errorf("readDeleteSetV2 range count: %w", err)
 		}
 		var dsCurr uint64
+		ranges := make([]Range, 0, rangeCount)
 		for j := uint64(0); j < rangeCount; j++ {
 			clockDiff, err := dec.ReadVarUint()
 			if err != nil {
+				return nil, fmt.Errorf("readDeleteSetV2 clock diff: %w", err)
+			}
+			if err := checkClockRange(dsCurr, clockDiff); err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 clock diff: %w", err)
 			}
 			dsCurr += clockDiff
@@ -564,10 +607,26 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 len: %w", err)
 			}
+			if lenMinus1 >= MaxClock {
+				return nil, fmt.Errorf("readDeleteSetV2 len: %w", checkClockRange(start, lenMinus1))
+			}
 			l := lenMinus1 + 1
-			ds.Insert(c, start, l)
+			if err := checkClockRange(start, l); err != nil {
+				return nil, fmt.Errorf("readDeleteSetV2 range: %w", err)
+			}
+			ranges = append(ranges, Range{Start: start, Length: l})
 			dsCurr += l
 		}
+		if _, seen := sections[c]; !seen {
+			order = append(order, c)
+		}
+		sections[c] = append(sections[c], ranges...)
+	}
+	// One sort per client, over every section written for it: inserting
+	// each range on its own, or each section, was quadratic for
+	// descending ranges across repeated sections.
+	for _, c := range order {
+		ds.insertAll(c, sections[c])
 	}
 	return ds, nil
 }
