@@ -429,11 +429,18 @@ func RestoreSnapshot(d *Doc, snap Snapshot) (*Doc, error) {
 	// V2, as yjs createDocFromSnapshot writes it.
 	upd, err := encoding.DecodeOwnUpdateV2(encoding.EncodeSnapshotAsUpdateV2(txn.Store(), snap))
 	var updateV1 []byte
-	if errors.Is(err, lib0.ErrInvalidUTF8) {
-		// d holds strings that a release before v1.26 stored with invalid
-		// UTF-8, which the V2 decoder refuses: rebuild from V1, read as
-		// stored (V1 cannot carry an undefined format value or embed).
-		updateV1, err = encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap), nil
+	if err != nil {
+		// d may hold strings that a release before v1.26 stored with
+		// invalid UTF-8. V2 writes all strings into one column, so they
+		// come back as an invalid column or, joined, as valid UTF-8 cut
+		// inside a character (ErrSplitSurrogate). V1 reads each string on
+		// its own: when a strict V1 read refuses one, rebuild from V1, read
+		// as stored (V1 cannot carry an undefined format value or embed).
+		// Any other error is returned.
+		v1 := encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap)
+		if _, _, verr := encoding.DecodeUpdate(v1); errors.Is(verr, lib0.ErrInvalidUTF8) {
+			updateV1, err = v1, nil
+		}
 	}
 	txn.Commit()
 	if err != nil {

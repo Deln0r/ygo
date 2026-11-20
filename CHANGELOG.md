@@ -31,8 +31,8 @@ file.
 ### Tests
 
 - New fixtures from yjs 13.6.33 (`testdata/format-undefined-fixtures.json`, `testdata/gen/gen-format-undefined.mjs`, in CI): 28 scenarios with attributes whose value is undefined (inserts inside and outside runs, inheriting, before a marker of another key, formats over plain and formatted text, next to markers of other keys, null over undefined, deletes across them, deltas, a delete and an insert through one cursor, ychange, from a peer and then edited, an embed with an undefined attribute, an undefined embed from a peer, undo and redo) and two snapshots. The writer replays the calls through ygo's API and the receiver applies yjs's V2 updates; both compare the V2 update of every transaction, the event deltas, the state and the delta: 58 subtests, 55 of them fail on 1.43.0.
-- Snapshots: a document with 500 empty nested arrays (more structs than bytes in V2) and an undefined marker restores with the marker; embeds keep a byte array, a BigInt, NaN, -0 and a nested undefined.
-- Controls: 18, each failing these tests.
+- Snapshots: a document with 500 empty nested arrays (more structs than bytes in V2) and an undefined marker restores with the marker; embeds keep a byte array, a BigInt, NaN, -0 and a nested undefined; a document with strings an older release stored with invalid UTF-8, which V2's string column joins into valid UTF-8 cut inside a character, still restores through V1.
+- Controls: 19, each failing these tests.
 
 ## [1.43.0] - 2026-11-20
 

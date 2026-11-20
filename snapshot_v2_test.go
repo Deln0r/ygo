@@ -1,11 +1,13 @@
 package ygo_test
 
 import (
+	"encoding/hex"
 	"math"
 	"reflect"
 	"testing"
 
 	"github.com/Deln0r/ygo"
+	"github.com/Deln0r/ygo/internal/encoding"
 )
 
 // TestRestoreSnapshot_ManyStructsInFewBytes: a snapshot is restored through
@@ -78,5 +80,26 @@ func TestRestoreSnapshot_KeepsWhatV2Carries(t *testing.T) {
 	}
 	if m["big"] != ygo.BigInt(1<<60) {
 		t.Errorf("BigInt restored as %#v", m["big"])
+	}
+}
+
+// TestRestoreSnapshot_LegacyInvalidStrings: a document holding strings a
+// release before v1.26 stored with invalid UTF-8 restores through V1, read
+// as stored, also when V2's string column joins them into valid UTF-8 cut
+// inside a character: a root named "\xf0" holding the text "\x9f\x98\x80"
+// joins into "😀" with lengths 1 and 3, which the V2 reader refuses as a
+// split surrogate, not as invalid UTF-8.
+func TestRestoreSnapshot_LegacyInvalidStrings(t *testing.T) {
+	stored, _ := hex.DecodeString("01010100040101f0039f988000")
+	d := ygo.NewDocWithOptions(ygo.Options{DisableGC: true})
+	if err := encoding.ApplyStoredUpdate(d, stored); err != nil {
+		t.Fatal(err)
+	}
+	r, err := ygo.RestoreSnapshot(d, ygo.CreateSnapshot(d))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ygo.EncodeStateAsUpdate(r), ygo.EncodeStateAsUpdate(d); hex.EncodeToString(got) != hex.EncodeToString(want) {
+		t.Fatalf("restored %x, want the stored %x", got, want)
 	}
 }
