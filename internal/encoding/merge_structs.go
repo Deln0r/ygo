@@ -1,6 +1,7 @@
 package encoding
 
 import (
+	"math"
 	"slices"
 
 	"github.com/Deln0r/ygo/internal/block"
@@ -357,4 +358,81 @@ func asRead(it *block.Item) *block.Item {
 	it.Parent = block.Parent{}
 	it.ParentSub = nil
 	return it
+}
+
+// asWritten is a client's leftover as yjs writes it into its queue:
+// writeStructs starts at findIndexSS(structs, the first struct's clock),
+// which passes over empty structs at the start when a later struct covers
+// that clock (the last struct when it starts there, else one found by a
+// pivoted binary search), and writes the struct it finds from that clock.
+// yjs's list has a Skip at every gap (an update's own, or the merge's in
+// its queue), so the search runs over list with those put back. Where
+// findIndexSS finds nothing yjs throws and rejects the update; the list is
+// then kept as it is. list holds no Skips.
+func asWritten(list []Block) []Block {
+	if len(list) < 2 {
+		return list
+	}
+	v := make([]Block, 0, len(list)+2)
+	real := make([]int, 0, len(list)+2) // index into list, -1 for a Skip put back
+	next := blockStartClock(list[0])
+	for i, b := range list {
+		if start := blockStartClock(b); start > next {
+			v = append(v, Block{Kind: WireBlockSkip, ID: block.ID{Client: blockClient(&b), Clock: next}, Len: start - next})
+			real = append(real, -1)
+		}
+		v = append(v, b)
+		real = append(real, i)
+		next = max(next, blockStartClock(b)+blockLen(b))
+	}
+	clock := blockStartClock(list[0])
+	k, ok := findIndexSS(v, clock)
+	if !ok {
+		return list
+	}
+	i := real[k]
+	if i < 0 { // a Skip: what follows it is written
+		i = real[k+1]
+	}
+	out := list[i:]
+	if off := clock - min(clock, blockStartClock(out[0])); off > 0 {
+		// A struct that starts before the first clock (only in a list that
+		// is not clock-ordered) is written from it.
+		if s, ok := sliceStruct(out[0], off); ok {
+			if s.Kind == WireBlockItem {
+				asRead(s.Item)
+			}
+			out = append([]Block{s}, out[1:]...)
+		}
+	}
+	return out
+}
+
+// findIndexSS is yjs findIndexSS (utils/StructStore.js) over structs,
+// float pivot included; ok is false where it throws or reads past the
+// list.
+func findIndexSS(structs []Block, clock uint64) (int, bool) {
+	left, right := 0, len(structs)-1
+	mid := structs[right]
+	if blockStartClock(mid) == clock {
+		return right, true
+	}
+	idx := math.Floor(float64(clock) / (float64(blockStartClock(mid)) + float64(blockLen(mid)) - 1) * float64(right))
+	for left <= right {
+		if math.IsNaN(idx) || idx < 0 || idx >= float64(len(structs)) {
+			return 0, false // structs[idx] is undefined in yjs: a TypeError
+		}
+		mi := int(idx)
+		mid = structs[mi]
+		if mc := blockStartClock(mid); mc <= clock {
+			if clock < mc+blockLen(mid) {
+				return mi, true
+			}
+			left = mi + 1
+		} else {
+			right = mi - 1
+		}
+		idx = math.Floor(float64(left+right) / 2)
+	}
+	return 0, false
 }

@@ -456,11 +456,13 @@ func integrateStack(txn *doc.TransactionMut, refs map[uint64][]Block) (map[uint6
 				continue
 			}
 			walled[c] = true
+			var kept []Block
 			for _, b := range refs[c][from[c]:] {
 				if b.Kind != WireBlockSkip {
-					rest[c] = append(rest[c], b)
+					kept = append(kept, b)
 				}
 			}
+			rest[c] = append(rest[c], asWritten(kept)...)
 		}
 		stack = stack[:0]
 	}

@@ -168,6 +168,20 @@ scenario("GC runs with a gap between them", [gcRuns(1, 2, 2), gcRuns(1, 5, 2)], 
   scenario("an empty GC run of a higher client", [item, emptyThenGC], [svOf([]), svOf([[1, 1]]), svOf([[2, 1]])], u0);
 }
 
+// An empty struct at the start of a waiting client: yjs writes its
+// leftover from findIndexSS(structs, the first clock), which passes over
+// it when a later struct covers that clock (here the GC run after it, or a
+// Skip), so the empty item never reaches the queue.
+{
+  const fromHex = (h) => Uint8Array.from(Buffer.from(h, "hex"));
+  const h = fromHex("0101010004010174016800"); // client 1, clock 0: "h"
+  const emptyThenGC = fromHex("010201010401017400000100"); // client 1, clock 1: empty item, GC 1
+  const item = fromHex("01010101840100014100"); // client 1, clock 1: "A" after 1:0
+  scenario("an empty item before a GC run at one clock", [emptyThenGC, item], [svOf([]), svOf([[1, 1]]), svOf([[1, 2]])], h);
+  const emptySkipItem = fromHex("0103010104010174000a02840100014200"); // client 1, clock 1: empty item, Skip 2, "B" after 1:0
+  scenario("an empty item before a Skip", [emptySkipItem], [svOf([]), svOf([[1, 1]]), svOf([[1, 3]])], h);
+}
+
 // The same clocks as an item and as GC: the second decoder wins.
 {
   const it = Y.decodeUpdate(u1).structs[0];
