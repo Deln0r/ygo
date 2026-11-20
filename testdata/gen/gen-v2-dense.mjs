@@ -102,7 +102,10 @@ scenario("one cached format key for 50 markers", (d) => {
 }, false, false, new CachingEncoderV2());
 
 // Pairs of dense updates of different clients, for MergeUpdatesV2: what a
-// merge holds is bounded as one update of both inputs' bytes would be.
+// merge holds is bounded as one update of both inputs' bytes would be. The
+// refused pair and the queued updates below are merged with a floor of
+// 20,000 (MergeUpdatesV2Floor), so they hold thousands of structs, not
+// millions.
 const pairs = [];
 function pair(name, buildA, buildB, refused) {
   const make = (client, build) => {
@@ -115,13 +118,13 @@ function pair(name, buildA, buildB, refused) {
 }
 pair("10k empty arrays and 10k deleted maps", (d) => d.transact(() => { const a = d.getArray("a"); for (let i = 0; i < 10000; i++) a.push([new Y.Array()]); }),
   (d) => { const a = d.getArray("m"); for (let i = 0; i < 10000; i++) a.insert(0, [new Y.Map()]); a.delete(0, a.length); }, false);
-pair("600k deleted characters each, past the budget together", prepends(600000), (d) => {
+pair("12k deleted characters each, past a floor of 20,000 together", prepends(12000), (d) => {
   const u = d.getText("u");
-  for (let i = 0; i < 600000; i++) u.insert(0, "y");
+  for (let i = 0; i < 12000; i++) u.insert(0, "y");
   u.delete(0, u.length);
 }, true);
 
-// Updates that are all queued: the 600k deleted characters of client 1 and
+// Updates that are all queued: the 12k deleted characters of client 1 and
 // of client 2 from clock 1 (diffUpdateV2), each missing its first struct,
 // and yjs's merge of the first with an empty update.
 const suffix = (client, build) => {
@@ -130,10 +133,10 @@ const suffix = (client, build) => {
   build(d);
   return Y.diffUpdateV2(Y.encodeStateAsUpdateV2(d), Y.encodeStateVector(new Map([[client, 1]])));
 };
-const sa = suffix(1, prepends(600000));
+const sa = suffix(1, prepends(12000));
 const sb = suffix(2, (d) => {
   const u = d.getText("u");
-  for (let i = 0; i < 600000; i++) u.insert(0, "y");
+  for (let i = 0; i < 12000; i++) u.insert(0, "y");
   u.delete(0, u.length);
 });
 const queued = { a: toHex(sa), b: toHex(sb), aMergedWithEmpty: toHex(Y.mergeUpdatesV2([sa, Y.encodeStateAsUpdateV2(new Y.Doc())])) };

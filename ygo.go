@@ -750,11 +750,17 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 // rest stream rather than the len column - so the emitters are separate
 // code paths with separate tests.
 func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
+	return mergeUpdatesV2(updates, encoding.V2StructFloor)
+}
+
+// mergeUpdatesV2 is MergeUpdatesV2 with floor in place of V2StructFloor
+// (tests of the bounds past the floor use a small one).
+func mergeUpdatesV2(updates [][]byte, floor int) ([]byte, error) {
 	if len(updates) == 0 {
 		return nil, nil
 	}
 	if len(updates) == 1 {
-		if _, err := encoding.DecodeUpdateV2(updates[0]); err != nil {
+		if _, err := encoding.DecodeUpdateV2Floor(updates[0], floor); err != nil {
 			return nil, err
 		}
 		return append([]byte(nil), updates[0]...), nil
@@ -769,11 +775,11 @@ func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 	for _, raw := range updates {
 		total += len(raw)
 	}
-	held := max(total, encoding.V2StructFloor)
+	held := max(total, floor)
 	d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
 	wtxn := d.WriteTxn()
 	for _, raw := range updates {
-		upd, err := encoding.DecodeUpdateV2(raw)
+		upd, err := encoding.DecodeUpdateV2Floor(raw, floor)
 		if err != nil {
 			wtxn.Commit()
 			return nil, err
@@ -792,8 +798,8 @@ func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 	// The merge must be an update ApplyUpdateV2 takes: merged runs of
 	// byteless structs compress, so the output can hold more structs than
 	// max(its own length, V2StructFloor) though every input did not.
-	if encoding.StateStructBound(d) > max(len(out), encoding.V2StructFloor) {
-		if _, err := encoding.DecodeUpdateV2(out); err != nil {
+	if encoding.StateStructBound(d) > max(len(out), floor) {
+		if _, err := encoding.DecodeUpdateV2Floor(out, floor); err != nil {
 			return nil, fmt.Errorf("ygo: MergeUpdatesV2: the merged update: %w", err)
 		}
 	}

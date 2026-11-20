@@ -34,11 +34,11 @@ file.
 
 ### Tests
 
-- New fixtures from yjs 13.6.33 (`testdata/v2-dense-fixtures.json`, `testdata/gen/gen-v2-dense.mjs`, in CI): 9 V2 states holding more structs than bytes (10,000 empty nested arrays and maps, deleted maps, 100,000 and 1,000,000 deleted characters, two clients typing in turns, a key written once for 50 format markers by an encoder with yjs's key cache on), applied, written back and merged byte for byte, and two past the budget (1.1 million structs, and two clients of 600,000 each), refused, the first before any struct is decoded. `ValidateUpdate` of each allocates under 4 MB.
-- `MergeUpdatesV2` of two dense updates of different clients (from yjs): the merge applies as the two inputs do; two of 600,000 structs each are refused together.
+- New fixtures from yjs 13.6.33 (`testdata/v2-dense-fixtures.json`, `testdata/gen/gen-v2-dense.mjs`, in CI): 9 V2 states holding more structs than bytes (10,000 empty nested arrays and maps, deleted maps, 100,000 and 1,000,000 deleted characters, two clients typing in turns, a key written once for 50 format markers by an encoder with yjs's key cache on), applied and written back byte for byte (and merged with themselves, up to 200,000 structs), and two past the budget (1.1 million structs, and two clients of 600,000 each), refused, the first before any struct is decoded. `ValidateUpdate` of each allocates under 4 MB.
+- `MergeUpdatesV2` of two dense updates of different clients (from yjs): the merge applies as the two inputs do. The bounds past the floor are tested with a floor of 20,000 (an unexported variant), on updates of 12,000 structs: two of them are refused together, and merge under the real floor.
 - A cached key read past the budget, block and delete-set clocks past the clock space or wrapping, a V1 item running past it, delete ranges ending exactly at it, a million delete-set sections for one client in V1 and V2, a million descending ranges in one V1 entry, and the one-pass range merge checked against inserting range by range on 20,000 random cases.
 - `MergeUpdatesV2` of 100,000 updates, each of its own client and root type; of updates whose structs are all queued (from yjs's `diffUpdateV2`): one merged with an empty update gives yjs's bytes, two are refused while held; of updates past the floor whose bytes carry their structs, accepted. The document's and the queue's struct counts checked against their lists across splits, queue merges, retries and commits. GC runs and items ending at 2^53 and past it, alone and added up, in V1 and V2.
-- Controls: 27, each failing these tests.
+- Controls: 29, each failing these tests.
 
 ## [1.44.0] - 2026-11-20
 

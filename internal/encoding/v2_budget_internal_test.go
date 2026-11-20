@@ -270,6 +270,7 @@ func TestHeldStructs_Counted(t *testing.T) {
 	var f struct {
 		Scenarios []struct {
 			State   string `json:"state"`
+			Structs int    `json:"structs"`
 			Refused bool   `json:"refused"`
 		} `json:"scenarios"`
 		Pairs []struct {
@@ -347,7 +348,9 @@ func TestHeldStructs_Counted(t *testing.T) {
 		runs = append(runs, [][]byte{h(p.A), h(p.B), h(p.A)})
 	}
 	for _, s := range f.Scenarios {
-		if !s.Refused {
+		// The counts need no million structs (they cost minutes under
+		// the race detector and coverage).
+		if !s.Refused && s.Structs <= 200000 {
 			runs = append(runs, [][]byte{h(s.State), h(s.State)})
 		}
 	}

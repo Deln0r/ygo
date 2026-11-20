@@ -272,7 +272,14 @@ func writeDeleteSetV2(enc *EncoderV2, ds *IdSet) {
 // Repair fills those at apply time. Mirrors DecodeUpdate (V1) but
 // pulls per-field bytes from the column decoders.
 func DecodeUpdateV2(buf []byte) (*Update, error) {
-	return decodeUpdateV2(buf, len(buf), max(len(buf), V2StructFloor))
+	return DecodeUpdateV2Floor(buf, V2StructFloor)
+}
+
+// DecodeUpdateV2Floor is DecodeUpdateV2 with floor in place of
+// V2StructFloor: the update may hold max(len(buf), floor) structs. Tests
+// of what is bounded past the floor use a small one.
+func DecodeUpdateV2Floor(buf []byte, floor int) (*Update, error) {
+	return decodeUpdateV2(buf, len(buf), max(len(buf), floor))
 }
 
 // StateStructBound is an upper bound on the structs
