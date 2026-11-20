@@ -13,7 +13,7 @@ set -e
 cd "$(dirname "$0")/.."
 split=v1.47.0
 fail() { echo "check-modules: $*" >&2; exit 1; }
-for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server examples/collab-server examples/offline-first; do
 	if grep -q '^replace' "$d/go.mod"; then fail "$d/go.mod has a replace directive"; fi
 done
 for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server examples/collab-server examples/offline-first; do

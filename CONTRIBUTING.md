@@ -41,7 +41,7 @@ If your change touches encoding/decoding paths:
 - One logical change per PR.
 - Reference any related issue.
 - Run `make check` before submitting (gofmt, vet, the race suite and lint in every module).
-- The core module (Go 1.23) does not contain the SQLite store and its users: `persist/sqlite`, `gomobile`, `cmd/yserve` and `cmd/ygo-server` are modules of their own (Go 1.26) that require the core at the version being released. Build them against your checkout in a workspace: `./tools/go-work.sh` writes a git-ignored `go.work`. The examples that use SQLite and the NATS and Matrix adapters build through their own `replace` directives (`GOWORK=off`). Check the core's floor with `GOWORK=off GOTOOLCHAIN=local` on Go 1.23.
+- The core module (Go 1.23) does not contain the SQLite store and its users: `persist/sqlite`, `gomobile`, `cmd/yserve`, `cmd/ygo-server` and the two SQLite examples are modules of their own (Go 1.26) that require the core at the version being released. Build them against your checkout in a workspace: `./tools/go-work.sh` writes a git-ignored `go.work`. The NATS and Matrix adapters build through their own `replace` directives (`GOWORK=off`). Check the core's floor with `GOWORK=off GOTOOLCHAIN=local` on Go 1.23.
 - Be patient with review (best-effort, response within 14 days).
 
 ## Communication

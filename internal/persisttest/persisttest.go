@@ -46,6 +46,7 @@ var tests = []struct {
 	name string
 	fn   func(*testing.T)
 }{
+	{"TestCanceledContext_ChangesNothing", testCanceledContext_ChangesNothing},
 	{"TestStoreUpdate_RejectsEmpty", testStoreUpdate_RejectsEmpty},
 	{"TestStoreUpdate_GetUpdates_RoundTrip", testStoreUpdate_GetUpdates_RoundTrip},
 	{"TestGetUpdates_UnknownDoc_ReturnsEmpty", testGetUpdates_UnknownDoc_ReturnsEmpty},
@@ -1068,5 +1069,46 @@ func testFlush_IncompleteLogSurvives(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("complete log compacted into %d blobs, want 1", len(got))
+	}
+}
+
+// testCanceledContext_ChangesNothing: a store refuses work under a
+// canceled context and changes nothing, as SQLite's database/sql does; a
+// client's shutdown persists with a fresh context for that reason.
+func testCanceledContext_ChangesNothing(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u1 := applyMapSet(t, 801, "a", "1")
+	u2 := applyMapSet(t, 802, "b", "2")
+	for _, u := range [][]byte{u1, u2} {
+		if err := s.StoreUpdate(ctx, "d", u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id, err := s.SaveVersion(ctx, "d", "v", u1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	for name, op := range map[string]func() error{
+		"StoreUpdate":    func() error { return s.StoreUpdate(canceled, "d", u1) },
+		"Flush":          func() error { return s.Flush(canceled, "d") },
+		"ClearDocument":  func() error { return s.ClearDocument(canceled, "d") },
+		"RestoreVersion": func() error { return s.RestoreVersion(canceled, "d", id) },
+		"DeleteVersion":  func() error { return s.DeleteVersion(canceled, "d", id) },
+		"SaveVersion":    func() error { _, err := s.SaveVersion(canceled, "d", "w", u2); return err },
+	} {
+		if err := op(); err == nil {
+			t.Errorf("%s under a canceled context: no error", name)
+		}
+	}
+	got, err := s.GetUpdates(ctx, "d")
+	if err != nil || len(got) != 2 || !bytesEqual(got[0], u1) || !bytesEqual(got[1], u2) {
+		t.Fatalf("the log changed under a canceled context: %d updates, %v", len(got), err)
+	}
+	versions, err := s.ListVersions(ctx, "d")
+	if err != nil || len(versions) != 1 || versions[0].ID != id {
+		t.Fatalf("the versions changed under a canceled context: %v, %v", versions, err)
 	}
 }

@@ -26,8 +26,7 @@ fmt-check:
 
 # The core, then the nested modules that build in the workspace
 # (tools/go-work.sh) and the examples (through their replace directives).
-NESTED ?= persist/sqlite gomobile cmd/yserve cmd/ygo-server
-EXAMPLES ?= examples/collab-server examples/offline-first
+NESTED ?= persist/sqlite gomobile cmd/yserve cmd/ygo-server examples/collab-server examples/offline-first
 
 .PHONY: work
 work:
@@ -38,16 +37,14 @@ work:
 vet: work
 	GOWORK=off $(GO) vet ./...
 	for d in $(NESTED); do (cd $$d && $(GO) vet ./...) || exit 1; done
-	for d in $(EXAMPLES); do (cd $$d && GOWORK=off $(GO) vet ./...) || exit 1; done
 
 .PHONY: test
 test: work
 	GOWORK=off $(GO) test -race -coverprofile=coverage.txt -covermode=atomic ./...
 	for d in $(NESTED); do (cd $$d && $(GO) test -race ./...) || exit 1; done
-	for d in $(EXAMPLES); do (cd $$d && GOWORK=off $(GO) test -race ./...) || exit 1; done
 
 .PHONY: lint
-lint:
+lint: work
 ifndef GOLANGCI_LINT
 	@echo "golangci-lint not found on PATH."
 	@echo "Install matching CI version with:"
@@ -55,7 +52,8 @@ ifndef GOLANGCI_LINT
 	@echo "(brew installs v2 by default; the project config is v1)"
 	@exit 1
 else
-	$(GOLANGCI_LINT) run
+	GOWORK=off $(GOLANGCI_LINT) run
+	for d in $(NESTED); do (cd $$d && $(GOLANGCI_LINT) run) || exit 1; done
 endif
 
 .PHONY: lint-install

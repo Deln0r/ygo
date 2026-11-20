@@ -95,15 +95,7 @@ jobs:
         run: |
           ./tools/go-work.sh
           ./tools/check-modules.sh
-          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
-            echo "== $d"
-            (cd "$d" && go vet ./... && go test -race ./...)
-          done
-      - name: the examples, through their replace directives
-        env:
-          GOWORK: "off"
-        run: |
-          for d in examples/collab-server examples/offline-first; do
+          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server examples/collab-server examples/offline-first; do
             echo "== $d"
             (cd "$d" && go vet ./... && go test -race ./...)
           done
@@ -121,16 +113,35 @@ jobs:
       - name: tidy, build and vet outside the workspace
         # What an adopter resolves: each module with the core (and
         # persist/sqlite) at the versions its go.mod requires, from the
-        # proxy. Between a core tag and the nested ones those versions may
-        # not be out yet; on a branch that is a notice, on a tag a failure.
+        # proxy, its go.sum complete. A core tag has nothing nested to
+        # check (the nested go.sum gain the core's checksum in a later
+        # commit); a nested module's tag checks that module. On a branch
+        # every module, and a module that requires the release being
+        # prepared (doc.go's Version) before it is published is skipped
+        # with a notice; any other lookup failure fails.
         run: |
-          v=$(awk '$1 == "github.com/Deln0r/ygo" { print $2; exit }' persist/sqlite/go.mod)
-          if ! go list -m "github.com/Deln0r/ygo@$v" > /dev/null 2>&1 || ! go list -m "github.com/Deln0r/ygo/persist/sqlite@$v" > /dev/null 2>&1; then
-            if [ "${GITHUB_REF_TYPE}" = tag ]; then echo "required $v is not published"; exit 1; fi
-            echo "::notice::the core or persist/sqlite $v is not published yet; skipped"
-            exit 0
-          fi
-          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+          release=$(sed -n 's/^const Version = "\(.*\)"$/v\1/p' doc.go)
+          case "${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}" in
+            tag:v*) echo "a core tag: nothing nested to check"; exit 0 ;;
+            tag:*) mods="${GITHUB_REF_NAME%/v*}" ;;
+            *) mods="persist/sqlite gomobile cmd/yserve cmd/ygo-server examples/collab-server examples/offline-first" ;;
+          esac
+          for d in $mods; do
+            skip=""
+            for dep in $(awk '$1 ~ /^github.com\/Deln0r\/ygo/ && $2 ~ /^v/ { print $1 "@" $2 }' "$d/go.mod"); do
+              if ! out=$(go list -m "$dep" 2>&1); then
+                if [ "${GITHUB_REF_TYPE}" != tag ] && [ "${dep##*@}" = "$release" ] && echo "$out" | grep -qE 'unknown revision|not found|invalid version'; then
+                  skip="$dep"
+                  break
+                fi
+                echo "$d: $out"
+                exit 1
+              fi
+            done
+            if [ -n "$skip" ]; then
+              echo "::notice::$d: $skip is the release being prepared and not published yet; skipped"
+              continue
+            fi
             echo "== $d"
             (cd "$d" && go mod tidy && git diff --exit-code -- go.mod go.sum && go build ./... && go vet ./...)
           done
@@ -195,6 +206,20 @@ jobs:
           for t in ios/arm64 android/amd64; do
             echo "== $t"
             GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build . ./persist/... ./client ./server/... ./internal/...
+          done
+      - name: the nested modules (in the workspace)
+        if: matrix.go == 'stable'
+        env:
+          GOWORK: ""
+        run: |
+          ./tools/go-work.sh
+          for t in android/arm64 linux/arm64 windows/amd64 darwin/arm64 freebsd/amd64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build ./persist/sqlite/... ./gomobile/... ./cmd/yserve/... ./cmd/ygo-server/... ./examples/collab-server/... ./examples/offline-first/...
+          done
+          for t in ios/arm64 android/amd64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build ./persist/sqlite ./gomobile
           done
       - name: wasm
         run: |
@@ -385,7 +410,7 @@ jobs:
       - name: lint the nested modules (in the workspace)
         run: |
           ./tools/go-work.sh
-          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server; do
+          for d in persist/sqlite gomobile cmd/yserve cmd/ygo-server examples/collab-server examples/offline-first; do
             echo "== $d"
             (cd "$d" && golangci-lint run)
           done

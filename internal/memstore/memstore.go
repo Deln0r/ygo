@@ -76,23 +76,33 @@ func Open(path string) (*Store, error) {
 	return &Store{st: st}, nil
 }
 
-func (s *Store) lock() (*state, error) {
+// lock refuses a closed store and a canceled context, as SQLite does
+// (database/sql checks the context before it runs a statement), and locks
+// the state; the context is checked again once the lock is held.
+func (s *Store) lock(ctx context.Context) (*state, error) {
 	s.closedMu.Lock()
 	closed := s.closed
 	s.closedMu.Unlock()
 	if closed {
 		return nil, ErrClosed
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.st.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.st.mu.Unlock()
+		return nil, err
+	}
 	return s.st, nil
 }
 
 // StoreUpdate appends a copy of update to docName's log.
-func (s *Store) StoreUpdate(_ context.Context, docName string, update []byte) error {
+func (s *Store) StoreUpdate(ctx context.Context, docName string, update []byte) error {
 	if len(update) == 0 {
 		return persist.ErrEmptyUpdate
 	}
-	st, err := s.lock()
+	st, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -102,8 +112,8 @@ func (s *Store) StoreUpdate(_ context.Context, docName string, update []byte) er
 }
 
 // GetUpdates returns copies of docName's updates in the order stored.
-func (s *Store) GetUpdates(_ context.Context, docName string) ([][]byte, error) {
-	st, err := s.lock()
+func (s *Store) GetUpdates(ctx context.Context, docName string) ([][]byte, error) {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +127,8 @@ func (s *Store) GetUpdates(_ context.Context, docName string) ([][]byte, error) 
 
 // Flush replaces docName's updates with their merge once there are two or
 // more, as persist/sqlite does.
-func (s *Store) Flush(_ context.Context, docName string) error {
-	st, err := s.lock()
+func (s *Store) Flush(ctx context.Context, docName string) error {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -136,8 +146,8 @@ func (s *Store) Flush(_ context.Context, docName string) error {
 }
 
 // DocumentExists reports whether docName has an update.
-func (s *Store) DocumentExists(_ context.Context, docName string) (bool, error) {
-	st, err := s.lock()
+func (s *Store) DocumentExists(ctx context.Context, docName string) (bool, error) {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -147,8 +157,8 @@ func (s *Store) DocumentExists(_ context.Context, docName string) (bool, error) 
 
 // ListDocuments returns the names of the documents that have an update,
 // sorted.
-func (s *Store) ListDocuments(_ context.Context) ([]string, error) {
-	st, err := s.lock()
+func (s *Store) ListDocuments(ctx context.Context) ([]string, error) {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +174,8 @@ func (s *Store) ListDocuments(_ context.Context) ([]string, error) {
 }
 
 // ClearDocument drops docName's updates; its versions stay.
-func (s *Store) ClearDocument(_ context.Context, docName string) error {
-	st, err := s.lock()
+func (s *Store) ClearDocument(ctx context.Context, docName string) error {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -183,11 +193,11 @@ func (s *Store) Close() error {
 }
 
 // SaveVersion stores a copy of state as a version of docName.
-func (s *Store) SaveVersion(_ context.Context, docName, label string, state []byte) (int64, error) {
+func (s *Store) SaveVersion(ctx context.Context, docName, label string, state []byte) (int64, error) {
 	if len(state) == 0 {
 		return 0, persist.ErrEmptyUpdate
 	}
-	st, err := s.lock()
+	st, err := s.lock(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -200,8 +210,8 @@ func (s *Store) SaveVersion(_ context.Context, docName, label string, state []by
 }
 
 // ListVersions returns docName's versions, oldest first.
-func (s *Store) ListVersions(_ context.Context, docName string) ([]persist.VersionInfo, error) {
-	st, err := s.lock()
+func (s *Store) ListVersions(ctx context.Context, docName string) ([]persist.VersionInfo, error) {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -223,8 +233,8 @@ func (st *state) find(docName string, id int64) (int, bool) {
 }
 
 // GetVersionState returns a copy of a version's state.
-func (s *Store) GetVersionState(_ context.Context, docName string, versionID int64) ([]byte, error) {
-	st, err := s.lock()
+func (s *Store) GetVersionState(ctx context.Context, docName string, versionID int64) ([]byte, error) {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -237,8 +247,8 @@ func (s *Store) GetVersionState(_ context.Context, docName string, versionID int
 }
 
 // DeleteVersion drops a version; an unknown one is not an error.
-func (s *Store) DeleteVersion(_ context.Context, docName string, versionID int64) error {
-	st, err := s.lock()
+func (s *Store) DeleteVersion(ctx context.Context, docName string, versionID int64) error {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -250,8 +260,8 @@ func (s *Store) DeleteVersion(_ context.Context, docName string, versionID int64
 }
 
 // RestoreVersion replaces docName's updates with the version's state.
-func (s *Store) RestoreVersion(_ context.Context, docName string, versionID int64) error {
-	st, err := s.lock()
+func (s *Store) RestoreVersion(ctx context.Context, docName string, versionID int64) error {
+	st, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}

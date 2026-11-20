@@ -20,7 +20,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.62.0 // indirect
 )
-
-replace github.com/Deln0r/ygo => ../..
-
-replace github.com/Deln0r/ygo/persist/sqlite => ../../persist/sqlite
