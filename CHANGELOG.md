@@ -2453,6 +2453,7 @@ conflicting items, a room set to `history_visibility: joined` hands a newcomer a
 partial document, redaction makes old and new readers diverge, and federation is
 not tested (the compose stack runs a single homeserver).
 
+[1.43.0]: https://github.com/Deln0r/ygo/releases/tag/v1.43.0
 [1.42.0]: https://github.com/Deln0r/ygo/releases/tag/v1.42.0
 [1.41.1]: https://github.com/Deln0r/ygo/releases/tag/v1.41.1
 [1.41.0]: https://github.com/Deln0r/ygo/releases/tag/v1.41.0
