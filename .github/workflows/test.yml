@@ -118,7 +118,10 @@ jobs:
         # commit); a nested module's tag checks that module. On a branch
         # every module, and a module that requires the release being
         # prepared (doc.go's Version) before it is published is skipped
-        # with a notice; any other lookup failure fails.
+        # with a notice (the proxy answers "unknown revision" for that very
+        # version; any other lookup failure fails), and so is a go.sum that
+        # lacks only the checksums of the release being prepared (they are
+        # committed after the tags they need, design 7 of the plan).
         run: |
           release=$(sed -n 's/^const Version = "\(.*\)"$/v\1/p' doc.go)
           case "${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}" in
@@ -130,7 +133,7 @@ jobs:
             skip=""
             for dep in $(awk '$1 ~ /^github.com\/Deln0r\/ygo/ && $2 ~ /^v/ { print $1 "@" $2 }' "$d/go.mod"); do
               if ! out=$(go list -m "$dep" 2>&1); then
-                if [ "${GITHUB_REF_TYPE}" != tag ] && [ "${dep##*@}" = "$release" ] && echo "$out" | grep -qE 'unknown revision|not found|invalid version'; then
+                if [ "${GITHUB_REF_TYPE}" != tag ] && [ "${dep##*@}" = "$release" ] && echo "$out" | grep -qF "invalid version: unknown revision $release"; then
                   skip="$dep"
                   break
                 fi
@@ -143,7 +146,21 @@ jobs:
               continue
             fi
             echo "== $d"
-            (cd "$d" && go mod tidy && git diff --exit-code -- go.mod go.sum && go build ./... && go vet ./...)
+            (
+              cd "$d"
+              go mod tidy
+              git diff --exit-code -- go.mod
+              if ! git diff --quiet -- go.sum; then
+                added=$(git diff -U0 -- go.sum | grep '^+[^+]' || true)
+                other=$(echo "$added" | grep -v "^+github.com/Deln0r/ygo[^ ]* $release[ /]" || true)
+                if [ "${GITHUB_REF_TYPE}" = tag ] || [ -n "$other" ] || git diff -U0 -- go.sum | grep -q '^-[^-]'; then
+                  git diff -- go.sum
+                  exit 1
+                fi
+                echo "::notice::$d: go.sum lacks only the checksums of $release, committed after its tags"
+              fi
+              go build ./... && go vet ./...
+            )
           done
 
   backplane-nats:

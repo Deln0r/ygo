@@ -10,6 +10,7 @@ exposes to code that mounts it, which the CLI cannot express.
 ## Run
 
 ```sh
+./tools/go-work.sh              # once, at the repository root: build against this checkout
 cd examples/collab-server       # a module of its own (it uses persist/sqlite)
 go run .                        # in-memory
 go run . -store x.db            # sqlite-backed (survives restart)

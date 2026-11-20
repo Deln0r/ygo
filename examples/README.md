@@ -3,9 +3,11 @@
 Runnable examples for embedding and using ygo. Each is a `go run`-able
 program with its own README. `collab-server` and `offline-first` use the
 SQLite store, so each is a module of its own: run them from their
-directory (`cd examples/collab-server && go run .`). In a workspace
-(`./tools/go-work.sh`) they build against this checkout; without one,
-against the published core and `persist/sqlite`. `collab-client` is part
+directory (`cd examples/collab-server && go run .`). Run `./tools/go-work.sh`
+once at the repository root first: they then build against this checkout
+(a release tag's checkout does not carry their checksums of that release,
+which are committed after its tags; without a workspace, `go mod tidy` in
+the example's directory fetches them). `collab-client` is part
 of the core module (`go run ./examples/collab-client`).
 
 | Example | What it shows |

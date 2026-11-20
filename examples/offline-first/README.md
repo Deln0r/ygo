@@ -9,6 +9,7 @@ server on the next successful connect.
 
 ```sh
 # No server reachable: the log persists locally across restarts.
+./tools/go-work.sh              # once, at the repository root: build against this checkout
 cd examples/offline-first       # a module of its own (it uses persist/sqlite)
 go run . -store notes.db -add "first note"
 go run . -store notes.db -add "second note"
