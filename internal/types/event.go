@@ -592,11 +592,11 @@ func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
 			}
 			if adds(txn, it) {
 				if !deletes(txn, it) {
-					if !attrValuesEqual(currentAttrs[key], value) {
+					if !attrValuesEqual(orNull(currentAttrs[key]), value) {
 						if action == "retain" {
 							addOp()
 						}
-						if attrValuesEqual(value, oldAttrs[key]) {
+						if attrValuesEqual(value, orNull(oldAttrs[key])) {
 							delete(attributes, key)
 						} else {
 							attributes[key] = value
@@ -605,15 +605,15 @@ func buildTextDelta(txn *doc.TransactionMut, br *block.Branch) []DeltaOp {
 				}
 			} else if deletes(txn, it) {
 				oldAttrs[key] = value
-				if !attrValuesEqual(currentAttrs[key], value) {
+				if cur := orNull(currentAttrs[key]); !attrValuesEqual(cur, value) {
 					if action == "retain" {
 						addOp()
 					}
-					attributes[key] = currentAttrs[key]
+					attributes[key] = cur
 				}
 			} else if !it.IsDeleted() {
 				oldAttrs[key] = value
-				if attr, ok := attributes[key]; ok {
+				if attr, ok := attributes[key]; ok && !isUndefined(attr) {
 					if !attrValuesEqual(attr, value) {
 						if action == "retain" {
 							addOp()

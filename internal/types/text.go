@@ -239,11 +239,11 @@ func cleanupFormattingGapFrom(txn *doc.TransactionMut, start, curr *block.Item, 
 			continue
 		}
 		key, value := start.Content.FormatKey, formatValue(start)
-		before := startAttrs[key]
+		before := orNull(startAttrs[key]) // yjs: startAttributes.get(key) ?? null, compared raw
 		if last[key] != start || strictEqual(before, value) {
 			txn.Delete(start)
 			cleanups++
-			if !reachedCurr && pos != nil && strictEqual(pos.attrs[key], value) && !strictEqual(before, value) {
+			if !reachedCurr && pos != nil && strictEqual(orNull(pos.attrs[key]), value) && !strictEqual(before, value) {
 				if before == nil {
 					pos.deleteAttr(key)
 				} else {

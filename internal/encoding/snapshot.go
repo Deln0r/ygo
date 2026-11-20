@@ -159,6 +159,55 @@ func EncodeSnapshotAsUpdateV1(bs *store.BlockStore, snap Snapshot) []byte {
 	return buf
 }
 
+// EncodeSnapshotAsUpdateV2 is EncodeSnapshotAsUpdateV1 in V2, as yjs
+// createDocFromSnapshot writes it (UpdateEncoderV2): V2 carries what V1
+// cannot, such as a format value or an embed that is undefined itself.
+func EncodeSnapshotAsUpdateV2(bs *store.BlockStore, snap Snapshot) []byte {
+	clients := make([]uint64, 0, len(snap.SV))
+	for c, clock := range snap.SV {
+		if clock > 0 {
+			clients = append(clients, c)
+		}
+	}
+	sort.Slice(clients, func(i, j int) bool { return clients[i] > clients[j] })
+
+	type run struct {
+		client uint64
+		cells  []store.BlockCell
+	}
+	var runs []run
+	for _, c := range clients {
+		clock := snap.SV[c]
+		list := bs.GetClient(c)
+		if list == nil {
+			continue
+		}
+		var cells []store.BlockCell
+		for i := 0; i < list.Len(); i++ {
+			cell, _ := list.Get(i)
+			if cell.ClockEnd() < clock {
+				cells = append(cells, cell)
+			}
+		}
+		if len(cells) > 0 {
+			runs = append(runs, run{client: c, cells: cells})
+		}
+	}
+
+	enc := NewEncoderV2()
+	enc.WriteVarUint(uint64(len(runs)))
+	for _, r := range runs {
+		enc.WriteVarUint(uint64(len(r.cells)))
+		enc.WriteClient(r.client)
+		enc.WriteVarUint(r.cells[0].ClockStart())
+		for _, cell := range r.cells {
+			encodeCellV2(enc, cell)
+		}
+	}
+	writeDeleteSetV2(enc, snap.DS)
+	return enc.Bytes()
+}
+
 // UpdateAddsNothing reports whether applying a V1 update to d would change
 // nothing: every block lies within d's state vector and every deletion is
 // already in d's delete set. It is yjs snapshotContainsUpdate against the

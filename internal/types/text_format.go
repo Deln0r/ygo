@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -130,10 +131,15 @@ func insertText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, con
 		full[k] = v
 	}
 	order := append([]string(nil), keys...)
+	// yjs: attributes[key] === undefined, absent or undefined, becomes null
+	// for every key in effect.
 	for _, k := range pos.order {
-		if _, ok := full[k]; !ok {
+		v, ok := full[k]
+		if !ok || isUndefined(v) {
 			full[k] = nil
-			order = append(order, k)
+			if !ok {
+				order = append(order, k)
+			}
 		}
 	}
 	order = jsPropertyOrder(order)
@@ -386,7 +392,7 @@ func (n *negatedAttrs) remove(key string) {
 func minimizeAttributeChanges(pos *textPos, attrs Attrs) {
 	for pos.right != nil {
 		r := pos.right
-		if !r.IsDeleted() && (r.Content.Kind != block.KindFormat || !attrValuesEqual(attrs[r.Content.FormatKey], formatValue(r))) {
+		if !r.IsDeleted() && (r.Content.Kind != block.KindFormat || !attrValuesEqual(orNull(attrs[r.Content.FormatKey]), formatValue(r))) {
 			return
 		}
 		pos.forward()
@@ -402,7 +408,7 @@ func insertAttributes(txn *doc.TransactionMut, branch *block.Branch, pos *textPo
 	negated := &negatedAttrs{}
 	for _, key := range keys {
 		value := attrs[key]
-		current := pos.attrs[key]
+		current := orNull(pos.attrs[key])
 		if attrValuesEqual(current, value) {
 			continue
 		}
@@ -431,7 +437,9 @@ walk:
 			if r.Content.Kind == block.KindFormat {
 				key, value := r.Content.FormatKey, formatValue(r)
 				pos.noteOrder(r)
-				if requested, ok := attrs[key]; ok {
+				// yjs: attr !== undefined, so a requested undefined is not
+				// requested here.
+				if requested, ok := attrs[key]; ok && !isUndefined(requested) {
 					if attrValuesEqual(requested, value) {
 						negated.remove(key)
 					} else {
@@ -481,8 +489,13 @@ func insertNegatedAttributes(txn *doc.TransactionMut, branch *block.Branch, pos 
 			if r.Content.Kind != block.KindFormat {
 				break
 			}
+			// An absent key reads undefined in yjs, so a marker whose value
+			// is undefined is stepped over whatever its key.
 			value, ok := negated.get(r.Content.FormatKey)
-			if !ok || !attrValuesEqual(value, formatValue(r)) {
+			if !ok {
+				value = block.Undefined{}
+			}
+			if !attrValuesEqual(value, formatValue(r)) {
 				break
 			}
 			negated.remove(r.Content.FormatKey)
@@ -496,7 +509,25 @@ func insertNegatedAttributes(txn *doc.TransactionMut, branch *block.Branch, pos 
 	}
 }
 
-// formatValue returns the value a format marker sets; nil clears.
+// orNull is JS `v ?? null` for a value read from the attributes in effect
+// or requested: an undefined value reads as null. yjs coalesces at most of
+// its reads and compares the raw value at others; each call site follows
+// the one it ports.
+func orNull(v any) any {
+	if isUndefined(v) {
+		return nil
+	}
+	return v
+}
+
+// isUndefined reports whether v is JavaScript's undefined.
+func isUndefined(v any) bool {
+	_, ok := v.(block.Undefined)
+	return ok
+}
+
+// formatValue returns the value a format marker sets; nil clears, and
+// block.Undefined{} is a value of its own (yjs keeps the key in effect).
 func formatValue(it *block.Item) any {
 	if len(it.Content.Anys) > 0 {
 		return it.Content.Anys[0]
@@ -523,6 +554,9 @@ func (t *Text) InsertEmbed(txn *doc.TransactionMut, idx uint64, value any) error
 // emitted by Range / ToDelta as an Embed op rather than a string
 // chunk.
 func (t *Text) InsertEmbedWithAttributes(txn *doc.TransactionMut, idx uint64, value any, attrs Attrs) error {
+	if isUndefined(value) {
+		return ErrUndefinedEmbed
+	}
 	total := t.Length()
 	if idx > total {
 		return fmt.Errorf("text: embed index %d out of range [0, %d]", idx, total)
@@ -538,6 +572,12 @@ func (t *Text) InsertEmbedWithAttributes(txn *doc.TransactionMut, idx uint64, va
 	return t.insertContent(txn, idx, content, length, attrs, sortedAttrKeys(attrs))
 }
 
+// ErrUndefinedEmbed is returned for an embed that is undefined itself. yjs
+// throws on insertEmbed(undefined), after the format markers for the
+// attributes went in; ygo refuses it before changing anything. An
+// undefined embed a peer sent stays in the document.
+var ErrUndefinedEmbed = errors.New("ygo: text: an embed cannot be undefined")
+
 // embedContent classifies an inserted value as yjs insertText does: a
 // string is text, anything else an embed. It returns the content and its
 // length in UTF-16 units.
@@ -546,31 +586,22 @@ func embedContent(value any) (block.Content, uint64) {
 		s = utf16.ValidString(s)
 		return block.Content{Kind: block.KindString, Str: s}, utf16.Length(s)
 	}
-	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{undefinedAsNil(anyval.ValidJSON(value))}}, 1
-}
-
-// undefinedAsNil turns a format value or an embed that is undefined itself
-// into nil. A peer reads such a value as nil (DecoderV2.ReadJSON; V1 writes
-// JSON, which has no undefined), so the writer's own document must hold the
-// same. Undefined nested inside the value is data and stays.
-func undefinedAsNil(v any) any {
-	if _, ok := v.(block.Undefined); ok {
-		return nil
-	}
-	return v
+	// An undefined embed is refused before here (ErrUndefinedEmbed) or
+	// skipped (ApplyDelta), as yjs does.
+	return block.Content{Kind: block.KindEmbed, Anys: []block.Any{anyval.ValidJSON(value)}}, 1
 }
 
 // validAttrs returns attrs with each key fixed by utf16.ValidString and each
-// value by anyval.ValidJSON (format values are written as JSON), and a value
-// that is undefined itself turned into nil (undefinedAsNil), copying the
+// value by anyval.ValidJSON (format values are written as JSON), copying the
 // map only when something changes, so the caller's map is not modified; nil
 // stays nil and an empty map stays empty. Two keys that become equal keep
-// the value of the key that sorts last.
+// the value of the key that sorts last. A value that is undefined itself
+// stays block.Undefined{}, which the formatting code treats as yjs treats
+// undefined.
 func validAttrs(attrs Attrs) Attrs {
 	changed := false
 	for k, v := range attrs {
-		_, undefined := v.(block.Undefined)
-		if !utf8.ValidString(k) || anyval.NeedsJSONFix(v) || undefined {
+		if !utf8.ValidString(k) || anyval.NeedsJSONFix(v) {
 			changed = true
 			break
 		}
@@ -585,7 +616,7 @@ func validAttrs(attrs Attrs) Attrs {
 	sort.Strings(keys)
 	out := make(Attrs, len(attrs))
 	for _, k := range keys {
-		out[utf16.ValidString(k)] = jsonNullAsNil(undefinedAsNil(anyval.ValidJSON(attrs[k])))
+		out[utf16.ValidString(k)] = jsonNullAsNil(anyval.ValidJSON(attrs[k]))
 	}
 	return out
 }
@@ -695,7 +726,9 @@ func (t *Text) ApplyDelta(txn *doc.TransactionMut, ops []DeltaOp) error {
 		case op.Insert != "":
 			s := utf16.ValidString(op.Insert)
 			insertText(txn, t.branch, pos, block.Content{Kind: block.KindString, Str: s}, utf16.Length(s), attrs, sortedAttrKeys(attrs))
-		case op.Embed != nil:
+		// yjs applyDelta inserts when op.insert !== undefined: an undefined
+		// embed is no insert, and the op's retain or delete applies.
+		case op.Embed != nil && !isUndefined(op.Embed):
 			if content, length := embedContent(op.Embed); length > 0 {
 				insertText(txn, t.branch, pos, content, length, attrs, sortedAttrKeys(attrs))
 			}
@@ -752,8 +785,9 @@ func (t *Text) ToDelta() []DeltaOp {
 			updateCurrentAttrs(current, cur.Content.FormatKey, formatValue(cur))
 		case block.KindString:
 			// yjs toDelta reserves "ychange" for snapshot diffs: without
-			// snapshots, a string drops it from the attributes in effect.
-			if _, ok := current["ychange"]; ok {
+			// snapshots, a string drops it from the attributes in effect,
+			// unless its value is undefined (yjs: cur !== undefined).
+			if v, ok := current["ychange"]; ok && !isUndefined(v) {
 				flush()
 				delete(current, "ychange")
 			}

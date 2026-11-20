@@ -14,6 +14,25 @@ ygo itself: the NATS backplane (`server/backplane/nats`) and the Matrix
 transport (`integration/matrix`). Their releases are listed at the end of this
 file.
 
+## [1.44.0] - 2026-11-20
+
+**Upgrade impact**:
+
+- **A format attribute whose value is `undefined` itself is kept, as yjs keeps it**, instead of reading as null. A V2 update from a JavaScript peer (`text.insert(i, s, {bold: undefined})`, `text.format(i, n, {bold: undefined})`) and a Go caller's `ygo.Undefined{}` in `Attrs` both make a marker of its own, written as lib0 tag 127, and the formatting code gives it yjs's meaning: an insert that inherits it clears it, a format request with it writes the marker but leaves the run's markers alone, the attributes in effect keep the key. `ToDelta`, `Range` and text event deltas can carry `ygo.Undefined{}` values; `json.Marshal` of them writes null.
+- **`Text.InsertEmbed(txn, i, ygo.Undefined{})` returns `ygo.ErrUndefinedEmbed`** before changing anything (it stored null; yjs throws). `ApplyDelta` skips an insert whose embed is undefined and applies the op's retain or delete, as yjs does. An undefined embed a peer sent stays.
+- **`RestoreSnapshot` goes through V2**, as yjs `createDocFromSnapshot` does, so an undefined marker survives it; documents holding strings a release before 1.26 stored with invalid UTF-8 still restore through V1.
+- **V1 cannot carry such a value**: yjs cannot write the document in V1 at all, ygo writes null there, so a V1 reader (including the Go client's local log) gets null.
+
+### Fixed
+
+- **A format attribute set to undefined came back as null**, in the document and in every state written from it, so a JavaScript peer saw `null` where the writer stored `undefined`, and edits around it formatted differently than in yjs (an insert after it, a format next to it, a delete across it).
+- **`ToDelta` dropped a `ychange` attribute whose value is undefined** at the next string; yjs keeps it.
+
+### Tests
+
+- New fixtures from yjs 13.6.33 (`testdata/format-undefined-fixtures.json`, `testdata/gen/gen-format-undefined.mjs`, in CI): 28 scenarios with attributes whose value is undefined (inserts inside and outside runs, inheriting, before a marker of another key, formats over plain and formatted text, next to markers of other keys, null over undefined, deletes across them, deltas, a delete and an insert through one cursor, ychange, from a peer and then edited, an embed with an undefined attribute, an undefined embed from a peer, undo and redo) and one snapshot. The writer replays the calls through ygo's API and the receiver applies yjs's V2 updates; both compare the V2 update of every transaction, the event deltas, the state and the delta: 57 subtests, 54 of them fail on 1.43.0.
+- Controls: 17, each failing these tests.
+
 ## [1.43.0] - 2026-11-20
 
 **Upgrade impact**:

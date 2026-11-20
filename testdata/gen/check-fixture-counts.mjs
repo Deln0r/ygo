@@ -42,6 +42,7 @@ const feature = [
   "testdata/undo-wire-fixtures.json",
   "testdata/pending-state-fixtures.json",
   "testdata/pending-merge-fixtures.json",
+  "testdata/format-undefined-fixtures.json",
 ].reduce((n, f) => n + count(f), 0);
 const total = v1Forward + v2Forward + reverse + feature;
 

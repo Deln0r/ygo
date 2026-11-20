@@ -423,13 +423,25 @@ func RestoreSnapshot(d *Doc, snap Snapshot) (*Doc, error) {
 	}
 	txn := d.WriteTxn()
 	encoding.SplitAtSnapshotBoundaries(txn.Store(), snap)
-	update := encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap)
+	updateV2 := encoding.EncodeSnapshotAsUpdateV2(txn.Store(), snap)
+	var updateV1 []byte
+	if _, err := encoding.DecodeUpdateV2(updateV2); err != nil {
+		// d holds strings that a release before v1.26 stored with invalid
+		// UTF-8, which the V2 decoder refuses: rebuild from V1, read as
+		// stored (V1 cannot carry an undefined format value or embed).
+		updateV1 = encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap)
+	}
 	txn.Commit()
 
 	nd := NewDocWithOptions(Options{DisableGC: true})
-	// The bytes come from d itself, which may hold strings that a release
-	// before v1.26 stored with invalid UTF-8: rebuild them as stored.
-	if err := encoding.ApplyStoredUpdate(nd, update); err != nil {
+	if updateV1 != nil {
+		if err := encoding.ApplyStoredUpdate(nd, updateV1); err != nil {
+			return nil, err
+		}
+		return nd, nil
+	}
+	// V2, as yjs createDocFromSnapshot writes it.
+	if err := encoding.ApplyUpdateV2(nd, updateV2); err != nil {
 		return nil, err
 	}
 	return nd, nil
@@ -571,6 +583,12 @@ var ErrSplitSurrogate = lib0.ErrSplitSurrogate
 // arrays overflowed the goroutine stack, a crash no caller can recover
 // from. Test with errors.Is.
 var ErrNestedTooDeep = encoding.ErrAnyTooDeep
+
+// ErrUndefinedEmbed is returned by Text.InsertEmbed and
+// InsertEmbedWithAttributes for an embed that is Undefined{} itself, before
+// anything changes. yjs throws on insertEmbed(undefined). An undefined embed
+// a peer sent (V2) stays in the document and reads as Undefined{}.
+var ErrUndefinedEmbed = types.ErrUndefinedEmbed
 
 // ValidateUpdate returns an error unless raw is a well-formed V1 update that
 // is consumed in its entirety, WITHOUT integrating it into any document. Use

@@ -1,0 +1,4100 @@
+{
+  "generator": "gen-format-undefined.mjs (yjs 13.6.33)",
+  "scenarios": [
+    {
+      "name": "insert with an undefined attribute",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00"
+        ],
+        "state": "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abc",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00"
+        ],
+        "state": "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abc"
+      }
+    },
+    {
+      "name": "insert with an undefined attribute inside a run of it",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "X",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X"
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000c00050600840086140f74626f6c64616263646566626f6c640104060401010000010300787e00",
+          "0002000202410503060a020308010005c600c400c60d09626f6c6458626f6c640401040000000103087e7800"
+        ],
+        "state": "000300030102410806000700460a02030801000b060084018600c600c400c6211874626f6c64616263646566626f6c64626f6c6458626f6c64010443004400010401010000010700787e7e7800",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X"
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcXdef",
+        "v1": "010701000601017404626f6c640474727565840100036162638401030364656686010604626f6c64046e756c6cc60103010404626f6c64046e756c6cc4010801040158c60109010404626f6c64047472756500"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X"
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000c00050600840086140f74626f6c64616263646566626f6c640104060401010000010300787e00",
+          "0002000202410503060a020308010005c600c400c60d09626f6c6458626f6c640401040000000103087e7800"
+        ],
+        "state": "000300030102410806000700460a02030801000b060084018600c600c400c6211874626f6c64616263646566626f6c64626f6c6458626f6c64010443004400010401010000010700787e7e7800",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X"
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcXdef"
+      }
+    },
+    {
+      "name": "insert with an undefined other attribute inside a run",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "X",
+            "attrs": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000c00050600840086140f74626f6c64616263646566626f6c640104060401010000010300787e00",
+          "000300030102410904060a03010308010205c601c400c61b156974616c6963626f6c64586974616c6963626f6c6406040106040000000105087f7e7e7800"
+        ],
+        "state": "000300030302410c07000700460a0301030801020b060084018600c601c400c62f2474626f6c64616263646566626f6c646974616c6963626f6c64586974616c6963626f6c640104430004060401060401010000010900787e7f7e7e7800",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcXdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000c00050600840086140f74626f6c64616263646566626f6c640104060401010000010300787e00",
+          "000300030102410904060a03010308010205c601c400c61b156974616c6963626f6c64586974616c6963626f6c6406040106040000000105087f7e7e7800"
+        ],
+        "state": "000300030302410c07000700460a0301030801020b060084018600c601c400c62f2474626f6c64616263646566626f6c646974616c6963626f6c64586974616c6963626f6c640104430004060401060401010000010900787e7f7e7e7800",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcXdef"
+      }
+    },
+    {
+      "name": "insert inheriting an undefined attribute",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X"
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00",
+          "00000241010104010601c40301580100000001010500"
+        ],
+        "state": "000200020241040400040242010607060084018600c4140d74626f6c64616263626f6c6458010402010401010100000105007f7e00",
+        "delta": [
+          {
+            "insert": "abXc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abXc",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00",
+          "00000241010104010601c40301580100000001010500"
+        ],
+        "state": "000200020241040400040242010607060084018600c4140d74626f6c64616263626f6c6458010402010401010100000105007f7e00",
+        "delta": [
+          {
+            "insert": "abXc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abXc"
+      }
+    },
+    {
+      "name": "insert after an undefined marker without attributes",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "X",
+            "attrs": {}
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X"
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00",
+          "000002410001080001840301580100000001010500"
+        ],
+        "state": "0002000202410203000602000706008400860084130d74626f6c64616263626f6c64580104030401010100000104007f7e00",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "X"
+          }
+        ],
+        "string": "abcX",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X"
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c6401040304010100000103007f7e00",
+          "000002410001080001840301580100000001010500"
+        ],
+        "state": "0002000202410203000602000706008400860084130d74626f6c64616263626f6c64580104030401010100000104007f7e00",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "X"
+          }
+        ],
+        "string": "abcX"
+      }
+    },
+    {
+      "name": "format undefined over plain text",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00"
+        ],
+        "state": "0002000202410504000646060202060504008401c6160f74616263646566626f6c64626f6c64410003024400010100000105007f7e00",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00"
+        ],
+        "state": "0002000202410504000646060202060504008401c6160f74616263646566626f6c64626f6c64410003024400010100000105007f7e00",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "format undefined over a run",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000c00050600840086140f74626f6c64616263646566626f6c640104060401010000010300787e00",
+          "0002000202410302020602040601c60b08626f6c64626f6c6444000000000102087f7800"
+        ],
+        "state": "000300030102410706000206044a0602040607060084028600c61f1774626f6c64616263646566626f6c64626f6c64626f6c640104010302440101010000010700787e7f7800",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000c00050600840086140f74626f6c64616263646566626f6c640104060401010000010300787e00",
+          "0002000202410302020602040601c60b08626f6c64626f6c6444000000000102087f7800"
+        ],
+        "state": "000300030102410706000206044a0602040607060084028600c61f1774626f6c64616263646566626f6c64626f6c64626f6c640104010302440101010000010700787e7f7800",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "format undefined twice",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00",
+          "0002000202410302000e020c4401c60b08626f6c64626f6c6444000000000102087f7e00"
+        ],
+        "state": "00030003010241090600064606460e04020604440504008401c61e1774616263646566626f6c64626f6c64626f6c64626f6c64410003024402010100000107007f7e7f7e00",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00",
+          "0002000202410302000e020c4401c60b08626f6c64626f6c6444000000000102087f7e00"
+        ],
+        "state": "00030003010241090600064606460e04020604440504008401c61e1774616263646566626f6c64626f6c64626f6c64626f6c64410003024402010100000107007f7e7f7e00",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "format a defined and an undefined attribute",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": true,
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 6,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0003000301024104030c4206020100054600c600861914626f6c646974616c6963626f6c646974616c696304060406000000010406787f7e7e00"
+        ],
+        "state": "0003000301024104030c42060201000704004600c60086221b74616263646566626f6c646974616c6963626f6c646974616c696301060406040601010000010500787f7e7e00",
+        "delta": [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true,
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 6,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0003000301024104030c4206020100054600c600861914626f6c646974616c6963626f6c646974616c696304060406000000010406787f7e7e00"
+        ],
+        "state": "0003000301024104030c42060201000704004600c60086221b74616263646566626f6c646974616c6963626f6c646974616c696301060406040601010000010500787f7e7e00",
+        "delta": [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true,
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "format next to an undefined marker of another key",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 3,
+            "length": 3,
+            "attrs": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 3,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "00020002024102020406010603c600860f0c6974616c69636974616c696346000000000102067f7e00",
+          "00020002024102010c020006034600c60b08626f6c64626f6c644400000000010208787e00"
+        ],
+        "state": "00030003010241060404000602030646060b04008400c60086004600c6231b746162636465666974616c69636974616c6963626f6c64626f6c6401430046004400010100000106007f7e787e00",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "00020002024102020406010603c600860f0c6974616c69636974616c696346000000000102067f7e00",
+          "00020002024102010c020006034600c60b08626f6c64626f6c644400000000010208787e00"
+        ],
+        "state": "00030003010241060404000602030646060b04008400c60086004600c6231b746162636465666974616c69636974616c6963626f6c64626f6c6401430046004400010100000106007f7e787e00",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "insert before an undefined marker of another key",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 3,
+            "length": 3,
+            "attrs": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "X",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "00020002024102020406010603c600860f0c6974616c69636974616c696346000000000102067f7e00",
+          "0002000202410503040c44030c004605c600c400c60d09626f6c6458626f6c64040104000000010308787e00"
+        ],
+        "state": "000300030102410906040006460c4404070000460d04008400c6008600c600c400c6251c746162636465666974616c69636974616c6963626f6c6458626f6c640143004600040104010100000107007f7e787e00",
+        "delta": [
+          {
+            "insert": "abc"
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abcXdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "00020002024102020406010603c600860f0c6974616c69636974616c696346000000000102067f7e00",
+          "0002000202410503040c44030c004605c600c400c60d09626f6c6458626f6c64040104000000010308787e00"
+        ],
+        "state": "000300030102410906040006460c4404070000460d04008400c6008600c600c400c6251c746162636465666974616c69636974616c6963626f6c6458626f6c640143004600040104010100000107007f7e787e00",
+        "delta": [
+          {
+            "insert": "abc"
+          },
+          {
+            "insert": "X",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "abcXdef"
+      }
+    },
+    {
+      "name": "format across an undefined marker",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "retain": 4,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302020402050001c60b08626f6c64626f6c6444000000000102067f7e00",
+          "00020002024101010a0100034600860b08626f6c64626f6c644400000000010208787e0101010601"
+        ],
+        "state": "00020002024107050204440500030500480904008401c101460086150f74616263646566626f6c64626f6c640142014400010100024100010700787e0101010601",
+        "delta": [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcdef",
+        "v1": "0107010004010174026162840101026364840103026566c10101010201c1010301040146010004626f6c64047472756586010504626f6c64046e756c6c0101010602"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "retain": 4,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302020402050001c60b08626f6c64626f6c6444000000000102067f7e00",
+          "00020002024101010a0100034600860b08626f6c64626f6c644400000000010208787e0101010601"
+        ],
+        "state": "00020002024107050204440500030500480904008401c101460086150f74616263646566626f6c64626f6c640142014400010100024100010700787e0101010601",
+        "delta": [
+          {
+            "insert": "abcdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "format null over an undefined marker",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": null
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00",
+          "0000000000000100000000000101010601"
+        ],
+        "state": "000002410504000646060202060504008401c10c0774616263646566410003020101000241000105000101010601",
+        "delta": [
+          {
+            "insert": "abcdef"
+          }
+        ],
+        "string": "abcdef",
+        "v1": "0105010004010174016184010003626364840103026566c10100010101c101030104010101010602"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00",
+          "0000000000000100000000000101010601"
+        ],
+        "state": "000002410504000646060202060504008401c10c0774616263646566410003020101000241000105000101010601",
+        "delta": [
+          {
+            "insert": "abcdef"
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "delete across undefined markers",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 2,
+            "length": 2,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 4
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "retain": 4,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "delete": 4
+            },
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302020402050001c60b08626f6c64626f6c6444000000000102067f7e00",
+          "00000000000001000000000001010201030101"
+        ],
+        "state": "00000241070600020402460402050007040081028400c106037461664101010100040102410101070001010201030101",
+        "delta": [
+          {
+            "insert": "af"
+          }
+        ],
+        "string": "af",
+        "v1": "010701000401017401618101000181010102810103018401040166c10101010201c1010301040101010201040602"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "retain": 4,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "delete": 4
+            },
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302020402050001c60b08626f6c64626f6c6444000000000102067f7e00",
+          "00000000000001000000000001010201030101"
+        ],
+        "state": "00000241070600020402460402050007040081028400c106037461664101010100040102410101070001010201030101",
+        "delta": [
+          {
+            "insert": "af"
+          }
+        ],
+        "string": "af"
+      }
+    },
+    {
+      "name": "delete a run formatted undefined",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab"
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "cd",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "op": "insert",
+            "index": 4,
+            "text": "ef"
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 2
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "ab"
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "ef"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "delete": 2
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410304030004020009040086008400860084160f746162626f6c646364626f6c646566010204020402010100000105007f7e00",
+          "0000000000000100000000000101010203"
+        ],
+        "state": "0000024101020208000504008100840905746162656601420001010001040103000101010203",
+        "delta": [
+          {
+            "insert": "abef"
+          }
+        ],
+        "string": "abef",
+        "v1": "0103010004010174026162810101048401050265660101010204"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "ab"
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "ef"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "delete": 2
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410304030004020009040086008400860084160f746162626f6c646364626f6c646566010204020402010100000105007f7e00",
+          "0000000000000100000000000101010203"
+        ],
+        "state": "0000024101020208000504008100840905746162656601420001010001040103000101010203",
+        "delta": [
+          {
+            "insert": "abef"
+          }
+        ],
+        "string": "abef"
+      }
+    },
+    {
+      "name": "delete between an undefined and a defined marker",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "cd",
+            "attrs": {
+              "bold": true
+            }
+          },
+          {
+            "op": "insert",
+            "index": 4,
+            "text": "ef"
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 2
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "ab",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "delete": 2
+            }
+          ]
+        ],
+        "updates": [
+          "0003000300024105040004000402060009060084008600c600c4191374626f6c646162626f6c64626f6c64636465660104024401010100000105007f7e7800",
+          "00000000000001000000000001010202000200"
+        ],
+        "state": "000300030002410806000300000402030601000d0600840081008600c600c100c4181174626f6c6461626f6c64626f6c646465660104014400030101000241000107007f7e7801010202000200",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "adef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "ab",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cdef",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "delete": 2
+            }
+          ]
+        ],
+        "updates": [
+          "0003000300024105040004000402060009060084008600c600c4191374626f6c646162626f6c64626f6c64636465660104024401010100000105007f7e7800",
+          "00000000000001000000000001010202000200"
+        ],
+        "state": "000300030002410806000300000402030601000d0600840081008600c600c100c4181174626f6c6461626f6c64626f6c646465660104014400030101000241000107007f7e7801010202000200",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "def",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "adef"
+      }
+    },
+    {
+      "name": "applyDelta with undefined attributes",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": "abc",
+                "attributes": {
+                  "bold": {
+                    "$undefined": true
+                  }
+                }
+              },
+              {
+                "insert": "d"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "retain": 1
+              },
+              {
+                "retain": 2,
+                "attributes": {
+                  "bold": {
+                    "$undefined": true
+                  },
+                  "italic": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "d"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410203000602000706008400860084130d74626f6c64616263626f6c64640104030401010100000104007f7e00",
+          "000300030102410704020a4408040400060001c61914626f6c646974616c6963626f6c646974616c6963040604060000000104067f787e7e00"
+        ],
+        "state": "000300030302410b0800020402460a44080404000600090600840186008400c62c2174626f6c64616263626f6c6464626f6c646974616c6963626f6c646974616c696301040102040104060406010100000109007f7e7f787e7e00",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "bc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": true
+            }
+          },
+          {
+            "insert": "d"
+          }
+        ],
+        "string": "abcd",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "d"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410203000602000706008400860084130d74626f6c64616263626f6c64640104030401010100000104007f7e00",
+          "000300030102410704020a4408040400060001c61914626f6c646974616c6963626f6c646974616c6963040604060000000104067f787e7e00"
+        ],
+        "state": "000300030302410b0800020402460a44080404000600090600840186008400c62c2174626f6c64616263626f6c6464626f6c646974616c6963626f6c646974616c696301040102040104060406010100000109007f7e7f787e7e00",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "bc",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": true
+            }
+          },
+          {
+            "insert": "d"
+          }
+        ],
+        "string": "abcd"
+      }
+    },
+    {
+      "name": "event deltas over several transactions",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 2,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 1
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "Z",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "delete": 1
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "insert": "Z"
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000402020401c60b08626f6c64626f6c6444000000000102067f7e00",
+          "00020002024101010a0100034600860b08626f6c64626f6c644400000000010208787e0101010601",
+          "0000000000000100000000000101010200",
+          "00020002024105030c08020302010005c600c400c60d09626f6c645a626f6c6404010400000001030a7e7800"
+        ],
+        "state": "000300030102410e0900030044040602080206020446020100130400840081008400c10146008600c600c400c61f17746162646566626f6c64626f6c64626f6c645a626f6c6441010344010104010100024101010b00787e7e7801010202000301",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "Z"
+          },
+          {
+            "insert": "bdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "aZbdef",
+        "v1": "010b010004010174016184010001628101010184010203646566c10100010101c1010201030146010004626f6c64047472756586010504626f6c64046e756c6cc60106010104626f6c64046e756c6cc4010a0101015ac6010b010104626f6c64047472756501010202010602"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "delete": 1
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "insert": "Z"
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000402020401c60b08626f6c64626f6c6444000000000102067f7e00",
+          "00020002024101010a0100034600860b08626f6c64626f6c644400000000010208787e0101010601",
+          "0000000000000100000000000101010200",
+          "00020002024105030c08020302010005c600c400c60d09626f6c645a626f6c6404010400000001030a7e7800"
+        ],
+        "state": "000300030102410e0900030044040602080206020446020100130400840081008400c10146008600c600c400c61f17746162646566626f6c64626f6c64626f6c645a626f6c6441010344010104010100024101010b00787e7e7801010202000301",
+        "delta": [
+          {
+            "insert": "a",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "Z"
+          },
+          {
+            "insert": "bdef",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "aZbdef"
+      }
+    },
+    {
+      "name": "undefined markers from a peer, then inserts",
+      "setup": [
+        "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00"
+      ],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 2,
+            "text": "X"
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 5,
+            "text": "Y",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "Z",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": "b",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "insert": "e",
+              "attributes": {
+                "italic": true
+              }
+            },
+            {
+              "insert": "f"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 5
+            },
+            {
+              "insert": "Y",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "insert": "Z",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 8,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00",
+          "0000030142000102011001c40301580100000001010000",
+          "0003000300080142000102014201040644020a040e01004605c601c400c61611626f6c646974616c6963596974616c696304060106000000010401787e7800",
+          "0002000206010201020102020a02020101054600c400c60d09626f6c645a626f6c640401040000000103057f7e00"
+        ],
+        "state": "00030003060e420b0142020102014202010201020f0002040248064406460444020a44020c0206440700420100464801001304008403c603c400c601c400c6004600c400c6483674616263646566626f6c64626f6c646974616c69636974616c696358626f6c646974616c6963596974616c6963626f6c645a626f6c644101024100440046000104060106040104010100000209007f7e787e0800787e787f7e00",
+        "delta": [
+          {
+            "insert": "Z",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bX",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "cd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": true
+            }
+          },
+          {
+            "insert": "Y",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "e",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "f"
+          }
+        ],
+        "string": "ZabXcdYef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": "b",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "insert": "e",
+              "attributes": {
+                "italic": true
+              }
+            },
+            {
+              "insert": "f"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 5
+            },
+            {
+              "insert": "Y",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "insert": "Z",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 8,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00",
+          "0000030142000102011001c40301580100000001010000",
+          "0003000300080142000102014201040644020a040e01004605c601c400c61611626f6c646974616c6963596974616c696304060106000000010401787e7800",
+          "0002000206010201020102020a02020101054600c400c60d09626f6c645a626f6c640401040000000103057f7e00"
+        ],
+        "state": "00030003060e420b0142020102014202010201020f0002040248064406460444020a44020c0206440700420100464801001304008403c603c400c601c400c6004600c400c6483674616263646566626f6c64626f6c646974616c69636974616c696358626f6c646974616c6963596974616c6963626f6c645a626f6c644101024100440046000104060106040104010100000209007f7e787e0800787e787f7e00",
+        "delta": [
+          {
+            "insert": "Z",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bX",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "cd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": true
+            }
+          },
+          {
+            "insert": "Y",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "e",
+            "attributes": {
+              "italic": true
+            }
+          },
+          {
+            "insert": "f"
+          }
+        ],
+        "string": "ZabXcdYef"
+      }
+    },
+    {
+      "name": "undefined markers from a peer, then a format",
+      "setup": [
+        "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00"
+      ],
+      "txns": [
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": true,
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": "b",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "insert": "e",
+              "attributes": {
+                "italic": true
+              }
+            },
+            {
+              "insert": "f"
+            }
+          ],
+          [
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00",
+          "00030003010601020142000103000a46020100054600c600861914626f6c646974616c6963626f6c646974616c696304060406000000010400787f7e7e0102010601"
+        ],
+        "state": "000300030308420b0102014200010b0002040248064406480a4606020644064a000d04008403c101c6014600c600863327746162636465666974616c69636974616c6963626f6c646974616c6963626f6c646974616c69634101024100460004060406010100024100020900787e0400787f7e7e0102010601",
+        "delta": [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true,
+              "italic": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "cde",
+            "attributes": {
+              "bold": true,
+              "italic": true
+            }
+          },
+          {
+            "insert": "f",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": "b",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "insert": "e",
+              "attributes": {
+                "italic": true
+              }
+            },
+            {
+              "insert": "f"
+            }
+          ],
+          [
+            {
+              "retain": 1,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 3,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true,
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00",
+          "00030003010601020142000103000a46020100054600c600861914626f6c646974616c6963626f6c646974616c696304060406000000010400787f7e7e0102010601"
+        ],
+        "state": "000300030308420b0102014200010b0002040248064406480a4606020644064a000d04008403c101c6014600c600863327746162636465666974616c69636974616c6963626f6c646974616c6963626f6c646974616c69634101024100460004060406010100024100020900787e0400787f7e7e0102010601",
+        "delta": [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true,
+              "italic": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "cde",
+            "attributes": {
+              "bold": true,
+              "italic": true
+            }
+          },
+          {
+            "insert": "f",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "undefined markers from a peer, then deletes",
+      "setup": [
+        "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00"
+      ],
+      "txns": [
+        [
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 2
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 0,
+            "length": 1
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": "b",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "insert": "e",
+              "attributes": {
+                "italic": true
+              }
+            },
+            {
+              "insert": "f"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "delete": 2
+            }
+          ],
+          [
+            {
+              "delete": 1
+            }
+          ]
+        ],
+        "updates": [
+          "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00",
+          "00000000000001000000000001020202010300",
+          "0000000000000100000000000102010000"
+        ],
+        "state": "000300030002420b08000204024806440604020644060d0100840081008401c600c100c61a1474626566626f6c646974616c69636974616c69634102044600010100030102010109007f787e010203000001010300",
+        "delta": [
+          {
+            "insert": "b",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "e",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": true
+            }
+          },
+          {
+            "insert": "f",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "bef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": "b",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "cd",
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                },
+                "italic": true
+              }
+            },
+            {
+              "insert": "e",
+              "attributes": {
+                "italic": true
+              }
+            },
+            {
+              "insert": "f"
+            }
+          ],
+          [
+            {
+              "retain": 2
+            },
+            {
+              "delete": 2
+            }
+          ],
+          [
+            {
+              "delete": 1
+            }
+          ]
+        ],
+        "updates": [
+          "000300030102420b08000204024806440604020644060504008403c6251b74616263646566626f6c64626f6c646974616c69636974616c6963410102410044004600010100000109007f7e787e00",
+          "00000000000001000000000001020202010300",
+          "0000000000000100000000000102010000"
+        ],
+        "state": "000300030002420b08000204024806440604020644060d0100840081008401c600c100c61a1474626566626f6c646974616c69636974616c69634102044600010100030102010109007f787e010203000001010300",
+        "delta": [
+          {
+            "insert": "b",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "e",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": true
+            }
+          },
+          {
+            "insert": "f",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "string": "bef"
+      }
+    },
+    {
+      "name": "an embed with an undefined attribute",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "ab"
+          },
+          {
+            "op": "embed",
+            "index": 1,
+            "embed": {
+              "img": "x"
+            },
+            "attrs": {
+              "link": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": {
+                "img": "x"
+              },
+              "attributes": {
+                "link": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "b"
+            }
+          ]
+        ],
+        "updates": [
+          "000200020241060401000402030201000904008400c600c500c6100b7461626c696e6b6c696e6b41014400010100000105007f760103696d677701787e00"
+        ],
+        "state": "000200020241060401000402030201000904008400c600c500c6100b7461626c696e6b6c696e6b41014400010100000105007f760103696d677701787e00",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": {
+              "img": "x"
+            },
+            "attributes": {
+              "link": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "b"
+          }
+        ],
+        "string": "ab",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "a"
+            },
+            {
+              "insert": {
+                "img": "x"
+              },
+              "attributes": {
+                "link": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "b"
+            }
+          ]
+        ],
+        "updates": [
+          "000200020241060401000402030201000904008400c600c500c6100b7461626c696e6b6c696e6b41014400010100000105007f760103696d677701787e00"
+        ],
+        "state": "000200020241060401000402030201000904008400c600c500c6100b7461626c696e6b6c696e6b41014400010100000105007f760103696d677701787e00",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": {
+              "img": "x"
+            },
+            "attributes": {
+              "link": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "b"
+          }
+        ],
+        "string": "ab"
+      }
+    },
+    {
+      "name": "an undefined embed from a peer",
+      "setup": [
+        "00000242000102000304008506037461620102010100000102007f00"
+      ],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 3,
+            "text": "c",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          {
+            "$throws": true
+          },
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "c",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000242000102000304008506037461620102010100000102007f00",
+          "00020002040102410003044402000586008400860d09626f6c6463626f6c64040104000000010300787e00"
+        ],
+        "state": "000200020642000102410004030044020009040085008600840086120c746162626f6c6463626f6c640102040104010100000202007f0300787e00",
+        "delta": [
+          {
+            "insert": "ab"
+          },
+          {
+            "insert": {
+              "$undefined": true
+            }
+          },
+          {
+            "insert": "c",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abc",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          {
+            "$throws": true
+          },
+          [
+            {
+              "retain": 3
+            },
+            {
+              "insert": "c",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000242000102000304008506037461620102010100000102007f00",
+          "00020002040102410003044402000586008400860d09626f6c6463626f6c64040104000000010300787e00"
+        ],
+        "state": "000200020642000102410004030044020009040085008600840086120c746162626f6c6463626f6c640102040104010100000202007f0300787e00",
+        "delta": [
+          {
+            "insert": "ab"
+          },
+          {
+            "insert": {
+              "$undefined": true
+            }
+          },
+          {
+            "insert": "c",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abc"
+      }
+    },
+    {
+      "name": "undo and redo a format with undefined",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "undo",
+        "redo"
+      ],
+      "undo": true,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00",
+          "0000000000000100000000000101010601",
+          "00020002024103020006020c0201c60b08626f6c64626f6c6444000000000102087f7e00"
+        ],
+        "state": "00030003010241090600064606460604020604020504008401c61e1774616263646566626f6c64626f6c64626f6c64626f6c64410003024402010100000107007f7e7f7e0101010601",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        "string": "abcdef",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abcdef"
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": null
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "retain": 5,
+              "attributes": {
+                "bold": {
+                  "$undefined": true
+                }
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "00000101000001040a077461626364656601060101000001010000",
+          "0002000202410302000602020601c60b08626f6c64626f6c6444000000000102067f7e00",
+          "0000000000000100000000000101010601",
+          "00020002024103020006020c0201c60b08626f6c64626f6c6444000000000102087f7e00"
+        ],
+        "state": "000200020241090600064606460604020604020704008401c101c6160f74616263646566626f6c64626f6c644100030244000101000241000107007f7e0101010601",
+        "delta": [
+          {
+            "insert": "a"
+          },
+          {
+            "insert": "bcd",
+            "attributes": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "ef"
+          }
+        ],
+        "string": "abcdef"
+      }
+    },
+    {
+      "name": "undo an insert with undefined",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc",
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "X",
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              },
+              "italic": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        "undo"
+      ],
+      "undo": true,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "delete": 1
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true,
+                "italic": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c640104030401010000010300787e00",
+          "000300030102410904020803010304010205c601c400c61b15626f6c646974616c696358626f6c646974616c696304060104060000000105057e7f787e00",
+          "0000000000000100000000000101010504"
+        ],
+        "state": "000300030302410c0700020444080301030401020b060084018600c601c400c62c2174626f6c64616263626f6c64626f6c646974616c696358626f6c646974616c69630104010244000601040601010000010900787e7e7f787e0101010504",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abc",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abc",
+              "attributes": {
+                "bold": true
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "insert": "X",
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "italic": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "delete": 1
+            },
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true,
+                "italic": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000600050600840086110c74626f6c64616263626f6c640104030401010000010300787e00",
+          "000300030102410904020803010304010205c601c400c61b15626f6c646974616c696358626f6c646974616c696304060104060000000105057e7f787e00",
+          "0000000000000100000000000101010504"
+        ],
+        "state": "000200020241040400020444010407060084018600c1120c74626f6c64616263626f6c6401040102040101000105010500787e0101010504",
+        "delta": [
+          {
+            "insert": "abc",
+            "attributes": {
+              "bold": true
+            }
+          }
+        ],
+        "string": "abc"
+      }
+    },
+    {
+      "name": "ychange set to undefined",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "x",
+            "attrs": {
+              "ychange": {
+                "$undefined": true
+              }
+            }
+          }
+        ],
+        [
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "y"
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "x",
+              "attributes": {
+                "ychange": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "insert": "y"
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000200050600840086151074796368616e676578796368616e676501070107010100000103007f7e00",
+          "000002410001040001840301790100000001010300"
+        ],
+        "state": "0002000202410203000300000706008400860084171174796368616e676578796368616e6765790107010701010100000104007f7e00",
+        "delta": [
+          {
+            "insert": "x",
+            "attributes": {
+              "ychange": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "y"
+          }
+        ],
+        "string": "xy",
+        "v1": null
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "x",
+              "attributes": {
+                "ychange": {
+                  "$undefined": true
+                }
+              }
+            }
+          ],
+          [
+            {
+              "retain": 1
+            },
+            {
+              "insert": "y"
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410102000200050600840086151074796368616e676578796368616e676501070107010100000103007f7e00",
+          "000002410001040001840301790100000001010300"
+        ],
+        "state": "0002000202410203000300000706008400860084171174796368616e676578796368616e6765790107010701010100000104007f7e00",
+        "delta": [
+          {
+            "insert": "x",
+            "attributes": {
+              "ychange": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "insert": "y"
+          }
+        ],
+        "string": "xy"
+      }
+    },
+    {
+      "name": "applyDelta delete then insert with undefined",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "x",
+            "attrs": {
+              "b": {
+                "$undefined": true
+              }
+            }
+          },
+          {
+            "op": "insert",
+            "index": 1,
+            "text": "y",
+            "attrs": {}
+          }
+        ],
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "delete": 1
+              },
+              {
+                "insert": "z",
+                "attributes": {
+                  "b": {
+                    "$undefined": true
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "x",
+              "attributes": {
+                "b": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "y"
+            }
+          ],
+          [
+            {
+              "delete": 1
+            },
+            {
+              "insert": "z"
+            },
+            {
+              "retain": 1,
+              "attributes": {
+                "b": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410203000300000706008400860084080574627862794103010100000104007f7e00",
+          "00000241010104010601c403017a010000000101040101010002"
+        ],
+        "state": "000002410202040001060501008400c4060374797a410101010001030103000101010002",
+        "delta": [
+          {
+            "insert": "zy"
+          }
+        ],
+        "string": "zy",
+        "v1": "0103010001010174038401020179c401020103017a0101010003"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "x",
+              "attributes": {
+                "b": {
+                  "$undefined": true
+                }
+              }
+            },
+            {
+              "insert": "y"
+            }
+          ],
+          [
+            {
+              "delete": 1
+            },
+            {
+              "insert": "z"
+            },
+            {
+              "retain": 1,
+              "attributes": {
+                "b": null
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "0002000202410203000300000706008400860084080574627862794103010100000104007f7e00",
+          "00000241010104010601c403017a010000000101040101010002"
+        ],
+        "state": "000002410202040001060501008400c4060374797a410101010001030103000101010002",
+        "delta": [
+          {
+            "insert": "zy"
+          }
+        ],
+        "string": "zy"
+      }
+    },
+    {
+      "name": "applyDelta insert of undefined is a retain",
+      "setup": [],
+      "txns": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc"
+          }
+        ],
+        [
+          {
+            "op": "delta",
+            "delta": [
+              {
+                "insert": {
+                  "$undefined": true
+                },
+                "retain": 2,
+                "attributes": {
+                  "bold": true
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "undo": false,
+      "writer": {
+        "events": [
+          [
+            {
+              "insert": "abc"
+            }
+          ],
+          [
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "000001010000010407047461626301030101000001010000",
+          "000200020241020102020004034600c60b08626f6c64626f6c644400000000010203787e00"
+        ],
+        "state": "0002000202410302020002000407040084004600c6120c74616263626f6c64626f6c64010201440001010000010400787e00",
+        "delta": [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "c"
+          }
+        ],
+        "string": "abc",
+        "v1": "0104010004010174026162840101016346010004626f6c640474727565c60101010204626f6c64046e756c6c00"
+      },
+      "receiver": {
+        "events": [
+          [
+            {
+              "insert": "abc"
+            }
+          ],
+          [
+            {
+              "retain": 2,
+              "attributes": {
+                "bold": true
+              }
+            }
+          ]
+        ],
+        "updates": [
+          "000001010000010407047461626301030101000001010000",
+          "000200020241020102020004034600c60b08626f6c64626f6c644400000000010203787e00"
+        ],
+        "state": "0002000202410302020002000407040084004600c6120c74616263626f6c64626f6c64010201440001010000010400787e00",
+        "delta": [
+          {
+            "insert": "ab",
+            "attributes": {
+              "bold": true
+            }
+          },
+          {
+            "insert": "c"
+          }
+        ],
+        "string": "abc"
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "name": "a snapshot holding an undefined marker",
+      "before": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abcdef"
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 1,
+            "length": 3,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "after": [
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 6,
+            "attrs": {
+              "bold": true
+            }
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 2,
+            "length": 2
+          }
+        ]
+      ],
+      "state": "0002000202410504000646060202060504008401c6160f74616263646566626f6c64626f6c64410003024400010100000105007f7e00",
+      "delta": [
+        {
+          "insert": "a"
+        },
+        {
+          "insert": "bcd",
+          "attributes": {
+            "bold": {
+              "$undefined": true
+            }
+          }
+        },
+        {
+          "insert": "ef"
+        }
+      ]
+    }
+  ]
+}
