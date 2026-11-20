@@ -369,6 +369,12 @@
 - **Resolved by (v1.44.0):** a format attribute or an embed whose value is undefined itself is `block.Undefined{}`, kept by the V2 decoder and by the text API, written as tag 127 in V2, and given yjs's meaning at each place the formatting code reads a value: most reads coalesce it to null (`orNull`), `insertText` turns a requested undefined for a key in effect into null, `formatText`'s walk and the event delta's retained branch treat a requested undefined as not requested, `insertNegatedAttributes` steps over a marker whose value is undefined whatever its key, the gap cleanup compares it raw, the attributes in effect keep the key, and `ToDelta` keeps an undefined `ychange`. `InsertEmbed(Undefined{})` returns `ErrUndefinedEmbed` (yjs throws), `ApplyDelta` skips an undefined insert, `RestoreSnapshot` goes through V2 as yjs does. Fixtures: `testdata/format-undefined-fixtures.json`.
 - **Remaining:** (1) V1 cannot carry such a value: yjs throws writing the document in V1, ygo writes null, so a V1 consumer reads null there, including the Go client's local log, which is V1. (2) yjs's event delta getter throws on an inserted undefined embed (`insert.length`); ygo's event carries `{Embed: Undefined{}}`. (3) `json.Marshal` of a delta writes null for `Undefined{}` (its `MarshalJSON`), and gomobile's JSON drops an undefined attribute and an undefined embed's insert, as `JSON.stringify` does. (4) ygo's XML attributes hold strings only, where yjs accepts any value.
 
+### V2 updates with more structs than bytes
+
+- **Where:** `DecodeUpdateV2` (`internal/encoding/update_v2.go`), the client and struct counts checked against the input length (`checkDecodeCount`).
+- **What:** V2 stores most fields in run-length columns, so a valid update can hold more structs than bytes: yjs writes 500 empty nested arrays in 32 bytes, and runs of deleted items compress the same way. ygo refuses such an update (`lib0: truncated input`); yjs reads it. The bound is there because a wire-supplied count drove an unbounded allocation; it holds for V1, where every struct takes at least its info byte, and not for V2. A snapshot, whose bytes ygo writes itself, is decoded without it (`DecodeOwnUpdateV2`). Probe: `docs eb-1/ygo/repro/b6-format-undefined/probe_v2count.mjs`. Found by the Б6 code review.
+- **When to address:** next (Б15), with a bound that a decompression bomb cannot pass and a real document does not hit.
+
 ### Duplicate format markers from concurrent formatting
 
 - **Where:** `internal/types/event.go` (text delta), `internal/types/text_cleanup.go`.

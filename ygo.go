@@ -408,7 +408,10 @@ func EqualSnapshots(a, b Snapshot) bool { return encoding.EqualSnapshots(a, b) }
 
 // RestoreSnapshot reconstructs the document state that d had at the
 // moment snap was taken, returning it as a new Doc. Byte-equivalent to
-// yjs `Y.createDocFromSnapshot`.
+// yjs `Y.createDocFromSnapshot(doc, snap, new Y.Doc({gc: false}))`: the
+// restore goes through V2, as yjs does, and the returned Doc keeps the
+// deleted content the snapshot holds (the default Y.Doc of
+// createDocFromSnapshot collects it).
 //
 // d must have been created with GC disabled (ygo.NewDocWithOptions with
 // DisableGC: true); otherwise deleted content the snapshot references
@@ -423,15 +426,19 @@ func RestoreSnapshot(d *Doc, snap Snapshot) (*Doc, error) {
 	}
 	txn := d.WriteTxn()
 	encoding.SplitAtSnapshotBoundaries(txn.Store(), snap)
-	updateV2 := encoding.EncodeSnapshotAsUpdateV2(txn.Store(), snap)
+	// V2, as yjs createDocFromSnapshot writes it.
+	upd, err := encoding.DecodeOwnUpdateV2(encoding.EncodeSnapshotAsUpdateV2(txn.Store(), snap))
 	var updateV1 []byte
-	if _, err := encoding.DecodeUpdateV2(updateV2); err != nil {
+	if errors.Is(err, lib0.ErrInvalidUTF8) {
 		// d holds strings that a release before v1.26 stored with invalid
 		// UTF-8, which the V2 decoder refuses: rebuild from V1, read as
 		// stored (V1 cannot carry an undefined format value or embed).
-		updateV1 = encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap)
+		updateV1, err = encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap), nil
 	}
 	txn.Commit()
+	if err != nil {
+		return nil, err
+	}
 
 	nd := NewDocWithOptions(Options{DisableGC: true})
 	if updateV1 != nil {
@@ -440,8 +447,11 @@ func RestoreSnapshot(d *Doc, snap Snapshot) (*Doc, error) {
 		}
 		return nd, nil
 	}
-	// V2, as yjs createDocFromSnapshot writes it.
-	if err := encoding.ApplyUpdateV2(nd, updateV2); err != nil {
+	w := nd.WriteTxn()
+	w.Local = false
+	err = upd.Apply(w)
+	w.Commit()
+	if err != nil {
 		return nil, err
 	}
 	return nd, nil

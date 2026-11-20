@@ -105,8 +105,15 @@ const undefinedEmbed = peerUpdate((t, p) => {
 const eventDelta = (e) => {
   try {
     return mark(e.delta);
-  } catch {
-    return { $throws: true };
+  } catch (err) {
+    if (!(err instanceof TypeError) || !String(err.message).includes("length")) throw err;
+    // What ygo emits instead: the text's delta at the event, which is the
+    // event's delta when the text was empty before it (the only case here,
+    // checked: an undefined embed from a peer into an empty document).
+    for (let n = e.target._start; n !== null; n = n.right) {
+      if (!n.deleted && !e.adds(n)) throw err; // the text was not empty before
+    }
+    return { $throws: true, expect: mark(e.target.toDelta()) };
   }
 };
 
@@ -210,10 +217,13 @@ function snapshotScenario(name, before, after) {
   for (const txn of before) Y.transact(w, () => { for (const op of txn) run(t, op); });
   const snap = Y.snapshot(w);
   for (const txn of after) Y.transact(w, () => { for (const op of txn) run(t, op); });
-  const r = Y.createDocFromSnapshot(w, snap);
+  // Into a document with GC off, as ygo's RestoreSnapshot returns one (the
+  // default Y.Doc would collect deleted content the snapshot holds).
+  const r = Y.createDocFromSnapshot(w, snap, new Y.Doc({ gc: false }));
   snapshots.push({ name, before, after, state: toHex(Y.encodeStateAsUpdateV2(r)), delta: mark(r.getText("t").toDelta()) });
 }
 snapshotScenario("a snapshot holding an undefined marker", [[ins(0, "abcdef")], [fmt(1, 3, { bold: U })]], [[fmt(0, 6, B)], [del(2, 2)]]);
+snapshotScenario("a snapshot after a delete", [[ins(0, "abc")], [del(1, 1)], [fmt(0, 2, { bold: U })]], [[ins(0, "Z")]]);
 
 // The fixtures depend on V8's two-element sort nowhere, but on JSON keeping
 // key order and on Object.keys listing keys whose value is undefined.

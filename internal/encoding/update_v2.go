@@ -2,6 +2,7 @@ package encoding
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/Deln0r/ygo/internal/block"
@@ -270,12 +271,24 @@ func writeDeleteSetV2(enc *EncoderV2, ds *IdSet) {
 // pulls per-field bytes from the column decoders.
 func DecodeUpdateV2(buf []byte) (*Update, error) {
 	// Block/client data is pulled from the V2 column streams, which are
-	// all slices of buf, so the total input length is a valid upper
-	// bound on any element count (each element consumes >= 1 byte from
-	// some column). Without it, a wire-supplied count drove an
+	// all slices of buf. Without a bound, a wire-supplied count drove an
 	// unbounded make()/decode loop on drained columns — a fuzzer
-	// OOM-killed the process from a 69-byte input.
-	total := len(buf)
+	// OOM-killed the process from a 69-byte input. The input length is
+	// the bound used, though run-length columns let a valid update hold
+	// more structs than bytes (docs/tech-debt.md "V2 updates with more
+	// structs than bytes"); bytes ygo wrote itself are decoded without it
+	// (DecodeOwnUpdateV2).
+	return decodeUpdateV2(buf, len(buf))
+}
+
+// DecodeOwnUpdateV2 is DecodeUpdateV2 for bytes ygo itself just encoded
+// (a snapshot restored through V2), whose counts are exact: no bound on
+// the number of clients or structs.
+func DecodeOwnUpdateV2(buf []byte) (*Update, error) {
+	return decodeUpdateV2(buf, math.MaxInt)
+}
+
+func decodeUpdateV2(buf []byte, total int) (*Update, error) {
 
 	dec, err := NewDecoderV2(buf)
 	if err != nil {
@@ -308,7 +321,7 @@ func DecodeUpdateV2(buf []byte) (*Update, error) {
 			return nil, fmt.Errorf("DecodeUpdateV2 clock start: %w", err)
 		}
 
-		blocks := make([]Block, 0, blockCount)
+		blocks := make([]Block, 0, min(blockCount, uint64(len(buf))))
 		for j := uint64(0); j < blockCount; j++ {
 			b, err := decodeBlockV2(dec, block.ID{Client: client, Clock: clock})
 			if err != nil {

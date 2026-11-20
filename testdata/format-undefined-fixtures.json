@@ -3290,7 +3290,17 @@
       "writer": {
         "events": [
           {
-            "$throws": true
+            "$throws": true,
+            "expect": [
+              {
+                "insert": "ab"
+              },
+              {
+                "insert": {
+                  "$undefined": true
+                }
+              }
+            ]
           },
           [
             {
@@ -3331,7 +3341,17 @@
       "receiver": {
         "events": [
           {
-            "$throws": true
+            "$throws": true,
+            "expect": [
+              {
+                "insert": "ab"
+              },
+              {
+                "insert": {
+                  "$undefined": true
+                }
+              }
+            ]
           },
           [
             {
@@ -4093,6 +4113,57 @@
         },
         {
           "insert": "ef"
+        }
+      ]
+    },
+    {
+      "name": "a snapshot after a delete",
+      "before": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "abc"
+          }
+        ],
+        [
+          {
+            "op": "delete",
+            "index": 1,
+            "length": 1
+          }
+        ],
+        [
+          {
+            "op": "format",
+            "index": 0,
+            "length": 2,
+            "attrs": {
+              "bold": {
+                "$undefined": true
+              }
+            }
+          }
+        ]
+      ],
+      "after": [
+        [
+          {
+            "op": "insert",
+            "index": 0,
+            "text": "Z"
+          }
+        ]
+      ],
+      "state": "000200020241030300030001000704008401460086110c74616263626f6c64626f6c6441024400010100000105007f7e0101010100",
+      "delta": [
+        {
+          "insert": "ac",
+          "attributes": {
+            "bold": {
+              "$undefined": true
+            }
+          }
         }
       ]
     }

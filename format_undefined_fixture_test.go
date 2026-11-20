@@ -178,10 +178,13 @@ func compareFormatUndefinedSide(t *testing.T, d *ygo.Doc, txt *ygo.Text, want fo
 		t.Errorf("%d text events, want %d", len(events), len(want.Events))
 	} else {
 		for i := range events {
-			if m, ok := want.Events[i].(map[string]any); ok && m["$throws"] == true {
-				continue // yjs's delta getter throws on an undefined embed
+			w := want.Events[i]
+			if m, ok := w.(map[string]any); ok && m["$throws"] == true {
+				// yjs's delta getter throws on an undefined embed; ygo emits
+				// the delta, which the generator records as expect.
+				w = m["expect"]
 			}
-			if g, w := normalize(t, events[i]), normalize(t, want.Events[i]); !reflect.DeepEqual(g, w) {
+			if g, w := normalize(t, events[i]), normalize(t, w); !reflect.DeepEqual(g, w) {
 				gj, _ := json.Marshal(g)
 				wj, _ := json.Marshal(w)
 				t.Errorf("event %d delta:\n got %s\nwant %s", i, gj, wj)
