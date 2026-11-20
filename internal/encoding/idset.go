@@ -38,6 +38,13 @@ type IdSet struct {
 // each, in O(n log n): the client's ranges and the new ones sorted by
 // start, overlapping and adjacent ranges merged.
 func (s *IdSet) insertAll(client uint64, ranges []Range) {
+	nonEmpty := false
+	for _, r := range ranges {
+		nonEmpty = nonEmpty || r.Length > 0
+	}
+	if !nonEmpty {
+		return // as Insert of empty ranges: the client's ranges stay as they are
+	}
 	existing, known := s.clients[client]
 	all := make([]Range, 0, len(existing)+len(ranges))
 	all = append(all, existing...)
@@ -65,6 +72,21 @@ func (s *IdSet) insertAll(client uint64, ranges []Range) {
 		merged = append(merged, r)
 	}
 	s.clients[client] = merged
+}
+
+// insertRanges adds ranges for client: one by one when they are few, where
+// Insert's binary search beats a sort of the client's ranges, and in one
+// sort otherwise (insertAll). A V1 delete set keeps a client's first entry
+// as written, so a peer's descending ranges, inserted one by one, made
+// folding them into the queue quadratic.
+func (s *IdSet) insertRanges(client uint64, ranges []Range) {
+	if len(ranges) <= 16 {
+		for _, r := range ranges {
+			s.Insert(client, r.Start, r.Length)
+		}
+		return
+	}
+	s.insertAll(client, ranges)
 }
 
 // NewIdSet returns an empty IdSet.
@@ -249,7 +271,7 @@ func DecodeIdSet(buf []byte) (*IdSet, []byte, error) {
 				return nil, buf, err
 			}
 			buf = buf[n:]
-			if err := checkClockRange(start, length); err != nil {
+			if err := checkDeleteRange(start, length); err != nil {
 				return nil, buf, err
 			}
 			ranges[j] = Range{Start: start, Length: length}

@@ -56,7 +56,11 @@ func TestDecodeUpdate_RejectsUnrepresentableClockRange(t *testing.T) {
 		{"GC block", gcBlockUpdate(99, 0, ^uint64(0))},
 		{"GC block at the boundary", gcBlockUpdate(99, 1, maxSafe)},
 		{"delete range", deleteSetUpdate(99, 0, ^uint64(0))},
-		{"delete range at the boundary", deleteSetUpdate(99, 1, maxSafe)},
+		// A delete range's end is no state-vector clock, so it may reach
+		// 2^53 (below); one past that, yjs reads with its sum rounded
+		// (it writes (2, MAX_SAFE) back as (2, MAX_SAFE-1)), so ygo
+		// refuses it rather than store a range yjs does not hold.
+		{"delete range past the boundary", deleteSetUpdate(99, 2, maxSafe)},
 	} {
 		t.Run("rejects "+tc.name, func(t *testing.T) {
 			if err := ygo.ValidateUpdate(tc.raw); err == nil {
@@ -76,6 +80,10 @@ func TestDecodeUpdate_RejectsUnrepresentableClockRange(t *testing.T) {
 	}{
 		{"GC block", gcBlockUpdate(99, 0, 1<<40)},
 		{"delete range", deleteSetUpdate(99, 0, 1<<40)},
+		// The last clock, MAX_SAFE_INTEGER, may be deleted: yjs reads both
+		// and writes them back unchanged.
+		{"delete range ending at 2^53", deleteSetUpdate(99, 1, maxSafe)},
+		{"delete range of the last clock", deleteSetUpdate(99, maxSafe, 1)},
 	} {
 		t.Run("still accepts a representable "+tc.name, func(t *testing.T) {
 			if err := ygo.ValidateUpdate(tc.raw); err != nil {

@@ -637,8 +637,9 @@ var ErrUndefinedEmbed = types.ErrUndefinedEmbed
 // than treating this as a free filter on unbounded bytes.
 //
 // V1 only. The V2 decoder does not report a trailing remainder, so there is
-// no equivalent strict check for V2 bytes; passing V2 bytes here is reported
-// as such rather than misdiagnosed.
+// no equivalent strict check for V2 bytes. V2 bytes that decode within their
+// own length are reported as V2; a V2 update holding more structs than bytes
+// is not expanded to tell, and is reported as trailing bytes.
 func ValidateUpdate(raw []byte) error {
 	upd, rest, err := encoding.DecodeUpdate(raw)
 	if err != nil {
@@ -760,6 +761,15 @@ func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 	}
 	// GC off: a merge carries deleted content, as yjs mergeUpdates does;
 	// whoever applies the result collects it, or keeps it with GC off.
+	// Each input is decoded within its own budget (DecodeUpdateV2), one at
+	// a time; what the merge holds is bounded as one update of all the
+	// inputs' bytes would be: max(their length, V2StructFloor) structs.
+	// Structs an input repeats are not held twice.
+	total := 0
+	for _, raw := range updates {
+		total += len(raw)
+	}
+	held := max(total, encoding.V2StructFloor)
 	d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
 	wtxn := d.WriteTxn()
 	for _, raw := range updates {
@@ -772,9 +782,22 @@ func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 			wtxn.Commit()
 			return nil, err
 		}
+		if encoding.TxnStructBound(wtxn) > held {
+			wtxn.Commit()
+			return nil, fmt.Errorf("ygo: MergeUpdatesV2: the inputs hold more than %d structs: %w", held, ErrUpdateTooDense)
+		}
 	}
 	wtxn.Commit()
-	return encoding.EncodeStateAsUpdateV2WithPending(d), nil
+	out := encoding.EncodeStateAsUpdateV2WithPending(d)
+	// The merge must be an update ApplyUpdateV2 takes: merged runs of
+	// byteless structs compress, so the output can hold more structs than
+	// max(its own length, V2StructFloor) though every input did not.
+	if encoding.StateStructBound(d) > max(len(out), encoding.V2StructFloor) {
+		if _, err := encoding.DecodeUpdateV2(out); err != nil {
+			return nil, fmt.Errorf("ygo: MergeUpdatesV2: the merged update: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // EncodeStateVectorFromUpdate computes the state vector a V1 update

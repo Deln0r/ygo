@@ -8,6 +8,7 @@ import (
 
 	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/lib0"
 	"github.com/Deln0r/ygo/internal/store"
 )
 
@@ -272,6 +273,29 @@ func writeDeleteSetV2(enc *EncoderV2, ds *IdSet) {
 // pulls per-field bytes from the column decoders.
 func DecodeUpdateV2(buf []byte) (*Update, error) {
 	return decodeUpdateV2(buf, len(buf), max(len(buf), V2StructFloor))
+}
+
+// StateStructBound is an upper bound on the structs
+// EncodeStateAsUpdateV2WithPending writes for d: a struct per cell of the
+// store, and per queued block one for it and one for a Skip before it.
+func StateStructBound(d *doc.Doc) int {
+	txn := d.ReadTxn()
+	defer txn.Close()
+	return storeStructBound(txn.Store(), GetPending(txn))
+}
+
+// TxnStructBound is StateStructBound inside a write transaction.
+func TxnStructBound(txn *doc.TransactionMut) int {
+	p, _ := txn.PendingState().(*Pending)
+	return storeStructBound(txn.Store(), p)
+}
+
+func storeStructBound(bs *store.BlockStore, p *Pending) int {
+	n := 0
+	for client := range bs.GetStateVector() {
+		n += bs.GetClient(client).Len()
+	}
+	return n + 2*p.BlockCount()
 }
 
 // LooksLikeUpdateV2 reports whether buf decodes as a V2 update holding no
@@ -598,7 +622,7 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 clock diff: %w", err)
 			}
-			if err := checkClockRange(dsCurr, clockDiff); err != nil {
+			if err := checkDeleteRange(dsCurr, clockDiff); err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 clock diff: %w", err)
 			}
 			dsCurr += clockDiff
@@ -607,11 +631,11 @@ func readDeleteSetV2(dec *DecoderV2) (*IdSet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 len: %w", err)
 			}
-			if lenMinus1 >= MaxClock {
-				return nil, fmt.Errorf("readDeleteSetV2 len: %w", checkClockRange(start, lenMinus1))
+			if lenMinus1 > MaxClock {
+				return nil, fmt.Errorf("readDeleteSetV2 len: %w: length %d+1 exceeds the %d-clock space", lib0.ErrTruncated, lenMinus1, MaxClock)
 			}
 			l := lenMinus1 + 1
-			if err := checkClockRange(start, l); err != nil {
+			if err := checkDeleteRange(start, l); err != nil {
 				return nil, fmt.Errorf("readDeleteSetV2 range: %w", err)
 			}
 			ranges = append(ranges, Range{Start: start, Length: l})

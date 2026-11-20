@@ -326,6 +326,17 @@ func checkClockRange(start, length uint64) error {
 	return nil
 }
 
+// checkDeleteRange is checkClockRange for a delete-set range, whose end is
+// not a clock any state vector holds: a range may delete the last clock,
+// MaxClock itself (yjs reads such a delete set), so its exclusive end may
+// be MaxClock+1.
+func checkDeleteRange(start, length uint64) error {
+	if start > MaxClock || length > MaxClock+1 || start > MaxClock+1-length {
+		return fmt.Errorf("%w: delete range %d+%d exceeds the %d-clock space the wire format can represent", lib0.ErrTruncated, start, length, MaxClock)
+	}
+	return nil
+}
+
 // DecodeUpdate decodes a V1 update. A string with invalid UTF-8 returns
 // lib0.ErrInvalidUTF8, as yjs throws on it.
 func DecodeUpdate(buf []byte) (*Update, []byte, error) {
@@ -367,6 +378,9 @@ func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
 			return nil, buf, err
 		}
 		buf = buf[n:]
+		if err := checkClockRange(clock, 0); err != nil {
+			return nil, buf, err
+		}
 
 		if err := checkDecodeCount(blockCount, len(buf)); err != nil {
 			return nil, buf, err
@@ -375,6 +389,11 @@ func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
 		for j := uint64(0); j < blockCount; j++ {
 			b, tail, err := decodeBlock(buf, block.ID{Client: client, Clock: clock}, strs, &orders)
 			if err != nil {
+				return nil, buf, err
+			}
+			// Every block, items too (GC and Skip check their run when
+			// read): the next block's clock must not wrap.
+			if err := checkClockRange(clock, b.length()); err != nil {
 				return nil, buf, err
 			}
 			blocks = append(blocks, b)
@@ -578,9 +597,7 @@ func (u *Update) Apply(txn *doc.TransactionMut) error {
 	fresh.applyDeletes(txn, true)
 	p.applyDeletes(txn, false)
 	fresh.DeleteSet.Iterate(func(client uint64, ranges []Range) {
-		for _, r := range ranges {
-			p.DeleteSet.Insert(client, r.Start, r.Length)
-		}
+		p.DeleteSet.insertRanges(client, ranges)
 	})
 	if retry {
 		queued := p.Blocks

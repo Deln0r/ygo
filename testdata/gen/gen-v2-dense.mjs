@@ -101,5 +101,25 @@ scenario("one cached format key for 50 markers", (d) => {
   for (let i = 0; i < 100; i += 2) t.format(i, 1, { ["k".repeat(1000)]: true });
 }, false, false, new CachingEncoderV2());
 
-writeFileSync(outPath, JSON.stringify({ generator: "gen-v2-dense.mjs (yjs 13.6.33)", scenarios }, null, 2) + "\n");
+// Pairs of dense updates of different clients, for MergeUpdatesV2: what a
+// merge holds is bounded as one update of both inputs' bytes would be.
+const pairs = [];
+function pair(name, buildA, buildB, refused) {
+  const make = (client, build) => {
+    const d = new Y.Doc();
+    d.clientID = client;
+    build(d);
+    return toHex(Y.encodeStateAsUpdateV2(d));
+  };
+  pairs.push({ name, a: make(1, buildA), b: make(2, buildB), refused });
+}
+pair("10k empty arrays and 10k deleted maps", (d) => d.transact(() => { const a = d.getArray("a"); for (let i = 0; i < 10000; i++) a.push([new Y.Array()]); }),
+  (d) => { const a = d.getArray("m"); for (let i = 0; i < 10000; i++) a.insert(0, [new Y.Map()]); a.delete(0, a.length); }, false);
+pair("600k deleted characters each, past the budget together", prepends(600000), (d) => {
+  const u = d.getText("u");
+  for (let i = 0; i < 600000; i++) u.insert(0, "y");
+  u.delete(0, u.length);
+}, true);
+
+writeFileSync(outPath, JSON.stringify({ generator: "gen-v2-dense.mjs (yjs 13.6.33)", scenarios, pairs }, null, 2) + "\n");
 console.log(`wrote ${scenarios.length} scenarios to ${outPath}`);

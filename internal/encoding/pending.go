@@ -370,9 +370,7 @@ func (p *Pending) foldDeleteSet(u *Update) {
 		return
 	}
 	for _, client := range u.DeleteSet.ClientsInOrder() {
-		for _, r := range u.DeleteSet.ClientRanges(client) {
-			p.DeleteSet.Insert(client, r.Start, r.Length)
-		}
+		p.DeleteSet.insertRanges(client, u.DeleteSet.ClientRanges(client))
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Deln0r/ygo"
@@ -23,6 +24,12 @@ func TestV2Dense_Fixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	var f struct {
+		Pairs []struct {
+			Name    string `json:"name"`
+			A       string `json:"a"`
+			B       string `json:"b"`
+			Refused bool   `json:"refused"`
+		} `json:"pairs"`
 		Scenarios []struct {
 			Name      string `json:"name"`
 			Structs   int    `json:"structs"`
@@ -35,8 +42,59 @@ func TestV2Dense_Fixtures(t *testing.T) {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Scenarios) == 0 {
-		t.Fatal("no scenarios")
+	if len(f.Scenarios) == 0 || len(f.Pairs) == 0 {
+		t.Fatal("no scenarios or no pairs")
+	}
+	// MergeUpdatesV2 of two dense updates of different clients: the merge
+	// applies as the two do, and holds no more than one update of both
+	// inputs' bytes may (max(bytes, 1<<20) structs).
+	for _, p := range f.Pairs {
+		t.Run("merge "+p.Name, func(t *testing.T) {
+			a, _ := hex.DecodeString(p.A)
+			b, _ := hex.DecodeString(p.B)
+			merged, err := ygo.MergeUpdatesV2([][]byte{a, b})
+			if p.Refused {
+				if !errors.Is(err, ygo.ErrUpdateTooDense) {
+					t.Fatalf("merged: %v, want ErrUpdateTooDense", err)
+				}
+				// The merge stops at the input that takes it past the
+				// bound: a broken input after it is never read.
+				if _, err := ygo.MergeUpdatesV2([][]byte{a, b, {0xff}}); !errors.Is(err, ygo.ErrUpdateTooDense) {
+					t.Fatalf("merged with a broken third input: %v, want ErrUpdateTooDense", err)
+				}
+				// Bytes that do not survive the merge (an input given
+				// twice) raise the inputs' allowance, not the output's:
+				// a merge ApplyUpdateV2 would refuse is refused.
+				big := ygo.NewDocWithOptions(ygo.Options{ClientID: 3})
+				txt := ygo.NewText(big, "big")
+				w := big.WriteTxn()
+				if err := txt.Insert(w, 0, strings.Repeat("x", 700000)); err != nil {
+					t.Fatal(err)
+				}
+				w.Commit()
+				c := ygo.EncodeStateAsUpdateV2(big)
+				if _, err := ygo.MergeUpdatesV2([][]byte{a, b, c, c}); !errors.Is(err, ygo.ErrUpdateTooDense) {
+					t.Fatalf("a merge past its own budget: %v, want ErrUpdateTooDense", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			both := ygo.NewDocWithOptions(ygo.Options{ClientID: 99})
+			for _, u := range [][]byte{a, b} {
+				if err := ygo.ApplyUpdateV2(both, u); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := ygo.NewDocWithOptions(ygo.Options{ClientID: 99})
+			if err := ygo.ApplyUpdateV2(m, merged); err != nil {
+				t.Fatalf("applying the merge: %v", err)
+			}
+			if got, want := hex.EncodeToString(ygo.EncodeStateAsUpdateV2(m)), hex.EncodeToString(ygo.EncodeStateAsUpdateV2(both)); got != want {
+				t.Fatalf("the merge applies to %s, the two inputs to %s", got, want)
+			}
+		})
 	}
 	for _, s := range f.Scenarios {
 		t.Run(s.Name, func(t *testing.T) {

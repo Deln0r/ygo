@@ -4,12 +4,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Deln0r/ygo/internal/block"
+	"github.com/Deln0r/ygo/internal/doc"
 	"github.com/Deln0r/ygo/internal/lib0"
 )
 
@@ -185,5 +188,141 @@ func TestLooksLikeUpdateV2_IsCheap(t *testing.T) {
 	}
 	if !LooksLikeUpdateV2(formatUpdate("bold", 3, false)) {
 		t.Fatal("an ordinary V2 update does not look like one")
+	}
+}
+
+// TestDeleteRange_Boundary: a delete range may end at MaxClock+1 (it
+// deletes the last clock, which yjs reads and writes back), not past it;
+// a GC run may end at MaxClock (its end is a state-vector clock).
+func TestDeleteRange_Boundary(t *testing.T) {
+	ds := func(diff, lenMinus1 uint64) []byte {
+		e := NewEncoderV2()
+		e.WriteVarUint(0)
+		e.WriteVarUint(1)
+		e.WriteVarUint(1)
+		e.WriteVarUint(1)
+		e.WriteVarUint(diff)
+		e.WriteVarUint(lenMinus1)
+		return e.Bytes()
+	}
+	for name, b := range map[string][]byte{
+		"the last clock":     ds(MaxClock, 0),
+		"every clock from 0": ds(0, MaxClock),
+		"V1, the last clock": lib0.WriteVarUint(lib0.WriteVarUint(lib0.WriteVarUint(lib0.WriteVarUint(lib0.WriteVarUint(lib0.WriteVarUint(nil, 0), 1), 1), 1), MaxClock), 1),
+	} {
+		var err error
+		if strings.HasPrefix(name, "V1") {
+			_, _, err = DecodeUpdate(b)
+		} else {
+			_, err = DecodeUpdateV2(b)
+		}
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := DecodeUpdateV2(ds(1, MaxClock)); !errors.Is(err, lib0.ErrTruncated) {
+		t.Errorf("a range one past the space: %v", err)
+	}
+	enc := NewEncoderV2()
+	enc.WriteVarUint(1)
+	enc.WriteVarUint(1)
+	enc.WriteClient(1)
+	enc.WriteVarUint(0)
+	enc.WriteInfo(0)
+	enc.WriteLen(MaxClock)
+	enc.WriteVarUint(0)
+	if _, err := DecodeUpdateV2(enc.Bytes()); err != nil {
+		t.Errorf("a GC run ending at MaxClock: %v", err)
+	}
+}
+
+// TestDecodeUpdate_ItemClockWrap: a V1 item whose length runs past the
+// clock space is refused, as GC and Skip runs are: the next block's clock
+// wrapped to zero.
+func TestDecodeUpdate_ItemClockWrap(t *testing.T) {
+	b := lib0.WriteVarUint(nil, 1)
+	b = lib0.WriteVarUint(b, 1)
+	b = lib0.WriteVarUint(b, 1)
+	b = lib0.WriteVarUint(b, 1)          // start clock
+	b = append(b, 0x01)                  // ContentDeleted, no origins
+	b = append(b, 0x01, 0x01, 't')       // parent named "t"
+	b = lib0.WriteVarUint(b, ^uint64(0)) // length
+	b = lib0.WriteVarUint(b, 0)
+	if _, _, err := DecodeUpdate(b); !errors.Is(err, lib0.ErrTruncated) {
+		t.Fatalf("an item running past the clock space: %v", err)
+	}
+}
+
+// TestInsertAll_MatchesInsert: insertAll gives what Insert gives range by
+// range, on random ranges that overlap, touch, repeat and are empty.
+func TestInsertAll_MatchesInsert(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 9))
+	rnd := func(n int) []Range {
+		var out []Range
+		for range n {
+			out = append(out, Range{Start: uint64(rng.IntN(60)), Length: uint64(rng.IntN(5))})
+		}
+		return out
+	}
+	for run := range 20000 {
+		existing, added := rnd(rng.IntN(6)), rnd(1+rng.IntN(8))
+		a, b := NewIdSet(), NewIdSet()
+		for _, r := range existing {
+			a.Insert(1, r.Start, r.Length)
+			b.Insert(1, r.Start, r.Length)
+		}
+		for _, r := range added {
+			a.Insert(1, r.Start, r.Length)
+		}
+		b.insertAll(1, added)
+		if !slices.Equal(a.clients[1], b.clients[1]) || slices.Equal(a.order, []uint64{1}) != slices.Equal(b.order, []uint64{1}) {
+			t.Fatalf("run %d: existing %v, added %v:\n Insert    %v\n insertAll %v", run, existing, added, a.clients[1], b.clients[1])
+		}
+	}
+}
+
+// TestApplyDeleteSet_OneEntryDescending: a V1 delete set keeps a client's
+// first entry as written, and a peer may write it descending. Queuing a
+// million such ranges, for items nobody has, is not quadratic (they were
+// inserted one by one), nor is queuing a million more below them.
+func TestApplyDeleteSet_OneEntryDescending(t *testing.T) {
+	const n = 1000000
+	descending := func(from uint64) []byte {
+		b := lib0.WriteVarUint(nil, 0) // no structs
+		b = lib0.WriteVarUint(b, 1)
+		b = lib0.WriteVarUint(b, 7)
+		b = lib0.WriteVarUint(b, n)
+		for i := n - 1; i >= 0; i-- {
+			b = lib0.WriteVarUint(b, from+uint64(i)*2)
+			b = lib0.WriteVarUint(b, 1)
+		}
+		return b
+	}
+	d := doc.NewDoc()
+	for _, from := range []uint64{2 * n, 0} {
+		if err := ApplyUpdate(d, descending(from)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	txn := d.ReadTxn()
+	defer txn.Close()
+	got := GetPending(txn).DeleteSet.clients[7]
+	if len(got) != 2*n || got[0].Start != 0 || got[2*n-1].Start != uint64(2*n-1)*2 {
+		t.Fatalf("queued %d ranges, want %d sorted", len(got), 2*n)
+	}
+}
+
+// TestDecodeIdSet_EmptyRepeatKeepsEntry: V1 keeps a client's first entry
+// as written; an entry for it again holding only an empty range changes
+// nothing (Insert of an empty range does nothing), so the first entry is
+// not sorted or merged.
+func TestDecodeIdSet_EmptyRepeatKeepsEntry(t *testing.T) {
+	b := []byte{0x02, 0x01, 0x02, 0x04, 0x01, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00}
+	s, rest, err := DecodeIdSet(b)
+	if err != nil || len(rest) != 0 {
+		t.Fatalf("decode: %v, %d left", err, len(rest))
+	}
+	if got, want := s.ClientRanges(1), []Range{{Start: 4, Length: 1}, {Start: 0, Length: 1}}; !slices.Equal(got, want) {
+		t.Fatalf("client 1: %v, want %v as written", got, want)
 	}
 }
