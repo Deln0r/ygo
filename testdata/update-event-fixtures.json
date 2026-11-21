@@ -13693,13 +13693,13 @@
     },
     {
       "name": "insert-into-root-typed-after-formatting",
-      "description": "a document receives bold text while its root is untyped, then types it and appends: yjs's fresh YText has search markers on (format markers turn them off only as they integrate), so the insert starts at a marker with no attributes and steps over the closing bold:null; ygo keeps walking from the start, collects bold and inserts before it (pinned, docs/tech-debt.md)",
+      "description": "a document receives bold text while its root is untyped, then types it and appends: yjs's fresh YText has search markers on (format markers turn them off only as they integrate), so the insert starts at a marker with no attributes, steps over the closing bold:null and is plain",
       "gc": true,
       "clients": [
         3141592653,
         271828182
       ],
-      "changed": false,
+      "changed": true,
       "steps": [
         {
           "doc": 0,
@@ -13761,6 +13761,9 @@
           "doc": 0,
           "origin": null,
           "v1": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
           "v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
         },
         {
@@ -13768,6 +13771,9 @@
           "doc": 1,
           "origin": "remote",
           "v1": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
           "v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
         },
         {
@@ -13775,6 +13781,9 @@
           "doc": 1,
           "origin": null,
           "v1": "0101d689cf81010084cdcc83da0b03012100",
+          "changed": [
+            "t"
+          ],
           "v2": "00000a96939e83028d9987b41701060001840301210100000001010000"
         },
         {
@@ -13782,7 +13791,5036 @@
           "doc": 0,
           "origin": "remote",
           "v1": "0101d689cf81010084cdcc83da0b03012100",
+          "changed": [
+            "t"
+          ],
           "v2": "00000a96939e83028d9987b41701060001840301210100000001010000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-marker-left-by-earlier-insert",
+      "description": "an insert inside the bold run leaves a search marker on cd, after bold:true; the next insert at the run's start begins there with no attributes and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-fresh-insert-before-run",
+      "description": "with no marker yet the insert at the run's start walks from the start and goes in before bold:true, plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": []
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101d689cf810100c4cdcc83da0b01cdcc83da0b04015a00",
+            "update_v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010000"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0101d689cf810100c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-embed-without-attributes",
+      "description": "an embed without attributes uses the search markers: after an insert left one past bold:true, the embed at the run's start goes in after bold:true and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "embed",
+              "path": "text:t",
+              "index": 2,
+              "value": {
+                "img": 1
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c5cdcc83da0b04cdcc83da0b02097b22696d67223a317d00",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064203c400c503015101000000010200760103696d677d0100"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c5cdcc83da0b04cdcc83da0b02097b22696d67223a317d00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c50100000000010101760103696d677d0100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c5cdcc83da0b04cdcc83da0b02097b22696d67223a317d00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064203c400c503015101000000010200760103696d677d0100"
+        }
+      ]
+    },
+    {
+      "name": "late-root-embed-with-empty-attributes",
+      "description": "an embed with {} walks from the start: the same embed goes in before bold:true, plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "embed",
+              "path": "text:t",
+              "index": 2,
+              "value": {
+                "img": 1
+              },
+              "attrs": {}
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c5cdcc83da0b01cdcc83da0b04097b22696d67223a317d00",
+            "update_v2": "00000b96939e8302cd9987b4170202044202060203c400c503015101000000010200760103696d677d0100"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c5cdcc83da0b01cdcc83da0b04097b22696d67223a317d00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c50100000000010101760103696d677d0100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c5cdcc83da0b01cdcc83da0b04097b22696d67223a317d00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202044202060203c400c503015101000000010200760103696d677d0100"
+        }
+      ]
+    },
+    {
+      "name": "late-root-insert-with-empty-attributes",
+      "description": "an insert with {} walks from the start: after the same earlier insert the text goes in before bold:true, plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z",
+              "attrs": {}
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b01cdcc83da0b04015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202044202060201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202044202060201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-delete-moves-marker",
+      "description": "a delete before the marker moves it back by what it deleted; the insert at the run's start begins at the moved marker and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "text:t",
+              "index": 0,
+              "len": 1
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a01cdcc83da0b010001",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020001cdcc83da0b010000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a01cdcc83da0b010001",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020001cdcc83da0b010000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-delta-insert-moves-marker",
+      "description": "applyDelta walks from the start but moves the markers past what it inserts; the insert at the run's start begins at the moved marker and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delta",
+              "path": "text:t",
+              "delta": [
+                {
+                  "retain": 1
+                },
+                {
+                  "insert": "D"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0103d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b00cdcc83da0b010144c4cdcc83da0b04cdcc83da0b02015a00",
+            "update_v2": "00000b96939e8302cd9987b41704030444080306440201c4060351445a410100000001030000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b00cdcc83da0b01014400",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000100010201c40301440100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810102c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010200"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0103d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b00cdcc83da0b010144c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b41704030444080306440201c4060351445a410100000001030000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-delta-delete-moves-marker",
+      "description": "a delta's delete moves the markers back as a delete does",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delta",
+              "path": "text:t",
+              "delta": [
+                {
+                  "delete": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a01cdcc83da0b010001",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020001cdcc83da0b010000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a01cdcc83da0b010001",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020001cdcc83da0b010000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-rewind-to-run-start",
+      "description": "three inserts typed in a row in one transaction: findMarker steps back over the receiver's consecutive items to the first, so the markers sit on it, and the next insert starts there",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Q"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "R"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "S"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b01cdcc83da0b0403515253c4cdcc83da0b01d689cf810100015a00",
+            "update_v2": "00001096939e8302cd9987b4170196939e830202020002084801c407045152535a030100000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b01cdcc83da0b040351525300",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c405035152530300000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810103c4cdcc83da0b01d689cf810100015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000f96939e83028d9987b41796939e83020102010001c403015a0100000001010300"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b01cdcc83da0b0403515253c4cdcc83da0b01d689cf810100015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00001096939e8302cd9987b4170196939e830202020002084801c407045152535a030100000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-rewind-to-run-start-past-run",
+      "description": "the same after the bold run; the insert inside the run starts from the markers they left",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "Q"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "R"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "S"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf81010084cdcc83da0b0503515253c4cdcc83da0b02cdcc83da0b03015a00",
+            "update_v2": "00000b96939e8302cd9987b41701020a460106038400c407045152535a030100000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf81010084cdcc83da0b050351525300",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000a96939e83028d9987b417010a00018405035152530300000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810103c4cdcc83da0b02cdcc83da0b03015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c403015a0100000001010300"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf81010084cdcc83da0b0503515253c4cdcc83da0b02cdcc83da0b03015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b41701020a460106038400c407045152535a030100000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-marker-cap",
+      "description": "90 inserts in one transaction, alternating between the end and the bold run's start, overflow the 80 search markers; the insert after them starts at the marker the eviction kept",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 9,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 8,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 11,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 13,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 15,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 17,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 19,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 21,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 23,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 8,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 25,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 27,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 29,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 31,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 33,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 35,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 37,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 8,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 39,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 41,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 43,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 45,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 47,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 49,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 51,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 8,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 53,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 55,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 57,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 59,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 61,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 63,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 65,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 8,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 67,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 69,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 71,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 73,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 75,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 77,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 79,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 8,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 81,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 83,
+              "text": "9"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "0"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 85,
+              "text": "1"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 7,
+              "text": "2"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 87,
+              "text": "3"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "4"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 89,
+              "text": "5"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "6"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 91,
+              "text": "7"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "8"
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 93,
+              "text": "9"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "015bd689cf810100c4cdcc83da0b01cdcc83da0b04013084cdcc83da0b050131c4cdcc83da0b02cdcc83da0b03013284d689cf8101010133c4cdcc83da0b05d689cf810101013484d689cf8101030135c4d689cf810101d689cf810103013684d689cf8101050137c4cdcc83da0b04cdcc83da0b02013884d689cf8101070139c4cdcc83da0b02d689cf810102013084d689cf8101090131c4d689cf810102cdcc83da0b03013284d689cf81010b0133c4cdcc83da0b01d689cf810100013484d689cf81010d0135c4d689cf810100cdcc83da0b04013684d689cf81010f0137c4d689cf810108cdcc83da0b02013884d689cf8101110139c4cdcc83da0b02d689cf81010a013084d689cf8101130131c4d689cf81010ed689cf810100013284d689cf8101150133c4d689cf810100d689cf810110013484d689cf8101170135c4d689cf810110cdcc83da0b04013684d689cf8101190137c4cdcc83da0b01d689cf81010e013884d689cf81011b0139c4d689cf81010ed689cf810116013084d689cf81011d0131c4d689cf810116d689cf810100013284d689cf81011f0133c4d689cf810100d689cf810118013484d689cf8101210135c4d689cf81011cd689cf81010e013684d689cf8101230137c4d689cf81010ed689cf81011e013884d689cf8101250139c4d689cf81011ed689cf810116013084d689cf8101270131c4cdcc83da0b01d689cf81011c013284d689cf8101290133c4d689cf81011cd689cf810124013484d689cf81012b0135c4d689cf810124d689cf81010e013684d689cf81012d0137c4d689cf81010ed689cf810126013884d689cf81012f0139c4d689cf81012ad689cf81011c013084d689cf8101310131c4d689cf81011cd689cf81012c013284d689cf8101330133c4d689cf81012cd689cf810124013484d689cf8101350135c4cdcc83da0b01d689cf81012a013684d689cf8101370137c4d689cf81012ad689cf810132013884d689cf8101390139c4d689cf810132d689cf81011c013084d689cf81013b0131c4d689cf81011cd689cf810134013284d689cf81013d0133c4d689cf810138d689cf81012a013484d689cf81013f0135c4d689cf81012ad689cf81013a013684d689cf8101410137c4d689cf81013ad689cf810132013884d689cf8101430139c4cdcc83da0b01d689cf810138013084d689cf8101450131c4d689cf810138d689cf810140013284d689cf8101470133c4d689cf810140d689cf81012a013484d689cf8101490135c4d689cf81012ad689cf810142013684d689cf81014b0137c4d689cf810146d689cf810138013884d689cf81014d0139c4d689cf810138d689cf810148013084d689cf81014f0131c4d689cf810148d689cf810140013284d689cf8101510133c4cdcc83da0b01d689cf810146013484d689cf8101530135c4d689cf810146d689cf81014e013684d689cf8101550137c4d689cf81014ed689cf810138013884d689cf8101570139c4cdcc83da0b01d689cf810154015a00",
+            "update_v2": "0000b10196939e8302cd9987b4170396939e83028d9987b417d6939e830203cd9987b4170096939e83028d9987b417d6939e8302018d9987b41796939e83028d9987b417d6939e8302018d9987b417d6939e8302008d9987b41796939e83028d9987b417d6939e8302078d9987b41796939e83028d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302068d9987b41796939e830268020846420843000842064a0e4e1254185a1e4e125e224a0e6a2e4e1270345a1e4e127e82014a0e6a2e4e12cc0190015a1e4e127e82014a0e6a2e4e12e801ac015a1e4e127e82014a0e6a2e4e12c40288025a1e4e127e82014a0e6a2e4e12e002a4025a1e4e12ec022e084244044200024608441054205814106c305420500c106c305420500c106c305420500c106c305420500c106c38b501c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c45e5b3031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738395a4159000000015b0000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "015ad689cf810100c4cdcc83da0b01cdcc83da0b04013084cdcc83da0b050131c4cdcc83da0b02cdcc83da0b03013284d689cf8101010133c4cdcc83da0b05d689cf810101013484d689cf8101030135c4d689cf810101d689cf810103013684d689cf8101050137c4cdcc83da0b04cdcc83da0b02013884d689cf8101070139c4cdcc83da0b02d689cf810102013084d689cf8101090131c4d689cf810102cdcc83da0b03013284d689cf81010b0133c4cdcc83da0b01d689cf810100013484d689cf81010d0135c4d689cf810100cdcc83da0b04013684d689cf81010f0137c4d689cf810108cdcc83da0b02013884d689cf8101110139c4cdcc83da0b02d689cf81010a013084d689cf8101130131c4d689cf81010ed689cf810100013284d689cf8101150133c4d689cf810100d689cf810110013484d689cf8101170135c4d689cf810110cdcc83da0b04013684d689cf8101190137c4cdcc83da0b01d689cf81010e013884d689cf81011b0139c4d689cf81010ed689cf810116013084d689cf81011d0131c4d689cf810116d689cf810100013284d689cf81011f0133c4d689cf810100d689cf810118013484d689cf8101210135c4d689cf81011cd689cf81010e013684d689cf8101230137c4d689cf81010ed689cf81011e013884d689cf8101250139c4d689cf81011ed689cf810116013084d689cf8101270131c4cdcc83da0b01d689cf81011c013284d689cf8101290133c4d689cf81011cd689cf810124013484d689cf81012b0135c4d689cf810124d689cf81010e013684d689cf81012d0137c4d689cf81010ed689cf810126013884d689cf81012f0139c4d689cf81012ad689cf81011c013084d689cf8101310131c4d689cf81011cd689cf81012c013284d689cf8101330133c4d689cf81012cd689cf810124013484d689cf8101350135c4cdcc83da0b01d689cf81012a013684d689cf8101370137c4d689cf81012ad689cf810132013884d689cf8101390139c4d689cf810132d689cf81011c013084d689cf81013b0131c4d689cf81011cd689cf810134013284d689cf81013d0133c4d689cf810138d689cf81012a013484d689cf81013f0135c4d689cf81012ad689cf81013a013684d689cf8101410137c4d689cf81013ad689cf810132013884d689cf8101430139c4cdcc83da0b01d689cf810138013084d689cf8101450131c4d689cf810138d689cf810140013284d689cf8101470133c4d689cf810140d689cf81012a013484d689cf8101490135c4d689cf81012ad689cf810142013684d689cf81014b0137c4d689cf810146d689cf810138013884d689cf81014d0139c4d689cf810138d689cf810148013084d689cf81014f0131c4d689cf810148d689cf810140013284d689cf8101510133c4cdcc83da0b01d689cf810146013484d689cf8101530135c4d689cf810146d689cf81014e013684d689cf8101550137c4d689cf81014ed689cf810138013884d689cf810157013900",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000a70196939e8302cd9987b4170396939e83028d9987b417d6939e830203cd9987b4170096939e83028d9987b417d6939e8302018d9987b41796939e83028d9987b417d6939e8302018d9987b417d6939e8302008d9987b41796939e83028d9987b417d6939e8302078d9987b41796939e83028d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e83020666020846420843000842064a0e4e1254185a1e4e125e224a0e6a2e4e1270345a1e4e127e82014a0e6a2e4e12cc0190015a1e4e127e82014a0e6a2e4e12e801ac015a1e4e127e82014a0e6a2e4e12c40288025a1e4e127e82014a0e6a2e4e12e002a4025a1e4e122d084244044200024608441054205814106c305420500c106c305420500c106c305420500c106c305420500c106cb301c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c400845d5a3031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738394158000000015a0000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf81015ac4cdcc83da0b01d689cf810154015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000f96939e83028d9987b41796939e8302010202a80201c403015a0100000001015a00"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "015bd689cf810100c4cdcc83da0b01cdcc83da0b04013084cdcc83da0b050131c4cdcc83da0b02cdcc83da0b03013284d689cf8101010133c4cdcc83da0b05d689cf810101013484d689cf8101030135c4d689cf810101d689cf810103013684d689cf8101050137c4cdcc83da0b04cdcc83da0b02013884d689cf8101070139c4cdcc83da0b02d689cf810102013084d689cf8101090131c4d689cf810102cdcc83da0b03013284d689cf81010b0133c4cdcc83da0b01d689cf810100013484d689cf81010d0135c4d689cf810100cdcc83da0b04013684d689cf81010f0137c4d689cf810108cdcc83da0b02013884d689cf8101110139c4cdcc83da0b02d689cf81010a013084d689cf8101130131c4d689cf81010ed689cf810100013284d689cf8101150133c4d689cf810100d689cf810110013484d689cf8101170135c4d689cf810110cdcc83da0b04013684d689cf8101190137c4cdcc83da0b01d689cf81010e013884d689cf81011b0139c4d689cf81010ed689cf810116013084d689cf81011d0131c4d689cf810116d689cf810100013284d689cf81011f0133c4d689cf810100d689cf810118013484d689cf8101210135c4d689cf81011cd689cf81010e013684d689cf8101230137c4d689cf81010ed689cf81011e013884d689cf8101250139c4d689cf81011ed689cf810116013084d689cf8101270131c4cdcc83da0b01d689cf81011c013284d689cf8101290133c4d689cf81011cd689cf810124013484d689cf81012b0135c4d689cf810124d689cf81010e013684d689cf81012d0137c4d689cf81010ed689cf810126013884d689cf81012f0139c4d689cf81012ad689cf81011c013084d689cf8101310131c4d689cf81011cd689cf81012c013284d689cf8101330133c4d689cf81012cd689cf810124013484d689cf8101350135c4cdcc83da0b01d689cf81012a013684d689cf8101370137c4d689cf81012ad689cf810132013884d689cf8101390139c4d689cf810132d689cf81011c013084d689cf81013b0131c4d689cf81011cd689cf810134013284d689cf81013d0133c4d689cf810138d689cf81012a013484d689cf81013f0135c4d689cf81012ad689cf81013a013684d689cf8101410137c4d689cf81013ad689cf810132013884d689cf8101430139c4cdcc83da0b01d689cf810138013084d689cf8101450131c4d689cf810138d689cf810140013284d689cf8101470133c4d689cf810140d689cf81012a013484d689cf8101490135c4d689cf81012ad689cf810142013684d689cf81014b0137c4d689cf810146d689cf810138013884d689cf81014d0139c4d689cf810138d689cf810148013084d689cf81014f0131c4d689cf810148d689cf810140013284d689cf8101510133c4cdcc83da0b01d689cf810146013484d689cf8101530135c4d689cf810146d689cf81014e013684d689cf8101550137c4d689cf81014ed689cf810138013884d689cf8101570139c4cdcc83da0b01d689cf810154015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000b10196939e8302cd9987b4170396939e83028d9987b417d6939e830203cd9987b4170096939e83028d9987b417d6939e8302018d9987b41796939e83028d9987b417d6939e8302018d9987b417d6939e8302008d9987b41796939e83028d9987b417d6939e8302078d9987b41796939e83028d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302128d9987b417d6939e8302068d9987b41796939e830268020846420843000842064a0e4e1254185a1e4e125e224a0e6a2e4e1270345a1e4e127e82014a0e6a2e4e12cc0190015a1e4e127e82014a0e6a2e4e12e801ac015a1e4e127e82014a0e6a2e4e12c40288025a1e4e127e82014a0e6a2e4e12e002a4025a1e4e12ec022e084244044200024608441054205814106c305420500c106c305420500c106c305420500c106c305420500c106c38b501c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c4008400c45e5b3031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738395a4159000000015b0000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-local-format-ends-markers",
+      "description": "a local format integrates a format marker, which turns the markers off: the next insert at the run's start walks from the start and is plain, though the insert before the format left a marker past bold:true",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 0,
+              "len": 1,
+              "attrs": {
+                "italic": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Y"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0105d689cf810100c4cdcc83da0b02cdcc83da0b03015146cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6cc4cdcc83da0b02d689cf8101000159c4cdcc83da0b01cdcc83da0b04015a00",
+            "update_v2": "000200021696939e8302cd9987b4170496939e8302cd9987b41700040444044205064602420807c4004600c600c4150f516974616c69636974616c6963595a0146004100000000010500787e00"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0102d689cf81010146cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "000200020b96939e8302cd9987b417010100020002034600c60f0c6974616c69636974616c69634600000000010201787e00"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810103c4cdcc83da0b02d689cf810100015900",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000f96939e83028d9987b41796939e83020104010001c40301590100000001010300"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810104c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010400"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0105d689cf810100c4cdcc83da0b02cdcc83da0b03015146cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6cc4cdcc83da0b02d689cf8101000159c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "000200021696939e8302cd9987b4170496939e8302cd9987b41700040444044205064602420807c4004600c600c4150f516974616c69636974616c6963595a0146004100000000010500787e00"
+        }
+      ]
+    },
+    {
+      "name": "late-root-empty-format-splits",
+      "description": "a format with {} changes nothing but splits the items at the range's ends, which moves the markers a later insert starts from; a remote insert in between clears them",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 1,
+              "len": 1,
+              "attrs": {}
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "D"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b00cdcc83da0b01014400",
+            "update_v2": "00000b96939e8302cd9987b4170202044402064401c405025144410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b00cdcc83da0b01014400",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000100010201c40301440100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b00cdcc83da0b01014400",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202044402064401c405025144410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-then-formatted-delete",
+      "description": "after a local format turns the markers off, deletes and inserts run as in a formatted text",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 0,
+              "len": 1,
+              "attrs": {
+                "italic": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "text:t",
+              "index": 3,
+              "len": 2
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "W"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0105d689cf810100c1cdcc83da0b02cdcc83da0b0301c4cdcc83da0b04cdcc83da0b02015a46cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6cc4cdcc83da0b03cdcc83da0b05015702cdcc83da0b010201d689cf8101010001",
+            "update_v2": "000200020b96939e8302cd9987b41707040500480605064244020809c100c4004600c600c4130e5a6974616c69636974616c6963570146000100000101010500787e02cdcc83da0b010200d689cf8101010000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0102d689cf81010246cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "000200020b96939e8302cd9987b417010100020002034600c60f0c6974616c69636974616c69634600000000010202787e00"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0002cdcc83da0b010201d689cf8101010001",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000002cdcc83da0b010200d689cf8101010000"
+        },
+        {
+          "step": 7,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810104c4cdcc83da0b03cdcc83da0b05015700",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000106010a01c40301570100000001010400"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0105d689cf810100c1cdcc83da0b02cdcc83da0b0301c4cdcc83da0b04cdcc83da0b02015a46cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6cc4cdcc83da0b03cdcc83da0b05015702cdcc83da0b010201d689cf8101010001",
+          "changed": [
+            "t"
+          ],
+          "v2": "000200020b96939e8302cd9987b41707040500480605064244020809c100c4004600c600c4130e5a6974616c69636974616c6963570146000100000101010500787e02cdcc83da0b010200d689cf8101010000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-delete-drops-closing-marker",
+      "description": "deleting the last bold character of a root typed late: the delete starts at a search marker with no attributes, so the cleanup takes the closing bold:null for redundant and deletes it with the character",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "xy"
+            },
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 0,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": "text:t",
+              "index": 1,
+              "len": 1
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b0201010301",
+            "update_v2": "00000000000001000000000001cdcc83da0b0201000100"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b0201010301",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b0201000100"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b0201010301",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b0201000100"
+        }
+      ]
+    },
+    {
+      "name": "late-root-run-typed-bold-in-one-call",
+      "description": "text typed bold in one call has consecutive clocks with its markers, so findMarker steps back over them to bold:true: an insert inside the run is bold, one at its end begins at the marker that leaves, and one at its start before bold:true is plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "ab"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "cdef",
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 6,
+              "text": "gh"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0105cdcc83da0b000401017402616286cdcc83da0b0104626f6c64047472756584cdcc83da0b02046364656686cdcc83da0b0604626f6c64046e756c6cc4cdcc83da0b06cdcc83da0b0702676800",
+            "update_v2": "0002000206cd9987b417040403000800010e090400860084008600c41711746162626f6c6463646566626f6c646768010244010201010000010500787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 5,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Y"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b04cdcc83da0b0502515ac4cdcc83da0b01cdcc83da0b02015900",
+            "update_v2": "00000b96939e8302cd9987b41702020846020a4601c40603515a59020100000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b000401017402616200",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b41700000104060374616201020101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b0286cdcc83da0b0104626f6c64047472756584cdcc83da0b02046364656686cdcc83da0b0604626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170203030008000586008400860f0c626f6c6463646566626f6c644401000000010302787e00"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b08c4cdcc83da0b06cdcc83da0b0702676800",
+          "changed": [
+            "t"
+          ],
+          "v2": "000006cd9987b41701010c010e01c4040267680200000001010800"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0105cdcc83da0b000401017402616286cdcc83da0b0104626f6c64047472756584cdcc83da0b02046364656686cdcc83da0b0604626f6c64046e756c6cc4cdcc83da0b06cdcc83da0b0702676800",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417040403000800010e090400860084008600c41711746162626f6c6463646566626f6c646768010244010201010000010500787e00"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b04cdcc83da0b05015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010a01c40301510100000001010000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4d689cf810100cdcc83da0b05015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000bd6939e8302008d9987b4170100010a01c403015a0100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810102c4cdcc83da0b01cdcc83da0b02015900",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010401c40301590100000001010200"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b04cdcc83da0b0502515ac4cdcc83da0b01cdcc83da0b02015900",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b41702020846020a4601c40603515a59020100000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-format-markers-all-deleted",
+      "description": "a root whose format markers were all removed before it arrived holds no live marker: inserts land as in a plain text",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 1,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 1,
+              "len": 2,
+              "attrs": {
+                "bold": null
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0105cdcc83da0b0004010174016184cdcc83da0b0002626384cdcc83da0b020164c1cdcc83da0b00cdcc83da0b0101c1cdcc83da0b02cdcc83da0b030101cdcc83da0b010402",
+            "update_v2": "000006cd9987b4170504000444040202040504008401c10a0574616263644100020101010002410001050001cdcc83da0b010401"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Y"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101d689cf810100c4cdcc83da0b01cdcc83da0b02025a5901cdcc83da0b010402",
+            "update_v2": "00000b96939e8302cd9987b417000102010401c404025a590200000001010001cdcc83da0b010401"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b02cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170302000402020401c60b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010402",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010401"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0105cdcc83da0b0004010174016184cdcc83da0b0002626384cdcc83da0b020164c1cdcc83da0b00cdcc83da0b0101c1cdcc83da0b02cdcc83da0b030101cdcc83da0b010402",
+          "changed": [
+            "t"
+          ],
+          "v2": "000006cd9987b4170504000444040202040504008401c10a0574616263644100020101010002410001050001cdcc83da0b010401"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b01cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010401c403015a0100000001010000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4d689cf810100cdcc83da0b02015900",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000bd6939e8302008d9987b4170100010401c40301590100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0101d689cf810100c4cdcc83da0b01cdcc83da0b02025a5900",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010401c404025a590200000001010000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-remote-insert-clears-markers",
+      "description": "a peer's insert into the root clears its search markers (yjs _callObserver for a remote transaction): the insert at the run's start then walks from the start and is plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "e"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101cdcc83da0b06c4cdcc83da0b03cdcc83da0b05016500",
+            "update_v2": "000006cd9987b417010106010a01c40301650100000001010600"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b01cdcc83da0b04015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202044202060201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b06c4cdcc83da0b03cdcc83da0b05016500",
+          "changed": [
+            "t"
+          ],
+          "v2": "000006cd9987b417010106010a01c40301650100000001010600"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101cdcc83da0b06c4cdcc83da0b03cdcc83da0b05016500",
+          "changed": [
+            "t"
+          ],
+          "v2": "000006cd9987b417010106010a01c40301650100000001010600"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010100"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202044202060201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-remote-format-ends-markers",
+      "description": "a peer's format marker turns the markers off: the inserts after it walk from the start, so the second, at the run's start, is plain where with markers on it would begin at the marker the first left",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 0,
+              "len": 1,
+              "attrs": {
+                "italic": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102cdcc83da0b0646cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6c00",
+            "update_v2": "0002000206cd9987b417020100020002034600c60f0c6974616c69636974616c69634600000000010206787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b0646cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417020100020002034600c60f0c6974616c69636974616c69634600000000010206787e00"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0102cdcc83da0b0646cdcc83da0b00066974616c69630474727565c6cdcc83da0b00cdcc83da0b01066974616c6963046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417020100020002034600c60f0c6974616c69636974616c69634600000000010206787e00"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-remote-change-elsewhere-keeps-markers",
+      "description": "a peer's change to another root leaves the text's markers: the insert at the run's start begins at the marker the earlier insert left and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:u",
+              "index": 0,
+              "text": "u"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101cdcc83da0b0604010175017500",
+            "update_v2": "0000058d9987b417000001040502757541000101000001010600"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0604010175017500",
+          "changed": [
+            "u"
+          ],
+          "v2": "0000058d9987b417000001040502757541000101000001010600"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101cdcc83da0b0604010175017500",
+          "changed": [
+            "u"
+          ],
+          "v2": "0000058d9987b417000001040502757541000101000001010600"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-update-with-nothing-new-keeps-markers",
+      "description": "an update that brings nothing new changes no type and clears nothing: the insert at the run's start begins at the earlier marker and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-undo-clears-markers",
+      "description": "an undo step on a root typed late clears its search markers (yjs popStackItem): the insert at the run's start after it walks from the start and is plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 1,
+          "scope": "text:t"
+        }
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "manage": 0
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "P"
+            }
+          ]
+        },
+        {
+          "undo": {
+            "doc": 1,
+            "um": 0
+          },
+          "result": true
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0103d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b00cdcc83da0b010150c4cdcc83da0b01cdcc83da0b04015a01d689cf8101010101",
+            "update_v2": "00000b96939e8302cd9987b41704030444020306440601c4060351505a410100000001030001d689cf8101010100"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b00cdcc83da0b01015000",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000100010201c40301500100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": "<um:0>",
+          "v1": "0001d689cf8101010101",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000000000001000000000001d689cf8101010100"
+        },
+        {
+          "step": 7,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810102c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010200"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0103d689cf810100c4cdcc83da0b02cdcc83da0b030151c1cdcc83da0b00cdcc83da0b0101c4cdcc83da0b01cdcc83da0b04015a01d689cf8101010101",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b41704030444020306440605c400c100c40502515a41000000010101030001d689cf8101010100"
+        }
+      ]
+    },
+    {
+      "name": "late-root-xmltext-marker-left-by-earlier-insert",
+      "description": "an XmlText root typed late is a YText: the second insert begins at the marker the first left and is bold",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "xmltext:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+            "update_v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010401c403015a0100000001010100"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b04cdcc83da0b02015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b4170202050002064201c40502515a410000000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-empty-format-splits-before-remote-insert",
+      "description": "a format with {} splits the bold run, the insert after it leaves a marker on the left half, a peer's insert clears the markers but not the flags, and the inserts after it start where the split left them",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 1,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0105cdcc83da0b0004010174016184cdcc83da0b0002626384cdcc83da0b020164c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b02cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b4170504000444040202040504008401c6140d7461626364626f6c64626f6c6441000201440001010000010500787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 2,
+              "len": 1,
+              "attrs": {}
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 4,
+              "text": "e"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101cdcc83da0b0684cdcc83da0b03016500",
+            "update_v2": "000006cd9987b4170001060001840301650100000001010600"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 3,
+              "text": "B"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "D"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0103d689cf810100c4cdcc83da0b05cdcc83da0b030151c4cdcc83da0b05d689cf8101000142c4cdcc83da0b04cdcc83da0b01014400",
+            "update_v2": "00001696939e8302cd9987b4170196939e8302cd9987b41700030a00420306460201c40603514244410100000001030000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b02cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170302000402020401c60b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0105cdcc83da0b0004010174016184cdcc83da0b0002626384cdcc83da0b020164c6cdcc83da0b00cdcc83da0b0104626f6c640474727565c6cdcc83da0b02cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170504000444040202040504008401c6140d7461626364626f6c64626f6c6441000201440001010000010500787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b05cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b41700010a010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0684cdcc83da0b03016500",
+          "changed": [
+            "t"
+          ],
+          "v2": "000006cd9987b4170001060001840301650100000001010600"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101cdcc83da0b0684cdcc83da0b03016500",
+          "changed": [
+            "t"
+          ],
+          "v2": "000006cd9987b4170001060001840301650100000001010600"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b05d689cf810100014200",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000f96939e83028d9987b41796939e8302010a010001c40301420100000001010100"
+        },
+        {
+          "step": 7,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810102c4cdcc83da0b04cdcc83da0b01014400",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000108010201c40301440100000001010200"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0103d689cf810100c4cdcc83da0b05cdcc83da0b030151c4cdcc83da0b05d689cf8101000142c4cdcc83da0b04cdcc83da0b01014400",
+          "changed": [
+            "t"
+          ],
+          "v2": "00001696939e8302cd9987b4170196939e8302cd9987b41700030a00420306460201c40603514244410100000001030000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-merge-repoints-marker",
+      "description": "a format that changes nothing splits xy on a root typed late, and the insert's marker lands on y; y merges back into x at commit, so the marker moves to x with its index less x's length, x's marker flag left off as yjs mergeWith leaves it, and the next inserts start there",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 0,
+              "text": "xy"
+            },
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 0,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "text:t",
+              "index": 1,
+              "len": 1,
+              "attrs": {
+                "bold": true
+              }
+            },
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 1,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "text:t",
+              "index": 2,
+              "text": "W"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0102d689cf81010084cdcc83da0b030151c4cdcc83da0b00cdcc83da0b01025a5700",
+            "update_v2": "00000b96939e8302cd9987b417010206460102038400c40603515a57010200000001020000"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf81010084cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000a96939e83028d9987b41701060001840301510100000001010000"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b00cdcc83da0b01015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000100010201c403015a0100000001010100"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810102c4d689cf810101cdcc83da0b01015700",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000bd6939e8302008d9987b4170102010201c40301570100000001010200"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0102d689cf81010084cdcc83da0b030151c4cdcc83da0b00cdcc83da0b01025a5700",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417010206460102038400c40603515a57010200000001020000"
+        }
+      ]
+    },
+    {
+      "name": "late-root-xmltext-stale-flag-after-remote-clear",
+      "description": "a remote clear empties the markers but leaves the items' marker flags: the next insert's marker walks left onto cd, still flagged, and is dropped, so the insert at the run's start walks from the start and is plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "xmltext:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 4,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": -1,
+            "to": 1,
+            "origin": "remote",
+            "what": "raw",
+            "update": "0101acd6b7430028010174016b0177017600",
+            "update_v2": "000005acacef8601000001280502746b4100010100010101010077017600"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 4,
+              "text": "X"
+            }
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0203d689cf81010084cdcc83da0b050151c4cdcc83da0b05d689cf8101000158c4cdcc83da0b01cdcc83da0b04015a01acd6b7430028010174016b0177017600",
+            "update_v2": "00001b96939e8302cd9987b4170096939e8302cd9987b41700acacef8601030a0048020008058400c40128080551585a746b41030101000101020300010077017600"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf81010084cdcc83da0b05015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000a96939e83028d9987b417010a0001840301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101acd6b7430028010174016b0177017600",
+          "changed": [
+            "t"
+          ],
+          "v2": "000005acacef8601000001280502746b4100010100010101010077017600"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b05d689cf810100015800",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000f96939e83028d9987b41796939e8302010a010001c40301580100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810102c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010200"
+        },
+        {
+          "step": 7,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0203d689cf81010084cdcc83da0b050151c4cdcc83da0b05d689cf8101000158c4cdcc83da0b01cdcc83da0b04015a01acd6b7430028010174016b0177017600",
+          "changed": [
+            "t"
+          ],
+          "v2": "00001b96939e8302cd9987b4170096939e8302cd9987b41700acacef8601030a0048020008058400c40128080551585a746b41030101000101020300010077017600"
+        }
+      ]
+    },
+    {
+      "name": "late-root-xmltext-remote-attribute-clears-markers",
+      "description": "a peer's setAttribute on an XmlText root typed late moves no position but clears its search markers, as yjs clears them for every type a remote transaction changed: the insert at the run's start walks from the start and is plain",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "steps": [
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 0,
+              "text": "abcd"
+            }
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "format",
+              "path": "xmltext:t",
+              "index": 2,
+              "len": 2,
+              "attrs": {
+                "bold": true
+              }
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+            "update_v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 3,
+              "text": "Q"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": -1,
+            "to": 1,
+            "origin": "remote",
+            "what": "raw",
+            "update": "0101acd6b7430028010174016b0177017600",
+            "update_v2": "000005acacef8601000001280502746b4100010100010101010077017600"
+          }
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insert",
+              "path": "xmltext:t",
+              "index": 2,
+              "text": "Z"
+            }
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0202d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b01cdcc83da0b04015a01acd6b7430028010174016b0177017600",
+            "update_v2": "00001096939e8302cd9987b41702acacef860102044202060203c401280704515a746b41020101000101020200010077017600"
+          }
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b0004010174046162636400",
+          "changed": [
+            "t"
+          ],
+          "v2": "0000058d9987b417000001040805746162636401040101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0102cdcc83da0b04c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b41702020204010403c600860b08626f6c64626f6c644400000000010204787e00"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0104cdcc83da0b000401017402616284cdcc83da0b01026364c6cdcc83da0b01cdcc83da0b0204626f6c64047472756586cdcc83da0b0304626f6c64046e756c6c00",
+          "changed": [
+            "t"
+          ],
+          "v2": "0002000206cd9987b417030302000401040704008400c60086130d7461626364626f6c64626f6c64014200440001010000010400787e00"
+        },
+        {
+          "step": 3,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810100c4cdcc83da0b02cdcc83da0b03015100",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000104010601c40301510100000001010000"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101acd6b7430028010174016b0177017600",
+          "changed": [
+            "t"
+          ],
+          "v2": "000005acacef8601000001280502746b4100010100010101010077017600"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0101d689cf810101c4cdcc83da0b01cdcc83da0b04015a00",
+          "changed": [
+            "t"
+          ],
+          "v2": "00000b96939e8302cd9987b417000102010801c403015a0100000001010100"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0202d689cf810100c4cdcc83da0b02cdcc83da0b030151c4cdcc83da0b01cdcc83da0b04015a01acd6b7430028010174016b0177017600",
+          "changed": [
+            "t"
+          ],
+          "v2": "00001096939e8302cd9987b41702acacef860102044202060203c401280704515a746b41020101000101020200010077017600"
         }
       ]
     },

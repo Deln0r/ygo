@@ -18,6 +18,25 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.48.0] - 2026-11-22
+
+**Upgrade impact**: in a root that received formatted text before it was first read as text, inserts, embeds without attributes and deletes now go where yjs puts them, which can differ from where ygo put them before (see Fixed). Documents that read their roots as text before applying updates, and texts with no formatting, are unchanged byte for byte.
+
+### Fixed
+
+- **A root typed after formatted text arrived edited differently from yjs.** yjs turns a text's search markers off for good when a format marker integrates into it, but a root that receives formatted text while nothing has read it as text holds those markers in a placeholder, and `doc.getText` then builds a fresh text with its markers on. Until the next format marker integrates, yjs starts an insert without attributes, an embed without attributes and a delete at a search marker, with only the formatting of the markers passed from there, so which markers earlier edits left decides the result. ygo walked from the start and collected all the formatting in effect.
+  - Text appended after bold text came out bold where yjs writes it plain, an insert at the start of a bold run came out plain where yjs, after an earlier insert inside the run, writes it bold, and deleting the last bold character kept the closing marker yjs deletes with it. Peers converged on what was sent, but the document differed from what a yjs peer would have written.
+  - This met every document that receives formatted text before its root is read: one loaded with `persist.LoadDoc`, a client that syncs before the app reads the root, `RestoreSnapshot`.
+  - Such a text now uses a port of yjs's marker list (`findMarker`, `updateMarkerChanges`, the repoint on a merge, the clears after a remote transaction and an undo step) until a format marker integrates into it. Inserts with attributes and `Format` walk from the start, as in yjs, and `Format` with no attributes walks the range too there: it changes nothing, but its splits move the markers.
+  - `InsertEmbed` of an empty string still inserts nothing, where yjs writes a zero-length item.
+  - The last pinned update-event divergence is gone, so the update-event set now counts in the README totals.
+
+### Tests
+
+- 27 update-event scenarios on a root typed late: an earlier insert's marker, embeds and inserts with and without attributes, deletes and deltas that move the markers, the marker moved by a merge, findMarker stepping back over a run, the 80-marker cap, a format with no attributes that only splits, a local and a remote format ending the state, remote inserts and attribute changes that clear the markers and remote changes that do not, an undo step, an XmlText root, a stale marker flag after a clear; as V1, V2 and both by turns.
+- `testdata/search-marker-fixtures.json` (`gen-search-markers.mjs`, 19 scenarios): yjs's marker list and each item's marker flag after every op and every commit, through merges, splits (an empty format among them), remote clears, eviction past 80 markers, a refreshed marker spared by it, and seeded random sessions; the state byte for byte at the end.
+- Unit tests for an update applied and an insert made in one non-local transaction (the markers clear when the commit reaches the text, not when the update is applied), the MarkerList left empty in the late state, and a nested text never being in it. 30 mutation controls each fail a test.
+
 ## [1.47.1] - 2026-11-21
 
 ### Fixed

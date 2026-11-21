@@ -93,11 +93,13 @@ func (i *Item) Integrate(ctx IntegrateContext, offset uint64) bool {
 
 // IntegrateTracked integrates a local insert whose caller keeps the
 // parent's search markers in step itself (MarkerList.ShiftAfter at the
-// index it inserted at), so the parent's markers are not dropped. yjs
-// keeps them the same way on a local insert: its type API updates them,
-// and a remote transaction or an undo step resets them. (yjs also stops
-// using them for a type once a format item integrates into it; ygo
-// keeps them, since Text.Delete still looks up positions from them.)
+// index it inserted at, or TextMarkers.Update), so the parent's markers
+// are not dropped. yjs keeps them the same way on a local insert: its type
+// API updates them, and a remote transaction or an undo step resets them.
+// (yjs also stops using them for a type once a format item integrates into
+// it; ygo keeps the MarkerList, since Text.Delete still looks up positions
+// from it.) Integrate never touches TextMarkers: yjs leaves its markers
+// alone when an item integrates.
 func (i *Item) IntegrateTracked(ctx IntegrateContext) bool {
 	return i.integrate(ctx, 0, true)
 }
@@ -268,6 +270,7 @@ func (i *Item) integrate(ctx IntegrateContext, offset uint64, trackedMarkers boo
 		parent.HasFormatting = true
 		if parent.TypeRef == TypeRefText || parent.TypeRef == TypeRefXmlText {
 			parent.FormattedText = true
+			parent.TextMarkers = nil
 		}
 	case KindDoc:
 		ctx.AddedSubdoc(i)

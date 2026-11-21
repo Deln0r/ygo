@@ -282,6 +282,8 @@ The TODO at `block_iter.rs:166` is a known gap for Move with open-ended ranges. 
 
 Implication: `Array` operations are O(N) where N = `branch.block_len + tombstones-since-GC`. Acceptable for arrays in the low-thousands range. **For our Go port: skip search markers in the first commit. Defer to benchmarks.** When we do add them, the JS shape is: a `Branch.searchMarkers: []SearchMarker` capped at ~80 entries; each marker is `{item *Item, index uint32}`; on every position lookup, find the closest marker by `|index - target|`, walk from there; on insert/delete inside a region, shift / invalidate downstream markers. None of this is in the executable spec we are mirroring.
 
+**Since then (November 2026):** ygo has two marker lists. `MarkerList` (`internal/block/search_marker.go`, v1.38.0) is ygo's own LRU cache for arrays, XML children and texts without format items, where the result of a lookup does not depend on the markers. `TextMarkers` (`internal/block/text_markers.go`, v1.48.0) is a step-for-step port of yjs's `_searchMarker` (`findMarker`, `markPosition`, `overwriteMarker`, `updateMarkerChanges`, the `mergeWith` repoint, `Item.marker` as `FlagMarked`), used only by a text whose root was typed after format items arrived (`Branch.LateText`): there yjs's markers are on while format markers sit in the list, and which markers exist decides where an insert goes and which markers a delete removes.
+
 ## 4. Insert — verbatim
 
 `Array::insert` (`array.rs:186-203`):

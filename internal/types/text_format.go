@@ -83,17 +83,27 @@ func (t *Text) InsertWithAttributes(txn *doc.TransactionMut, idx uint64, str str
 		return fmt.Errorf("text: insert index %d out of range [0, %d]", idx, length)
 	}
 	attrs = validAttrs(attrs)
-	return t.insertContent(txn, idx, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str), attrs, sortedAttrKeys(attrs))
+	return t.insertContent(txn, idx, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str), attrs, sortedAttrKeys(attrs), false)
 }
 
 // insertContent inserts content at idx through insertText, with attrs in
 // the key order keys. A text that never had a format item has no
 // attributes in effect anywhere, so the position comes from the search
-// markers and insertText starts from empty attributes; otherwise the
-// cursor walks from the start and collects them, as yjs findPosition does
-// for a type with formatting.
-func (t *Text) insertContent(txn *doc.TransactionMut, idx uint64, content block.Content, length uint64, attrs Attrs, keys []string) error {
+// markers and insertText starts from empty attributes; a text typed
+// before its formatting walks from the start and collects them, as yjs
+// findPosition does for a type with formatting; a LateText starts at a
+// yjs search marker when useMarker (yjs !attributes: an embed without
+// attributes).
+func (t *Text) insertContent(txn *doc.TransactionMut, idx uint64, content block.Content, length uint64, attrs Attrs, keys []string, useMarker bool) error {
 	var pos *textPos
+	if t.branch.LateText() {
+		pos, err := findPosition(txn, t.branch, idx, useMarker)
+		if err != nil {
+			return err
+		}
+		insertText(txn, t.branch, pos, content, length, attrs, keys)
+		return nil
+	}
 	if t.branch.HasFormatting {
 		var err error
 		if pos, err = findTextPos(txn, t.branch, idx); err != nil {
@@ -146,6 +156,9 @@ func insertText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, con
 	minimizeAttributeChanges(pos, full)
 	negated := insertAttributes(txn, branch, pos, full, order)
 	at := pos.index
+	// yjs: if (parent._searchMarker) updateMarkerChanges(...), after the
+	// opening markers, one of which turns the list off (TextMarkers nil).
+	branch.TextMarkers.Update(pos.index, int64(length))
 	item := integrateContent(txn, branch, pos.left, pos.right, content, length)
 	pos.right = item
 	pos.forward()
@@ -198,7 +211,11 @@ func integrateContent(txn *doc.TransactionMut, branch *block.Branch, left, right
 // error; yjs instead appends newlines for the missing length, a Quill
 // convention this port does not follow.
 func (t *Text) Format(txn *doc.TransactionMut, idx, length uint64, attrs Attrs) error {
-	if length == 0 || len(attrs) == 0 {
+	// Empty attrs change nothing, but yjs still walks the range and splits
+	// the items at its ends; in a root typed after formatted text arrived
+	// those splits move its search markers (a marker stays on the left
+	// half and moves again when the halves merge), so there the walk runs.
+	if length == 0 || (len(attrs) == 0 && !t.branch.LateText()) {
 		return nil
 	}
 	total := t.Length()
@@ -334,19 +351,53 @@ func (p *textPos) currentAttrs() (Attrs, []string) {
 // every marker before it.
 func findTextPos(txn *doc.TransactionMut, branch *block.Branch, index uint64) (*textPos, error) {
 	pos := &textPos{right: branch.Start, attrs: Attrs{}}
-	for pos.right != nil && index > 0 {
-		r := pos.right
-		if !r.IsDeleted() && r.Content.Kind != block.KindFormat && index < r.Len {
-			if txn.Store().SplitBlock(r, index) == nil {
-				return nil, fmt.Errorf("text: split failed at offset %d in item %v", index, r.ID)
+	return pos, findNextPosition(txn, pos, index)
+}
+
+// findPosition is yjs findPosition (YText.js:127-137) for a LateText
+// branch: with useMarker, the cursor starts at the search marker
+// TextMarkers.Find gives for index, with no attributes in effect, and
+// findNextPosition walks the rest of the way, collecting only the
+// attributes of the markers it passes; otherwise, or when Find gives no
+// marker, it starts at the first item.
+func findPosition(txn *doc.TransactionMut, branch *block.Branch, index uint64, useMarker bool) (*textPos, error) {
+	pos := &textPos{right: branch.Start, attrs: Attrs{}}
+	count := index
+	if useMarker {
+		if branch.TextMarkers == nil {
+			branch.TextMarkers = &block.TextMarkers{}
+		}
+		if mk := branch.TextMarkers.Find(branch, index); mk != nil {
+			start := uint64(max(mk.Index, 0))
+			pos = &textPos{left: mk.P.Left, right: mk.P, index: start, attrs: Attrs{}}
+			// yjs walks while count > 0, so a marker past index walks
+			// nowhere.
+			count = 0
+			if start < index {
+				count = index - start
 			}
 		}
+	}
+	return pos, findNextPosition(txn, pos, count)
+}
+
+// findNextPosition is yjs findNextPosition (YText.js:91-115): it moves pos
+// right over count units of content, splitting a string item the end falls
+// inside, and stops right after the content that brings count to zero.
+func findNextPosition(txn *doc.TransactionMut, pos *textPos, count uint64) error {
+	for pos.right != nil && count > 0 {
+		r := pos.right
 		if !r.IsDeleted() && r.Content.Kind != block.KindFormat {
-			index -= r.Len
+			if count < r.Len {
+				if txn.Store().SplitBlock(r, count) == nil {
+					return fmt.Errorf("text: split failed at offset %d in item %v", count, r.ID)
+				}
+			}
+			count -= r.Len
 		}
 		pos.forward()
 	}
-	return pos, nil
+	return nil
 }
 
 // negatedAttrs holds the values to restore after a formatted range, in
@@ -545,7 +596,10 @@ func (t *Text) InsertEmbed(txn *doc.TransactionMut, idx uint64, value any) error
 
 // InsertEmbedWithAttributes inserts a single embedded value at idx
 // carrying exactly attrs, as yjs insertEmbed(index, embed, attributes).
-// nil attrs and an empty map both mean no attributes. The value must be
+// nil attrs and an empty map both mean no attributes; in a root typed after
+// formatted text arrived (see Insert) they differ as in yjs, where an embed
+// without attributes starts from a search marker and one with {} from the
+// start of the text. The value must be
 // representable as a lib0 Any, typically a map[string]any or a scalar.
 // A string value is inserted as text, as yjs does with a string embed;
 // an empty string inserts nothing.
@@ -565,11 +619,15 @@ func (t *Text) InsertEmbedWithAttributes(txn *doc.TransactionMut, idx uint64, va
 	if length == 0 {
 		return nil
 	}
+	// yjs insertEmbed looks the position up from its search markers when
+	// it is given no attributes (findPosition(..., !attributes)), which
+	// matters only in a root typed after formatted text arrived.
+	useMarker := attrs == nil
 	if attrs == nil {
 		attrs = Attrs{}
 	}
 	attrs = validAttrs(attrs)
-	return t.insertContent(txn, idx, content, length, attrs, sortedAttrKeys(attrs))
+	return t.insertContent(txn, idx, content, length, attrs, sortedAttrKeys(attrs), useMarker)
 }
 
 // ErrUndefinedEmbed is returned for an embed that is undefined itself. yjs

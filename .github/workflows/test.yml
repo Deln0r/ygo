@@ -523,6 +523,9 @@ jobs:
       - name: regenerate event delta fixtures
         working-directory: testdata/gen
         run: node gen-event-delta.mjs
+      - name: regenerate search marker fixtures
+        working-directory: testdata/gen
+        run: node gen-search-markers.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff

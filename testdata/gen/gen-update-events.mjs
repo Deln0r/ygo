@@ -125,10 +125,19 @@ const fullyKnown = (() => {
   return { gcH, staleH: Y.encodeStateAsUpdate(h, rawSV({ [L]: 1 })), lAll: Y.encodeStateAsUpdate(l) };
 })();
 
+// A peer's setAttribute on the XmlText root "t", alone in its update: a
+// keyed change of the root that depends on nothing.
+const keyedXmlTextRoot = (() => {
+  const d = rawDoc(MID);
+  d.get("t", Y.XmlText).setAttribute("k", "v");
+  return Y.encodeStateAsUpdate(d);
+})();
+
 const T = "text:t";
 const A = "array:a";
 const M = "map:m";
 const X = "xml:x";
+const XT = "xmltext:t";
 const O = "map:o";
 
 const appends = [];
@@ -693,13 +702,232 @@ const scenarios = [
   },
   {
     name: "insert-into-root-typed-after-formatting",
-    changed: false,
-    description: "a document receives bold text while its root is untyped, then types it and appends: yjs's fresh YText has search markers on (format markers turn them off only as they integrate), so the insert starts at a marker with no attributes and steps over the closing bold:null; ygo keeps walking from the start, collects bold and inserts before it (pinned, docs/tech-debt.md)",
+    description: "a document receives bold text while its root is untyped, then types it and appends: yjs's fresh YText has search markers on (format markers turn them off only as they integrate), so the insert starts at a marker with no attributes, steps over the closing bold:null and is plain",
     docs: 2,
     steps: [
       txn(0, null, ins(T, 0, "xy"), fmt(T, 0, 2, { bold: true })),
       apply(0, 1, "remote", "state"),
       txn(1, null, ins(T, 2, "!")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  // Roots typed after formatted text arrived ("late"): the receiver, doc 1,
+  // applies doc 0's state while its root is untyped and reads it as text
+  // with its first op. Until a format marker integrates into it, its
+  // inserts, embeds without attributes and deletes start at yjs's search
+  // markers, with only the attributes of the markers passed from there.
+  // "abcd" with "cd" bold: ab, bold:true, cd, bold:null.
+  ...[
+    ["late-root-marker-left-by-earlier-insert", "an insert inside the bold run leaves a search marker on cd, after bold:true; the next insert at the run's start begins there with no attributes and is bold", [ins(T, 3, "Q")], [ins(T, 2, "Z")]],
+    ["late-root-fresh-insert-before-run", "with no marker yet the insert at the run's start walks from the start and goes in before bold:true, plain", [], [ins(T, 2, "Z")]],
+    ["late-root-embed-without-attributes", "an embed without attributes uses the search markers: after an insert left one past bold:true, the embed at the run's start goes in after bold:true and is bold", [ins(T, 3, "Q")], [embed(T, 2, { img: 1 })]],
+    ["late-root-embed-with-empty-attributes", "an embed with {} walks from the start: the same embed goes in before bold:true, plain", [ins(T, 3, "Q")], [embed(T, 2, { img: 1 }, {})]],
+    ["late-root-insert-with-empty-attributes", "an insert with {} walks from the start: after the same earlier insert the text goes in before bold:true, plain", [ins(T, 3, "Q")], [ins(T, 2, "Z", {})]],
+    ["late-root-delete-moves-marker", "a delete before the marker moves it back by what it deleted; the insert at the run's start begins at the moved marker and is bold", [ins(T, 3, "Q")], [del(T, 0, 1)], [ins(T, 1, "Z")]],
+    ["late-root-delta-insert-moves-marker", "applyDelta walks from the start but moves the markers past what it inserts; the insert at the run's start begins at the moved marker and is bold", [ins(T, 3, "Q")], [delta(T, [{ retain: 1 }, { insert: "D" }])], [ins(T, 3, "Z")]],
+    ["late-root-delta-delete-moves-marker", "a delta's delete moves the markers back as a delete does", [ins(T, 3, "Q")], [delta(T, [{ delete: 1 }])], [ins(T, 1, "Z")]],
+    ["late-root-rewind-to-run-start", "three inserts typed in a row in one transaction: findMarker steps back over the receiver's consecutive items to the first, so the markers sit on it, and the next insert starts there", [ins(T, 2, "Q"), ins(T, 3, "R"), ins(T, 4, "S")], [ins(T, 2, "Z")]],
+    ["late-root-rewind-to-run-start-past-run", "the same after the bold run; the insert inside the run starts from the markers they left", [ins(T, 4, "Q"), ins(T, 5, "R"), ins(T, 6, "S")], [ins(T, 3, "Z")]],
+    ["late-root-marker-cap", "90 inserts in one transaction, alternating between the end and the bold run's start, overflow the 80 search markers; the insert after them starts at the marker the eviction kept", Array.from({ length: 90 }, (_, i) => ins(T, i % 2 ? 4 + i : 2 + (i % 7), String(i % 10))), [ins(T, 2, "Z")]],
+    ["late-root-local-format-ends-markers", "a local format integrates a format marker, which turns the markers off: the next insert at the run's start walks from the start and is plain, though the insert before the format left a marker past bold:true", [ins(T, 3, "Q")], [fmt(T, 0, 1, { italic: true })], [ins(T, 3, "Y")], [ins(T, 2, "Z")]],
+    ["late-root-empty-format-splits", "a format with {} changes nothing but splits the items at the range's ends, which moves the markers a later insert starts from; a remote insert in between clears them", [fmt(T, 1, 1, {}), ins(T, 3, "Q")], [ins(T, 1, "D")]],
+    ["late-root-then-formatted-delete", "after a local format turns the markers off, deletes and inserts run as in a formatted text", [ins(T, 3, "Q")], [ins(T, 2, "Z")], [fmt(T, 0, 1, { italic: true })], [del(T, 3, 2)], [ins(T, 4, "W")]],
+  ].map(([name, description, ...txns]) => ({
+    name,
+    description,
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      ...txns.map((ops) => txn(1, null, ...ops)),
+      apply(1, 0, "remote", "diff"),
+    ],
+  })),
+  {
+    name: "late-root-delete-drops-closing-marker",
+    description: "deleting the last bold character of a root typed late: the delete starts at a search marker with no attributes, so the cleanup takes the closing bold:null for redundant and deletes it with the character",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "xy"), fmt(T, 0, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, del(T, 1, 1)),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-run-typed-bold-in-one-call",
+    description: "text typed bold in one call has consecutive clocks with its markers, so findMarker steps back over them to bold:true: an insert inside the run is bold, one at its end begins at the marker that leaves, and one at its start before bold:true is plain",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "ab")),
+      txn(0, null, ins(T, 2, "cdef", { bold: true })),
+      txn(0, null, ins(T, 6, "gh")),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(T, 4, "Q")),
+      txn(1, null, ins(T, 5, "Z")),
+      txn(1, null, ins(T, 2, "Y")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-format-markers-all-deleted",
+    description: "a root whose format markers were all removed before it arrived holds no live marker: inserts land as in a plain text",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 1, 2, { bold: true })),
+      txn(0, null, fmt(T, 1, 2, { bold: null })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(T, 2, "Z")),
+      txn(1, null, ins(T, 3, "Y")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-remote-insert-clears-markers",
+    description: "a peer's insert into the root clears its search markers (yjs _callObserver for a remote transaction): the insert at the run's start then walks from the start and is plain",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(T, 3, "Q")),
+      txn(0, null, ins(T, 4, "e")),
+      apply(0, 1, "remote", "diff"),
+      txn(1, null, ins(T, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-remote-format-ends-markers",
+    description: "a peer's format marker turns the markers off: the inserts after it walk from the start, so the second, at the run's start, is plain where with markers on it would begin at the marker the first left",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(0, null, fmt(T, 0, 1, { italic: true })),
+      apply(0, 1, "remote", "diff"),
+      txn(1, null, ins(T, 3, "Q")),
+      txn(1, null, ins(T, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-remote-change-elsewhere-keeps-markers",
+    description: "a peer's change to another root leaves the text's markers: the insert at the run's start begins at the marker the earlier insert left and is bold",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(T, 3, "Q")),
+      txn(0, null, ins("text:u", 0, "u")),
+      apply(0, 1, "remote", "diff"),
+      txn(1, null, ins(T, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-update-with-nothing-new-keeps-markers",
+    description: "an update that brings nothing new changes no type and clears nothing: the insert at the run's start begins at the earlier marker and is bold",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(T, 3, "Q")),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(T, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-undo-clears-markers",
+    description: "an undo step on a root typed late clears its search markers (yjs popStackItem): the insert at the run's start after it walks from the start and is plain",
+    docs: 2,
+    managers: [{ doc: 1, scope: T }],
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      manage(0),
+      txn(1, null, ins(T, 3, "Q")),
+      txn(1, null, ins(T, 1, "P")),
+      undo(1, 0),
+      txn(1, null, ins(T, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-xmltext-marker-left-by-earlier-insert",
+    description: "an XmlText root typed late is a YText: the second insert begins at the marker the first left and is bold",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(XT, 0, "abcd")),
+      txn(0, null, fmt(XT, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(XT, 3, "Q")),
+      txn(1, null, ins(XT, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-empty-format-splits-before-remote-insert",
+    description: "a format with {} splits the bold run, the insert after it leaves a marker on the left half, a peer's insert clears the markers but not the flags, and the inserts after it start where the split left them",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "abcd")),
+      txn(0, null, fmt(T, 1, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, fmt(T, 2, 1, {}), ins(T, 3, "Q")),
+      txn(0, null, ins(T, 4, "e")),
+      apply(0, 1, "remote", "diff"),
+      txn(1, null, ins(T, 3, "B")),
+      txn(1, null, ins(T, 1, "D")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-merge-repoints-marker",
+    description: "a format that changes nothing splits xy on a root typed late, and the insert's marker lands on y; y merges back into x at commit, so the marker moves to x with its index less x's length, x's marker flag left off as yjs mergeWith leaves it, and the next inserts start there",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(T, 0, "xy"), fmt(T, 0, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, fmt(T, 1, 1, { bold: true }), ins(T, 2, "Q")),
+      txn(1, null, ins(T, 1, "Z")),
+      txn(1, null, ins(T, 2, "W")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-xmltext-stale-flag-after-remote-clear",
+    description: "a remote clear empties the markers but leaves the items' marker flags: the next insert's marker walks left onto cd, still flagged, and is dropped, so the insert at the run's start walks from the start and is plain",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(XT, 0, "abcd")),
+      txn(0, null, fmt(XT, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(XT, 4, "Q")),
+      applyRaw(1, "remote", keyedXmlTextRoot),
+      txn(1, null, ins(XT, 4, "X")),
+      txn(1, null, ins(XT, 2, "Z")),
+      apply(1, 0, "remote", "diff"),
+    ],
+  },
+  {
+    name: "late-root-xmltext-remote-attribute-clears-markers",
+    description: "a peer's setAttribute on an XmlText root typed late moves no position but clears its search markers, as yjs clears them for every type a remote transaction changed: the insert at the run's start walks from the start and is plain",
+    docs: 2,
+    steps: [
+      txn(0, null, ins(XT, 0, "abcd")),
+      txn(0, null, fmt(XT, 2, 2, { bold: true })),
+      apply(0, 1, "remote", "state"),
+      txn(1, null, ins(XT, 3, "Q")),
+      applyRaw(1, "remote", keyedXmlTextRoot),
+      txn(1, null, ins(XT, 2, "Z")),
       apply(1, 0, "remote", "diff"),
     ],
   },
@@ -1654,6 +1882,7 @@ const resolveType = (doc, path) => {
     case "array": cur = doc.getArray(name); break;
     case "map": cur = doc.getMap(name); break;
     case "xml": cur = doc.getXmlFragment(name); break;
+    case "xmltext": cur = doc.get(name, Y.XmlText); break;
     default: throw new Error(`unknown root kind ${kind}`);
   }
   for (const seg of segs.slice(1)) {

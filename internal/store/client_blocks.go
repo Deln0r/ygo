@@ -154,14 +154,18 @@ func (l *ClientBlockList) SquashFrom(startIdx int) int {
 }
 
 // squashItems merges other into its left neighbour i (Item.TrySquash)
-// and moves the search markers that pointed at other onto i.
+// and moves the search markers that pointed at other onto i, in both
+// lists: MarkerList and a late-typed text's TextMarkers (yjs mergeWith).
 func squashItems(i, other *block.Item) bool {
 	before := i.Len
 	if !i.TrySquash(other) {
 		return false
 	}
-	if br := i.Parent.Branch; br != nil && br.Markers != nil {
-		br.Markers.Absorbed(other, i, before)
+	if br := i.Parent.Branch; br != nil {
+		if br.Markers != nil {
+			br.Markers.Absorbed(other, i, before)
+		}
+		br.TextMarkers.OnMerge(other, i, before)
 	}
 	return true
 }

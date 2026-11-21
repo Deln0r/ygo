@@ -193,44 +193,13 @@ func (sv svJSON) encode(t *testing.T) []byte {
 
 // knownUpdateEventDivergences pins the scenarios where ygo's events do not yet
 // match yjs, with the exact events ygo emits today. A scenario that starts to
-// match, or diverges in another way, fails the test.
+// match, or diverges in another way, fails the test. None is pinned since
+// 1.48.0; the last pin listed its events as "step|doc|origin|v1|v2" lines
+// read by a pinnedEvents helper (in the 1.47.1 tree).
 var knownUpdateEventDivergences = map[string]struct {
 	reason string
 	events []updateEvent
-}{
-	"insert-into-root-typed-after-formatting": {
-		reason: "yjs builds a fresh YText when an untyped root is first read as text, with search markers on, though the root already holds format markers (ContentFormat.integrate turns them off as it integrates); the next insert starts at a marker with no attributes in effect and steps over the closing bold:null, so \"!\" is plain. ygo's text keeps walking from the start, collects bold and inserts before the closing marker, so \"!\" is bold (docs/tech-debt.md, \"A root typed after formatted text arrived inserts as a formatted text\")",
-		events: pinnedEvents(
-			"0|0|nil|0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00|0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00",
-			"1|1|remote|0103cdcc83da0b000401017402787946cdcc83da0b0004626f6c64047472756586cdcc83da0b0104626f6c64046e756c6c00|0002000206cd9987b4170101020100050400460086100b747879626f6c64626f6c640102440001010000010300787e00",
-			"2|1|nil|0101d689cf810100c4cdcc83da0b01cdcc83da0b03012100|00000b96939e8302cd9987b417000102010601c40301210100000001010000",
-			"3|0|remote|0101d689cf81010084cdcc83da0b03012100|00000a96939e83028d9987b41701060001840301210100000001010000",
-		),
-	},
-}
-
-// pinnedEvents parses "step|doc|origin|v1|v2" lines, origin "nil" for none.
-func pinnedEvents(lines ...string) []updateEvent {
-	out := make([]updateEvent, 0, len(lines))
-	for _, l := range lines {
-		f := strings.Split(l, "|")
-		if len(f) != 5 {
-			panic("pinned event needs 5 fields: " + l)
-		}
-		step, err1 := strconv.Atoi(f[0])
-		doc, err2 := strconv.Atoi(f[1])
-		if err1 != nil || err2 != nil {
-			panic("bad pinned event: " + l)
-		}
-		e := updateEvent{Step: step, Doc: doc, V1: f[3], V2: f[4]}
-		if f[2] != "nil" {
-			o := f[2]
-			e.Origin = &o
-		}
-		out = append(out, e)
-	}
-	return out
-}
+}{}
 
 func TestUpdateEvents_Fixtures(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "update-event-fixtures.json"))
@@ -394,6 +363,8 @@ func (ed *updateEventDoc) root(name string) any {
 		r = ygo.NewMap(ed.d, n)
 	case "xml":
 		r = ygo.NewXmlFragment(ed.d, n)
+	case "xmltext":
+		r = ygo.NewXmlText(ed.d, n)
 	default:
 		panic("unknown root kind " + kind)
 	}
@@ -431,7 +402,7 @@ func replayUpdateEvents(t *testing.T, sc updateEventScenario, format string) ([]
 		ed := &updateEventDoc{d: d, roots: map[string]any{}}
 		for name := range rootNames {
 			switch kind, _, _ := strings.Cut(name, ":"); kind {
-			case "text", "array", "map", "xml":
+			case "text", "array", "map", "xml", "xmltext":
 			default:
 				t.Fatalf("unknown root kind %q", kind)
 			}

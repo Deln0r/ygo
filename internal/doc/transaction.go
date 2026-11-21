@@ -564,6 +564,7 @@ func (t *TransactionMut) gcNestedChildren(br *block.Branch, touched map[uint64]u
 	br.BlockLen = 0
 	br.ContentLen = 0
 	br.Markers.Invalidate()
+	br.TextMarkers = nil
 }
 
 // squashNewBlocks collapses runs of same-client adjacent-clock items
@@ -792,6 +793,7 @@ func (t *TransactionMut) deleteTypeContent(br *block.Branch) {
 		}
 	}
 	br.Markers.Invalidate()
+	br.TextMarkers = nil
 	if _, ok := t.changedTypes[br]; ok {
 		delete(t.changedTypes, br)
 		for i, b := range t.changedOrder {
@@ -849,6 +851,18 @@ func (t *TransactionMut) ChangedKeys(b *block.Branch) map[string]struct{} {
 
 // PositionalChanged reports whether branch saw positional (Array /
 // Text) content changes this transaction.
+// ClearPositionalTextMarkers empties the TextMarkers of every type whose
+// positional content this transaction changed, keeping the items' marker
+// flags, as yjs UndoManager popStackItem empties _searchMarker for each
+// changed type with a positional change after the step.
+func (t *TransactionMut) ClearPositionalTextMarkers() {
+	for _, b := range t.changedOrder {
+		if cs := t.changedTypes[b]; cs != nil && cs.positional {
+			b.TextMarkers.Clear()
+		}
+	}
+}
+
 // InvalidatePositionalMarkers drops the search markers of every type whose
 // positional content this transaction changed. The type API keeps its
 // markers in step with its own edits; deletions that do not go through
@@ -859,6 +873,9 @@ func (t *TransactionMut) ChangedKeys(b *block.Branch) map[string]struct{} {
 // A type whose markers were reset and whose positions have not changed
 // since is skipped: its markers are as valid as after the reset.
 func (t *TransactionMut) InvalidatePositionalMarkers() {
+	// TextMarkers are cleared elsewhere, where yjs clears them: per type as
+	// the commit dispatches a remote transaction's events, and after an
+	// undo step (ClearPositionalTextMarkers).
 	for _, b := range t.staleMarkers {
 		if cs := t.changedTypes[b]; cs != nil && cs.stale {
 			b.Markers.Invalidate()

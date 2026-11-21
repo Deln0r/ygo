@@ -104,10 +104,15 @@ func (it *Item) IsCountable() bool { return it.Flags&FlagCountable != 0 }
 func (it *Item) IsKeep() bool      { return it.Flags&FlagKeep != 0 }
 func (it *Item) IsLinked() bool    { return it.Flags&FlagLinked != 0 }
 
+// IsMarked reports whether a TextMarkers marker points at it, or did when
+// its list was last cleared (yjs Item.marker).
+func (it *Item) IsMarked() bool { return it.Flags&FlagMarked != 0 }
+
 func (it *Item) SetDeleted(v bool)   { setFlag(&it.Flags, FlagDeleted, v) }
 func (it *Item) SetCountable(v bool) { setFlag(&it.Flags, FlagCountable, v) }
 func (it *Item) SetKeep(v bool)      { setFlag(&it.Flags, FlagKeep, v) }
 func (it *Item) SetLinked(v bool)    { setFlag(&it.Flags, FlagLinked, v) }
+func (it *Item) SetMarked(v bool)    { setFlag(&it.Flags, FlagMarked, v) }
 
 func setFlag(bits *uint16, mask uint16, on bool) {
 	if on {
@@ -166,7 +171,10 @@ func (it *Item) Splice(offset uint64) *Item {
 		Parent:      it.Parent,
 		ParentSub:   it.ParentSub,
 		Moved:       it.Moved,
-		Flags:       it.Flags,
+		// The right half carries no marker flag, as yjs splitItem builds
+		// it with a fresh info: a marker stays on the left half, which
+		// starts where the item did.
+		Flags: it.Flags &^ FlagMarked,
 	}
 	// A redone item's halves map to the matching halves of the item it
 	// was redone into, as yjs splitItem keeps redone: undo follows this

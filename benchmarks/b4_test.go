@@ -103,3 +103,70 @@ func BenchmarkB4_RealWorldTrace(b *testing.B) {
 	})
 	runStandardSuite(b, build)
 }
+
+// BenchmarkB4_LateRoot replays the trace into a root that received one bold
+// "B" before it was first read as text, so it stays a LateText for the
+// whole trace (the trace writes no formatting) and every insert and delete
+// goes through yjs's search-marker lookup (TextMarkers) rather than the
+// MarkerList. The "B" stays at the end: the trace's positions never pass
+// the text it built. yjs's side of the comparison is the same replay into
+// doc.getText over the same state.
+func BenchmarkB4_LateRoot(b *testing.B) {
+	tf, _ := loadB4Trace(b)
+	w := ygo.NewDocWithOptions(ygo.Options{ClientID: 2})
+	wt := ygo.NewText(w, "text")
+	wtxn := w.WriteTxn()
+	if err := wt.InsertWithAttributes(wtxn, 0, "B", ygo.Attrs{"bold": true}); err != nil {
+		b.Fatal(err)
+	}
+	wtxn.Commit()
+	seed := ygo.EncodeStateAsUpdate(w)
+
+	build := func(perEdit bool) *ygo.Doc {
+		d := ygo.NewDocWithOptions(ygo.Options{ClientID: 1})
+		if err := ygo.ApplyUpdate(d, seed); err != nil {
+			b.Fatal(err)
+		}
+		t := ygo.NewText(d, "text")
+		if !t.Branch().LateText() {
+			b.Fatal("the root is not a late text")
+		}
+		apply := func(txn *ygo.TransactionMut, e b4Edit) {
+			pos, delLen, ins := unpackEdit(e)
+			if delLen > 0 {
+				_ = t.Delete(txn, pos, delLen)
+			}
+			if len(ins) > 0 {
+				_ = t.Insert(txn, pos, ins)
+			}
+		}
+		if perEdit {
+			for _, e := range tf.Edits {
+				txn := d.WriteTxn()
+				apply(txn, e)
+				txn.Commit()
+			}
+		} else {
+			txn := d.WriteTxn()
+			for _, e := range tf.Edits {
+				apply(txn, e)
+			}
+			txn.Commit()
+		}
+		return d
+	}
+
+	if got := ygo.NewText(build(false), "text").String(); got != tf.FinalText+"B" {
+		b.Fatalf("final text mismatch: got %d chars, want %d chars", len(got), len(tf.FinalText)+1)
+	}
+	b.Run("ops", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			build(false)
+		}
+	})
+	b.Run("per-edit", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			build(true)
+		}
+	})
+}

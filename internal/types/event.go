@@ -105,6 +105,13 @@ func dispatchEvents(t *doc.TransactionMut) {
 		if br.Item != nil && br.Item.IsDeleted() {
 			continue
 		}
+		// yjs AbstractType._callObserver empties the search markers of
+		// each type a remote transaction changed, at its turn, before its
+		// observers run, whether or not it has any; the items keep their
+		// marker flags.
+		if !t.Local {
+			br.TextMarkers.Clear()
+		}
 		var build func() any
 		if keys := t.ChangedKeys(br); len(keys) > 0 {
 			// A text with changed attributes gets a text event too, as

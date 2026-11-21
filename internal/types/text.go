@@ -73,7 +73,12 @@ func (t *Text) String() string {
 // text) does: it goes in right after the content before idx, past
 // tombstones and past markers that set a value already in effect, and
 // before the first marker that changes one. So text typed at the end of
-// a bold run is bold, and text typed at its start is not.
+// a bold run is bold, and text typed at its start is not. In a root that
+// received formatted text before it was first read as text, and into
+// which no format item has integrated since, yjs starts from a search
+// marker and takes only the formatting of the markers it passes from
+// there, so the result depends on the edits before; ygo does the same
+// (Branch.LateText).
 //
 // Multiple consecutive Insert calls produce separate Items;
 // commit-time TrySquash merges adjacent same-client adjacent-clock
@@ -90,6 +95,18 @@ func (t *Text) Insert(txn *doc.TransactionMut, idx uint64, str string) error {
 		return fmt.Errorf("text: insert index %d out of range [0, %d]", idx, length)
 	}
 	if t.branch.HasFormatting {
+		if t.branch.LateText() {
+			// yjs insert without attributes: the position from a search
+			// marker, and the attributes in effect there as the cursor
+			// collected them on its way from it.
+			pos, err := findPosition(txn, t.branch, idx, true)
+			if err != nil {
+				return err
+			}
+			attrs, keys := pos.currentAttrs()
+			insertText(txn, t.branch, pos, block.Content{Kind: block.KindString, Str: str}, utf16.Length(str), attrs, keys)
+			return nil
+		}
 		pos, err := findTextPos(txn, t.branch, idx)
 		if err != nil {
 			return err
@@ -143,6 +160,14 @@ func (t *Text) Delete(txn *doc.TransactionMut, idx, length uint64) error {
 	}
 	if length == 0 {
 		return nil
+	}
+	if t.branch.LateText() {
+		// yjs delete: deleteText from the search-marker position.
+		pos, err := findPosition(txn, t.branch, idx, true)
+		if err != nil {
+			return err
+		}
+		return deleteText(txn, t.branch, pos, length)
 	}
 	defer t.branch.Markers.ShrinkAfter(idx, length)
 
@@ -222,12 +247,20 @@ func cleanupFormattingGap(txn *doc.TransactionMut, branch *block.Branch, start *
 // the number of markers deleted.
 func cleanupFormattingGapFrom(txn *doc.TransactionMut, start, curr *block.Item, startAttrs Attrs, pos *textPos) int {
 	end := start
-	last := map[string]*block.Item{}
+	var last map[string]*block.Item
 	for end != nil && (end.IsDeleted() || !end.IsCountable()) {
 		if !end.IsDeleted() && end.Content.Kind == block.KindFormat {
+			if last == nil {
+				last = map[string]*block.Item{}
+			}
 			last[end.Content.FormatKey] = end
 		}
 		end = end.Right
+	}
+	// The walk below acts only on live format markers; a run without one,
+	// a run of tombstones after a delete above all, has nothing to clean.
+	if last == nil {
+		return 0
 	}
 	cleanups := 0
 	reachedCurr := false
@@ -264,6 +297,7 @@ func cleanupFormattingGapFrom(txn *doc.TransactionMut, start, curr *block.Item, 
 // cleanupFormattingGapFrom then removes the ones that no longer mark
 // anything and corrects the cursor's attributes.
 func deleteText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, length uint64) error {
+	startLength := length
 	startAttrs, _ := pos.currentAttrs()
 	start := pos.right
 	for length > 0 && pos.right != nil {
@@ -285,6 +319,9 @@ func deleteText(txn *doc.TransactionMut, branch *block.Branch, pos *textPos, len
 	if start != nil {
 		cleanupFormattingGapFrom(txn, start, pos.right, startAttrs, pos)
 	}
+	// yjs: if (parent._searchMarker) updateMarkerChanges(..., -startLength
+	// + length), at the index the cursor stayed at.
+	branch.TextMarkers.Update(pos.index, -int64(startLength-length))
 	return nil
 }
 

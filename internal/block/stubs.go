@@ -108,11 +108,10 @@ type Branch struct {
 	Markers *MarkerList
 
 	// HasFormatting is set when a format item integrates into this
-	// branch, local or remote, and is never cleared (yjs
-	// _hasFormatting). Until it is set the branch holds no format
-	// item, so a text insert needs no attributes in effect and can take
-	// its position from Markers; once it is set, text inserts walk from
-	// Start as yjs does for a type with formatting.
+	// branch, local or remote, and is never cleared. Until it is set the
+	// branch holds no format item, so a text insert needs no attributes
+	// in effect and can take its position from Markers; once it is set,
+	// a text's inserts and deletes go as LateText says.
 	HasFormatting bool
 
 	// FormattedText is set when a format item integrates into this
@@ -122,6 +121,11 @@ type Branch struct {
 	// items without it, and yjs builds a fresh YText, flag false, when
 	// such a root is first read as text.
 	FormattedText bool
+
+	// TextMarkers is yjs's search-marker list of a text in LateText
+	// state, allocated by its first lookup and dropped when a format
+	// item integrates into it (text_markers.go).
+	TextMarkers *TextMarkers
 
 	// Observers / DeepObservers mirror the shared-type change-event
 	// callbacks registered on this branch (yjs _eH / _dEH): the
@@ -143,6 +147,20 @@ type Branch struct {
 
 	observers     listeners[func(any)]
 	deepObservers listeners[func([]any)]
+}
+
+// LateText reports whether b is a text whose root was typed after format
+// items arrived and into which no format item has integrated since: yjs's
+// fresh YText over such a root (Doc.get) has its search markers on and
+// _hasFormatting false, so its insert, insertEmbed without attributes and
+// delete start at a search marker (TextMarkers) with only the attributes of
+// the markers passed from there. A text typed before its first format item
+// (FormattedText) walks from the start as yjs does with markers off, and
+// one that never had a format item (no HasFormatting) needs no attributes,
+// so its results do not depend on markers. A nested text is constructed
+// typed, so it is never LateText.
+func (b *Branch) LateText() bool {
+	return b.HasFormatting && !b.FormattedText && (b.TypeRef == TypeRefText || b.TypeRef == TypeRefXmlText)
 }
 
 // MapKeys returns the keys of Map in yjs's _map order: the order each
