@@ -69,10 +69,22 @@ type hocuspocusSession struct {
 }
 
 func (s *Server) serveHocuspocus(w http.ResponseWriter, r *http.Request) {
+	// Reserve a socket slot before the handshake completes, so a client
+	// whose handshake completed holds it (reserveConn), and before
+	// accepting any keys, including for sockets which never authenticate.
+	// Key admission does not consume another slot. Released when the
+	// handler returns, whatever the path.
+	reserved := s.reserveConn()
+	if reserved {
+		defer s.totalConns.Add(-1)
+	}
 	aw, rec := recordHijack(w)
 	ws, err := websocket.Accept(aw, r, &websocket.AcceptOptions{OriginPatterns: s.opts.OriginPatterns})
 	if err != nil {
 		return
+	}
+	if s.afterAccept != nil {
+		s.afterAccept()
 	}
 	t := &conn{server: s, ws: ws, queue: newSendQueue(s.maxSendQueue(), s.maxSendQueueBytes(), s.writeTimeout())}
 	if rec != nil {
@@ -84,19 +96,10 @@ func (s *Server) serveHocuspocus(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(limit)
 
-	// Reserve a socket slot before accepting any keys, including sockets
-	// which never authenticate. Key admission does not consume another slot.
-	s.docsMu.Lock()
-	full := s.maxConns() > 0 && s.totalConns.Load() >= int64(s.maxConns())
-	if !full {
-		s.totalConns.Add(1)
-	}
-	s.docsMu.Unlock()
-	if full {
+	if !reserved {
 		t.closeWS(websocket.StatusTryAgainLater, "server connection limit reached")
 		return
 	}
-	defer s.totalConns.Add(-1)
 	t.startWriter()
 	defer func() {
 		t.queue.terminate(causeReleased)
@@ -247,7 +250,7 @@ func (s *hocuspocusSession) handle(raw []byte) bool {
 			return false
 		}
 		var ok bool
-		c, _, ok, err = s.server.admitDocument(s.request.Context(), syncpkg.RouteDocName(key), s.transport.ws, s, key)
+		c, _, ok, err = s.server.admitDocument(s.request.Context(), syncpkg.RouteDocName(key), s.transport.ws, s, key, false)
 		if err != nil || !ok {
 			s.transport.closeFromServer(websocket.StatusTryAgainLater, "document admission failed")
 			return false

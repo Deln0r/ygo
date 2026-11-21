@@ -322,9 +322,11 @@ type Options struct {
 	// Zero selects a safe default (4096); a negative value disables the
 	// cap. A connection beyond the cap is rejected at the upgrade with
 	// websocket.StatusPolicyViolation; connections already in the room
-	// keep working. The newest socket is the one refused, so an
-	// established collaborator is never displaced by a flood. Hocuspocus
-	// counts each key separately; a refused key closes its socket with 1013.
+	// keep working. A connection already admitted is never displaced by a
+	// flood; between two still being admitted, the one admitted second is
+	// refused, whichever handshake finished first (the room is decided
+	// after the handshake, unlike MaxConns). Hocuspocus counts each key
+	// separately; a refused key closes its socket with 1013.
 	MaxConnsPerDoc int
 
 	// MaxDocs bounds the number of distinct documents the server holds
@@ -355,10 +357,13 @@ type Options struct {
 	// before its room is created or loaded, so a rejected connection
 	// neither orphans a fresh document nor forces a Store load; connections
 	// already established keep working and the newest socket is the one
-	// refused. The count is of admitted connections and drops as they
-	// depart, so the cap tracks live load, not lifetime connections.
-	// A Hocuspocus socket counts once, including before its first key is
-	// authenticated; its document keys do not consume additional slots.
+	// refused. A connection counts from the moment its upgrade request
+	// reaches the handler, before its handshake completes, so a client whose
+	// handshake completed is never refused in favour of one that arrived
+	// later; it stops counting when it departs or is refused, so the cap
+	// tracks live load, not lifetime connections. A Hocuspocus socket counts
+	// once, including before its first key is authenticated; its document
+	// keys do not consume additional slots.
 	MaxConns int
 
 	// DocIdleTimeout keeps a document resident in memory for this long after
@@ -476,12 +481,17 @@ type Server struct {
 	// parking into a registry no sweeper will scan again.
 	closed bool
 
-	// totalConns counts admitted WebSocket connections across all
-	// documents, backing the global Options.MaxConns cap. It is bumped
-	// under docsMu in admitConn (so admissions serialize against the cap
-	// check and cannot overshoot) and dropped in releaseConn; an atomic so
-	// the decrement, which runs outside docsMu, is safe.
+	// totalConns counts WebSocket connections across all documents, from
+	// before their handshake to their release, backing the global
+	// Options.MaxConns cap. reserveConn takes a slot with a compare-and-swap,
+	// so the count never passes the cap and a reservation never waits on
+	// docsMu; releaseConn (or the handler, for a connection that was not
+	// admitted) gives it back.
 	totalConns atomic.Int64
+
+	// afterAccept, when set (tests only), runs right after a successful
+	// WebSocket handshake in serveWS and serveHocuspocus.
+	afterAccept func()
 
 	// slowClientsClosed counts connections chosen for closing because they
 	// fell behind their send queue (Stats.SlowClientsClosed).
@@ -871,6 +881,18 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Take the global connection slot before the handshake completes, so a
+	// client whose handshake completed holds it (reserveConn). The handler
+	// owns it until the connection is admitted and releaseConn is set to
+	// give it back; every other exit, a panic included, releases it here.
+	reserved := s.reserveConn()
+	slotHeld := reserved
+	defer func() {
+		if slotHeld {
+			s.totalConns.Add(-1)
+		}
+	}()
+
 	// Keep the hijacked transport, so every close the server starts can be
 	// bounded (see defaultCloseHandshakeLimit).
 	aw, rec := recordHijack(w)
@@ -880,6 +902,9 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// websocket.Accept already wrote a response.
 		return
+	}
+	if s.afterAccept != nil {
+		s.afterAccept()
 	}
 	var raw net.Conn
 	if rec != nil {
@@ -891,19 +916,39 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	wsConn.SetReadLimit(readLimit)
 
-	c, state, ok, err := s.admitConn(r.Context(), docName, wsConn)
+	if !reserved {
+		// Server is at its global connection cap. Transient capacity, same
+		// close code as the document cap; the reason distinguishes.
+		closeWithin(wsConn, raw, s.closeLimit, websocket.StatusTryAgainLater, "server connection limit reached")
+		return
+	}
+	// A panic before admission (an adopter's OnLoadDocument, say) leaves the
+	// hijacked socket to no one: net/http recovers the handler but does not
+	// close a hijacked connection, so the client would wait on it. Close it
+	// and let the panic go on to net/http's log.
+	admitting := true
+	defer func() {
+		if admitting {
+			if p := recover(); p != nil {
+				_ = wsConn.CloseNow()
+				panic(p)
+			}
+		}
+	}()
+	c, state, ok, err := s.admitDocument(r.Context(), docName, wsConn, nil, "", true)
+	admitting = false
+	if err != nil || !ok {
+		// Refused: give the slot back before the close, which can take
+		// up to closeLimit.
+		s.totalConns.Add(-1)
+		slotHeld = false
+	}
 	if err != nil {
 		if errors.Is(err, errServerDocsFull) {
 			// Server is at its document cap. Signal transient capacity so
 			// a client can back off and retry, distinct from the per-doc
 			// connection cap's policy-violation close.
 			closeWithin(wsConn, raw, s.closeLimit, websocket.StatusTryAgainLater, "server document limit reached")
-			return
-		}
-		if errors.Is(err, errServerConnsFull) {
-			// Server is at its global connection cap. Transient capacity,
-			// same close code as the document cap; the reason distinguishes.
-			closeWithin(wsConn, raw, s.closeLimit, websocket.StatusTryAgainLater, "server connection limit reached")
 			return
 		}
 		closeWithin(wsConn, raw, s.closeLimit, websocket.StatusInternalError,
@@ -936,6 +981,8 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			s.opts.OnDisconnect(c.idForLog, docName)
 		}
 	}()
+	// releaseConn gives the slot back from here on.
+	slotHeld = false
 
 	if s.opts.OnConnect != nil {
 		// Request-aware gate, before syncing starts. A rejection (or a
@@ -1165,20 +1212,47 @@ func (b *bufferedApply) activate(live func([]byte)) {
 // (addConn takes connsMu) matches releaseConn's eviction and is not
 // inverted anywhere.
 func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
-	return s.admitDocument(ctx, docName, ws, nil, "")
+	return s.admitDocument(ctx, docName, ws, nil, "", false)
 }
 
-func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string) (c *conn, state *docState, ok bool, err error) {
+// reserveConn takes a global connection slot (Options.MaxConns), or reports
+// false when the server is at its cap. The serving paths take it before the
+// WebSocket handshake completes, so a connection whose handshake completed
+// holds its slot: taken after, a connection dialed later could take the last
+// slot first and the earlier one was refused. A compare-and-swap keeps the
+// count at or under the cap without a lock, so a reservation never waits on
+// a document load holding docsMu.
+func (s *Server) reserveConn() bool {
+	lim := int64(s.maxConns())
+	for {
+		n := s.totalConns.Load()
+		if lim > 0 && n >= lim {
+			return false
+		}
+		if s.totalConns.CompareAndSwap(n, n+1) {
+			return true
+		}
+	}
+}
+
+func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
 	// Global connection cap: refuse before creating or loading a room so a
 	// rejected connection neither orphans a fresh docState nor forces a
-	// Store load. The check here and the matching increment below both run
-	// under docsMu, so admissions serialize against the cap and can never
-	// overshoot it; concurrent releases only decrement totalConns, making
-	// this check at worst conservative, never permissive.
-	if lim := s.maxConns(); session == nil && lim > 0 && int(s.totalConns.Load()) >= lim {
-		return nil, nil, false, errServerConnsFull
+	// Store load. serveWS reserved its slot before the handshake
+	// (reserved); a caller that did not reserves it here and gives it back
+	// unless the connection is admitted. A Hocuspocus key takes no slot:
+	// its socket holds one.
+	if session == nil && !reserved {
+		if !s.reserveConn() {
+			return nil, nil, false, errServerConnsFull
+		}
+		defer func() {
+			if !ok {
+				s.totalConns.Add(-1)
+			}
+		}()
 	}
 	state, err = s.getOrCreateDocLocked(ctx, docName)
 	if err != nil {
@@ -1198,9 +1272,6 @@ func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocke
 	// across the whole admission), so the idle sweep can never observe a
 	// stale idleSince alongside a live connection.
 	state.idleSince = time.Time{}
-	if session == nil {
-		s.totalConns.Add(1)
-	}
 	return c, state, true, nil
 }
 
@@ -1230,8 +1301,8 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	// Drop the global connection count. releaseConn runs exactly once per
 	// admitted connection (serveWS defers it only past a successful
 	// admission, and the white-box callers release only admitConn results
-	// with ok==true), so this pairs one-to-one with the increment in
-	// admitConn and the count never drifts.
+	// with ok==true), so this pairs one-to-one with the slot reserveConn
+	// took for it and the count never drifts.
 	if c.session == nil {
 		s.totalConns.Add(-1)
 	}

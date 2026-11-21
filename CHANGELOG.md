@@ -18,6 +18,19 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.48.1] - 2026-11-22
+
+### Fixed
+
+- **A connection whose handshake had completed could lose its `MaxConns` slot to a later one.** Both serving paths (y-websocket and Hocuspocus) took the global connection slot after the WebSocket handshake, so a client's dial returned while its handler had not reserved anything yet. A client dialed after it could take the last slot first: the earlier one was closed with 1013 and the later one kept. The cap was never passed, but the slot went to the wrong connection. The slot is now taken before the handshake completes (a lock-free compare-and-swap, so it never waits on a document load), held by the handler until the connection is admitted, and given back on every other exit, before a refusal's close. `MaxConns` now counts a connection from when its upgrade request reaches the handler. CI showed it as `TestHocuspocusSocketAndDocumentLimits` timing out on the v1.48.0 tag run. Per-document caps (`MaxConnsPerDoc`, `MaxDocs`) are still decided after the handshake, as their documentation now says.
+- **A panic in `OnLoadDocument` left the client's socket open.** The handler had already taken over the connection from net/http, which recovers the panic but does not close a hijacked connection, so the client waited until its own timeout. The socket is now closed and the panic goes on to net/http's log. The connection slot comes back too.
+- `cmd/yserve` and `cmd/ygo-server` v1.48.1 carry both fixes.
+
+### Tests
+
+- `TestMaxConns_HandshakeOrderKeepsSlot` holds the first connection's handler right after its handshake (an unexported hook) and dials a second: the second must be refused with 1013 and the first admitted, for y-websocket and Hocuspocus. Before the fix it was the other way round.
+- `TestMaxConns_SlotReturnedOnEveryExit`: the slot comes back after a refused handshake (both paths), a load error, a load panic, an `OnConnect` panic and rejection, and the document cap; the next connection is admitted. 8 mutation controls each fail a test; the new tests and `TestHocuspocusSocketAndDocumentLimits` pass 50 runs under the race detector.
+
 ## [1.48.0] - 2026-11-22
 
 **Upgrade impact**: in a root that received formatted text before it was first read as text, inserts, embeds without attributes and deletes now go where yjs puts them, which can differ from where ygo put them before (see Fixed). Documents that read their roots as text before applying updates, and texts with no formatting, are unchanged byte for byte.
