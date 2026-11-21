@@ -30,6 +30,7 @@ listed in the core's entries.
   - Such a text now uses a port of yjs's marker list (`findMarker`, `updateMarkerChanges`, the repoint on a merge, the clears after a remote transaction and an undo step) until a format marker integrates into it. Inserts with attributes and `Format` walk from the start, as in yjs, and `Format` with no attributes walks the range too there: it changes nothing, but its splits move the markers.
   - `InsertEmbed` of an empty string still inserts nothing, where yjs writes a zero-length item.
   - The last pinned update-event divergence is gone, so the update-event set now counts in the README totals.
+  - `gomobile` v1.48.0 carries the fix (a mobile app that loads a document before it reads the root as text is the case it fixes).
 
 ### Tests
 
