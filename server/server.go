@@ -342,7 +342,9 @@ type Options struct {
 	// count. A
 	// connection that would create a document past the cap is refused at
 	// the upgrade with websocket.StatusTryAgainLater (1013); an already
-	// resident room is always admitted.
+	// resident room is always admitted. The cap is decided after the
+	// handshake: between two connections each creating a room, the one
+	// admitted second is refused, whichever handshake finished first.
 	MaxDocs int
 
 	// MaxConns bounds the total number of simultaneous WebSocket
@@ -881,6 +883,9 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if refuseUpgradeWithBody(w, r) {
+		return
+	}
 	// Take the global connection slot before the handshake completes, so a
 	// client whose handshake completed holds it (reserveConn). The handler
 	// owns it until the connection is admitted and releaseConn is set to
@@ -1213,6 +1218,21 @@ func (b *bufferedApply) activate(live func([]byte)) {
 // inverted anywhere.
 func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
 	return s.admitDocument(ctx, docName, ws, nil, "", false)
+}
+
+// refuseUpgradeWithBody answers an upgrade request that carries a body with
+// 400 and reports true. A WebSocket handshake has none, and completing one
+// would make net/http read the body first (it drains an unread body when the
+// response goes out), which a client can stall indefinitely while the
+// handler holds a connection slot. The response closes the connection, so
+// net/http does not read the body after it either.
+func refuseUpgradeWithBody(w http.ResponseWriter, r *http.Request) bool {
+	if r.ContentLength == 0 && len(r.TransferEncoding) == 0 {
+		return false
+	}
+	w.Header().Set("Connection", "close")
+	http.Error(w, "websocket upgrade with a request body", http.StatusBadRequest)
+	return true
 }
 
 // reserveConn takes a global connection slot (Options.MaxConns), or reports

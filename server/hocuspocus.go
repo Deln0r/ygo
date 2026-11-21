@@ -69,6 +69,9 @@ type hocuspocusSession struct {
 }
 
 func (s *Server) serveHocuspocus(w http.ResponseWriter, r *http.Request) {
+	if refuseUpgradeWithBody(w, r) {
+		return
+	}
 	// Reserve a socket slot before the handshake completes, so a client
 	// whose handshake completed holds it (reserveConn), and before
 	// accepting any keys, including for sockets which never authenticate.

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -199,4 +201,57 @@ func TestMaxConns_SlotReturnedOnEveryExit(t *testing.T) {
 			awaitTotalConns(t, s, held)
 		})
 	}
+}
+
+// TestMaxConns_UpgradeWithBodyRefused: an upgrade request that announces a
+// body and withholds it is answered with 400 at once and holds no slot.
+// Completing its handshake would make net/http read the body first, which
+// the client can stall forever while the handler holds the connection slot.
+func TestMaxConns_UpgradeWithBodyRefused(t *testing.T) {
+	for _, path := range []string{"/room", "/"} {
+		t.Run(path, func(t *testing.T) {
+			s := New(Options{MaxConns: 1})
+			url := startSlotServer(t, s)
+			host := strings.TrimPrefix(url, "ws://")
+			raw, err := net.Dial("tcp", host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer raw.Close()
+			req := "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+				"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nContent-Length: 1\r\n\r\n"
+			if _, err := raw.Write([]byte(req)); err != nil {
+				t.Fatal(err)
+			}
+			_ = raw.SetReadDeadline(time.Now().Add(5 * time.Second))
+			status, err := bufio.NewReader(raw).ReadString('\n')
+			if err != nil || !strings.Contains(status, " 400 ") {
+				t.Fatalf("response %q, %v; want 400", status, err)
+			}
+			awaitTotalConns(t, s, 0)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			next := dialSlot(t, ctx, url+"/ok", nil)
+			wantAdmitted(t, ctx, next, false)
+		})
+	}
+}
+
+// TestMaxConns_SlotBackBeforeRefusalClose: a y-websocket connection refused
+// at the document cap gives its slot back before its close, which waits up
+// to the close limit for a client that does not answer: while the refused
+// handler still waits, the count has dropped and another connection is
+// admitted.
+func TestMaxConns_SlotBackBeforeRefusalClose(t *testing.T) {
+	s := New(Options{MaxConns: 2, MaxDocs: 1})
+	url := startSlotServer(t, s)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	held := dialSlot(t, ctx, url+"/held", nil)
+	wantAdmitted(t, ctx, held, false)
+	// Refused at the document cap; never read, so its close is not answered.
+	_ = dialSlot(t, ctx, url+"/other", nil)
+	awaitTotalConns(t, s, 1)
+	next := dialSlot(t, ctx, url+"/held", nil)
+	wantAdmitted(t, ctx, next, false)
 }
