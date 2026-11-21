@@ -901,7 +901,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	// Keep the hijacked transport, so every close the server starts can be
 	// bounded (see defaultCloseHandshakeLimit).
 	aw, rec := recordHijack(w)
-	wsConn, err := websocket.Accept(aw, r, &websocket.AcceptOptions{
+	wsConn, err := s.acceptBounded(w, aw, r, &websocket.AcceptOptions{
 		OriginPatterns: s.opts.OriginPatterns,
 	})
 	if err != nil {
@@ -1218,6 +1218,25 @@ func (b *bufferedApply) activate(live func([]byte)) {
 // inverted anywhere.
 func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
 	return s.admitDocument(ctx, docName, ws, nil, "", false)
+}
+
+// acceptBounded is websocket.Accept with WriteTimeout on the writes it makes
+// before the connection is handed over: the 101 (net/http writes it as the
+// connection is hijacked, which then clears the deadline) or the error
+// response a refused handshake gets, which can be large (it can quote the
+// request's headers). Unbounded, a client that reads nothing would hold the
+// handler there, and with it a connection slot, for as long as it liked. On a
+// refusal the deadline is cleared again so a kept-alive connection is not cut
+// later. A ResponseWriter that cannot set deadlines (a middleware's wrapper
+// without Unwrap) leaves the writes unbounded, as before.
+func (s *Server) acceptBounded(w, aw http.ResponseWriter, r *http.Request, opts *websocket.AcceptOptions) (*websocket.Conn, error) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(s.writeTimeout()))
+	ws, err := websocket.Accept(aw, r, opts)
+	if err != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+	return ws, err
 }
 
 // refuseUpgradeWithBody answers an upgrade request that carries a body with

@@ -54,7 +54,12 @@ func startSlotServer(t *testing.T, s *Server) string {
 
 func awaitTotalConns(t *testing.T, s *Server, want int64) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	awaitTotalConnsWithin(t, s, want, 5*time.Second)
+}
+
+func awaitTotalConnsWithin(t *testing.T, s *Server, want int64, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(d)
 	for s.totalConns.Load() != want && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -238,10 +243,10 @@ func TestMaxConns_UpgradeWithBodyRefused(t *testing.T) {
 }
 
 // TestMaxConns_SlotBackBeforeRefusalClose: a y-websocket connection refused
-// at the document cap gives its slot back before its close, which waits up
-// to the close limit for a client that does not answer: while the refused
-// handler still waits, the count has dropped and another connection is
-// admitted.
+// at the document cap gives its slot back before its close, which waits for
+// a client that does not answer (five seconds in coder/websocket, up to the
+// close limit): within a second, while the refused handler still waits, the
+// count has dropped and another connection is admitted.
 func TestMaxConns_SlotBackBeforeRefusalClose(t *testing.T) {
 	s := New(Options{MaxConns: 2, MaxDocs: 1})
 	url := startSlotServer(t, s)
@@ -251,7 +256,63 @@ func TestMaxConns_SlotBackBeforeRefusalClose(t *testing.T) {
 	wantAdmitted(t, ctx, held, false)
 	// Refused at the document cap; never read, so its close is not answered.
 	_ = dialSlot(t, ctx, url+"/other", nil)
-	awaitTotalConns(t, s, 1)
+	awaitTotalConnsWithin(t, s, 1, time.Second)
 	next := dialSlot(t, ctx, url+"/held", nil)
 	wantAdmitted(t, ctx, next, false)
+}
+
+// TestMaxConns_StalledHandshakeWriteReturnsSlot: a client that sends an
+// upgrade request and reads nothing cannot hold the handler, and its
+// connection slot, in the handshake's writes: the 101 (over a pipe, a write
+// completes only when the other end reads) and the error response to a key
+// that is not valid, which quotes it, both end at WriteTimeout. The slot then
+// comes back (for a 101 that failed, once the connection's first write or,
+// for Hocuspocus, its AuthTimeout ends it) and a client that reads is
+// admitted.
+func TestMaxConns_StalledHandshakeWriteReturnsSlot(t *testing.T) {
+	const key = "dGhlIHNhbXBsZSBub25jZQ=="
+	for _, tc := range []struct {
+		name, path, key string
+		hocuspocus      bool
+	}{
+		{"y-websocket 101", "/room", key, false},
+		{"hocuspocus 101", "/", key, true},
+		{"y-websocket refusal", "/room", strings.Repeat("k", 32<<10), false},
+		{"hocuspocus refusal", "/", strings.Repeat("k", 32<<10), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New(Options{MaxConns: 1, WriteTimeout: 500 * time.Millisecond, AuthTimeout: 700 * time.Millisecond, OriginPatterns: []string{"*"}})
+			l := &pipeConns{ch: make(chan net.Conn), done: make(chan struct{})}
+			hs := &http.Server{Handler: s.Handler()}
+			go func() { _ = hs.Serve(l) }()
+			t.Cleanup(func() {
+				_ = hs.Close()
+				_ = l.Close()
+				_ = s.Close(context.Background())
+			})
+			serverEnd, stalled := net.Pipe()
+			t.Cleanup(func() { _ = stalled.Close() })
+			l.ch <- serverEnd
+			req := "GET " + tc.path + " HTTP/1.1\r\nHost: pipe\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+				"Sec-WebSocket-Key: " + tc.key + "\r\nSec-WebSocket-Version: 13\r\n\r\n"
+			go func() { _, _ = stalled.Write([]byte(req)) }()
+			// The handler takes the slot, then cannot write.
+			awaitTotalConns(t, s, 1)
+			awaitTotalConns(t, s, 0)
+
+			dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
+				a, b := net.Pipe()
+				select {
+				case l.ch <- a:
+					return b, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			next := dialSlot(t, ctx, "ws://pipe"+tc.path, &websocket.DialOptions{HTTPClient: &http.Client{Transport: &http.Transport{DialContext: dial}}})
+			wantAdmitted(t, ctx, next, tc.hocuspocus)
+		})
+	}
 }

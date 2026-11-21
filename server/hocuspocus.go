@@ -82,7 +82,7 @@ func (s *Server) serveHocuspocus(w http.ResponseWriter, r *http.Request) {
 		defer s.totalConns.Add(-1)
 	}
 	aw, rec := recordHijack(w)
-	ws, err := websocket.Accept(aw, r, &websocket.AcceptOptions{OriginPatterns: s.opts.OriginPatterns})
+	ws, err := s.acceptBounded(w, aw, r, &websocket.AcceptOptions{OriginPatterns: s.opts.OriginPatterns})
 	if err != nil {
 		return
 	}
