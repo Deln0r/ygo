@@ -15,5 +15,11 @@ go work init . ./persist/sqlite ./gomobile ./cmd/yserve ./cmd/ygo-server ./examp
 # being released, which may not be published yet; the go command reads a
 # required version's go.mod even for a workspace module, so that version
 # is replaced by the checkout too.
-v=$(awk '$1 == "github.com/Deln0r/ygo" { print $2; exit }' persist/sqlite/go.mod)
-go work edit -replace "github.com/Deln0r/ygo@$v=./" -replace "github.com/Deln0r/ygo/persist/sqlite@$v=./persist/sqlite"
+# Every version any nested module requires, as each may be the unpublished
+# one.
+for v in $(awk '$1 == "github.com/Deln0r/ygo" { print $2 }' persist/sqlite/go.mod gomobile/go.mod cmd/*/go.mod examples/*/go.mod | sort -u); do
+	go work edit -replace "github.com/Deln0r/ygo@$v=./"
+done
+for v in $(awk '$1 == "github.com/Deln0r/ygo/persist/sqlite" { print $2 }' gomobile/go.mod cmd/*/go.mod examples/*/go.mod | sort -u); do
+	go work edit -replace "github.com/Deln0r/ygo/persist/sqlite@$v=./persist/sqlite"
+done
