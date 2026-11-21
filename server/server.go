@@ -275,7 +275,9 @@ type Options struct {
 	// connection is closed with websocket.StatusTryAgainLater (1013, reason
 	// "send queue stalled") so the client reconnects and resyncs. A
 	// broadcast can so wait up to about twice WriteTimeout plus the write
-	// of the reply before it. Zero selects a safe default (10s).
+	// of the reply before it. The close frame a connection closed for
+	// falling behind gets is a write too: past WriteTimeout the transport
+	// is cut under it. Zero selects a safe default (10s).
 	WriteTimeout time.Duration
 
 	// MaxSendQueue bounds the messages queued to one connection on behalf of
@@ -1505,28 +1507,45 @@ func writeMessage(ws *websocket.Conn, msg []byte, timeout time.Duration) error {
 
 // closeForCause sends the close the writer owns for cause. A write deadline
 // has usually closed the transport already, so a client that does not read
-// sees an abnormal close rather than the code.
+// sees an abnormal close rather than the code. Every one of these causes is
+// a client that fell behind or a write to it that failed, and the close
+// frame is one more write to that client, so WriteTimeout bounds it too:
+// coder/websocket gives a close frame five seconds of its own, and a queue
+// that filled or stalled before any write blocked (the writer had not yet
+// taken its first envelope) left a client that reads nothing connected for
+// those five seconds whatever WriteTimeout said.
 func (c *conn) closeForCause(cause closeCause) {
+	limit := min(c.closeLimit(), c.writeTimeout())
 	switch cause {
 	case causeQueueFull:
-		c.closeWS(websocket.StatusTryAgainLater, "send queue full")
+		c.closeWSWithin(limit, websocket.StatusTryAgainLater, "send queue full")
 	case causeQueueStalled:
 		if c.server != nil {
 			c.server.slowClientsClosed.Add(1) // only the writer sets this cause, and it exits after
 		}
-		c.closeWS(websocket.StatusTryAgainLater, "send queue stalled")
+		c.closeWSWithin(limit, websocket.StatusTryAgainLater, "send queue stalled")
 	case causeWriteFailed:
-		c.closeWS(websocket.StatusPolicyViolation, "write timeout")
+		c.closeWSWithin(limit, websocket.StatusPolicyViolation, "write timeout")
 	}
+}
+
+// closeLimit is how long a close the server starts may take before the
+// transport is cut under it.
+func (c *conn) closeLimit() time.Duration {
+	if c.server != nil {
+		return c.server.closeLimit
+	}
+	return defaultCloseHandshakeLimit
 }
 
 // closeWS closes the socket with code and reason, cutting the transport if
 // the close handshake takes longer than the server's limit.
 func (c *conn) closeWS(code websocket.StatusCode, reason string) {
-	limit := defaultCloseHandshakeLimit
-	if c.server != nil {
-		limit = c.server.closeLimit
-	}
+	c.closeWSWithin(c.closeLimit(), code, reason)
+}
+
+// closeWSWithin is closeWS with the cut after limit.
+func (c *conn) closeWSWithin(limit time.Duration, code websocket.StatusCode, reason string) {
 	closeWithin(c.ws, c.raw, limit, code, reason)
 }
 

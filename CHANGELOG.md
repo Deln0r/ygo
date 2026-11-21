@@ -18,6 +18,17 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.47.1] - 2026-11-21
+
+### Fixed
+
+- **A slow client the server closed could stay connected five seconds past `WriteTimeout`.** When a client's send queue filled or stalled before a write to it had blocked (its writer had not yet taken the first message), the close frame went out under coder/websocket's own five-second limit rather than `WriteTimeout`, so a client that reads nothing kept its connection, and its writer goroutine, that long. The transport is now cut under such a close after `WriteTimeout`. It shows only with a `WriteTimeout` under five seconds (the default is ten). `cmd/yserve` and `cmd/ygo-server` v1.47.1 carry the fix.
+
+### Tests
+
+- `TestCloseForCause_ClientNotReadingWithinWriteTimeout`: a connection closed for a full or a stalled queue, over a pipe whose client reads nothing, is gone within `WriteTimeout` (it took 5.0 s with 200 ms). `TestServer_NoWriterLeak`, which timed out in CI on that close, passes 100 runs under the race detector.
+- `TestDecodeAny_DeepRefusalIsCheap` bounds the bytes a refusal at the nesting bound allocates (64 times the input; the old bug allocated 2.8 GB for 20 KB) and its allocations with a tenth of margin: its bound of `MaxNesting`+20 failed in CI by two allocations, the whole process's counts moving with the race detector and coverage.
+
 ## [1.47.0] - 2026-11-21
 
 **Upgrade impact**:

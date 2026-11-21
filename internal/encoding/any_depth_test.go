@@ -53,18 +53,34 @@ func TestDecodeAny_NestingBound(t *testing.T) {
 // TestDecodeAny_DeepRefusalIsCheap: refusing a value at the nesting bound
 // costs about what reading it does. Each level used to wrap the error of
 // the levels below, copying its message: over a gigabyte allocated for an
-// update of 20 KB.
+// update of 20 KB, and a few allocations per level.
+//
+// Reading it allocates one []any per level and a few more (10,013 to
+// 10,017 counted, about 161 KB for 20,003 bytes, 20 Nov 2026). The counts
+// are the whole process's (testing.AllocsPerRun, runtime.MemStats), so the
+// runtime and the race detector add a few: the bounds leave room for that
+// and still sit far below the old cost (a bound at MaxNesting+20 failed in
+// CI by two allocations).
 func TestDecodeAny_DeepRefusalIsCheap(t *testing.T) {
 	buf := nestedAny(anyval.MaxNesting+1, false)
 	var tab orderTable
-	allocs := testing.AllocsPerRun(5, func() {
+	refuse := func() {
 		if _, _, _, err := decodeAnyOrdered(buf, strictStrings, &tab, 0); !errors.Is(err, ErrAnyTooDeep) {
 			t.Fatal(err)
 		}
-	})
-	// One []any per level read, and the few wraps of the outer levels.
-	if allocs > anyval.MaxNesting+20 {
+	}
+	if allocs := testing.AllocsPerRun(5, refuse); allocs > anyval.MaxNesting+anyval.MaxNesting/10 {
 		t.Errorf("%v allocations to refuse %d bytes", allocs, len(buf))
+	}
+	var m0, m1 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+	const runs = 5
+	for range runs {
+		refuse()
+	}
+	runtime.ReadMemStats(&m1)
+	if per := (m1.TotalAlloc - m0.TotalAlloc) / runs; per > 64*uint64(len(buf)) {
+		t.Errorf("%d bytes allocated to refuse %d bytes", per, len(buf))
 	}
 }
 
