@@ -135,9 +135,7 @@ func (l *ClientBlockList) SquashFrom(startIdx int) int {
 			// cur merged into prev and left the linked list.
 		case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
 			// Collapse two adjacent garbage-collected runs into one,
-			// matching yjs's merge of contiguous GC structs. This is the
-			// run that forms when a deleted shared type's children are
-			// each replaced with a GC cell (see ReplaceWithGC).
+			// as yjs GC.mergeWith does.
 			l.list[w] = CellOfGC(prev.GC.Start, cur.GC.End)
 		default:
 			w++
@@ -172,24 +170,226 @@ func squashItems(i, other *block.Item) bool {
 
 // MergeWithLefts merges the cell at pos into its left neighbour, and the
 // result into its own left neighbour, while that succeeds (yjs
-// tryToMergeWithLefts). Returns the number of merges.
+// tryToMergeWithLefts). Returns the number of merges. The merged cells
+// leave the list in one move, as yjs splices them out once.
 func (l *ClientBlockList) MergeWithLefts(pos int) int {
-	merged := 0
-	for i := pos; i >= 1 && i < len(l.list); i-- {
-		prev, cur := l.list[i-1], l.list[i]
-		switch {
-		case prev.Kind == CellKindItem && cur.Kind == CellKindItem &&
-			prev.Item != nil && cur.Item != nil && squashItems(prev.Item, cur.Item):
-		case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
-			l.list[i-1] = CellOfGC(prev.GC.Start, cur.GC.End)
-		default:
-			return merged
-		}
-		l.list = append(l.list[:i], l.list[i+1:]...)
-		l.count(-1)
-		merged++
+	if pos < 1 || pos >= len(l.list) {
+		return 0
+	}
+	j := l.mergeChain(pos)
+	merged := pos - j
+	if merged > 0 {
+		l.list = append(l.list[:j+1], l.list[pos+1:]...)
+		l.count(-merged)
 	}
 	return merged
+}
+
+// mergeChain merges the cell at pos into its left neighbour, that one into
+// its own, and so on while a merge succeeds, leaving the absorbed cells in
+// place; it returns the index of the cell that absorbed them (pos when none
+// merged). The cell at pos is the chain's current head throughout: each
+// merge extends the cell on its left.
+func (l *ClientBlockList) mergeChain(pos int) int {
+	i := pos
+	for ; i >= 1; i-- {
+		if !l.mergePair(i-1, i) {
+			return i
+		}
+	}
+	return i
+}
+
+// MergeSession runs a series of yjs tryToMergeWithLefts calls on the list as
+// yjs runs them on its array, which splices the merged structs out at once,
+// but leaves the absorbed cells in place, each recording the cell that
+// absorbed it, and removes them all in one pass at Close: splicing at every
+// merge copied the rest of the list each time. Indices are physical; the
+// methods see the list as yjs would at that point (a cell's left neighbour
+// is the nearest cell not absorbed). The list must not be changed otherwise
+// until Close.
+type MergeSession struct {
+	l        *ClientBlockList
+	absorber map[int]int // absorbed index -> index of the cell it went into
+	minDead  int         // -1 while nothing is absorbed
+}
+
+// BeginMerges starts a MergeSession on l.
+func (l *ClientBlockList) BeginMerges() *MergeSession {
+	return &MergeSession{l: l, minDead: -1}
+}
+
+func (m *MergeSession) dead(i int) bool {
+	_, ok := m.absorber[i]
+	return ok
+}
+
+// live returns the cell that holds i now: i, or the cell it was absorbed
+// into, followed to one that was not.
+func (m *MergeSession) live(i int) int {
+	j := i
+	for {
+		a, ok := m.absorber[j]
+		if !ok {
+			break
+		}
+		j = a
+	}
+	if j != i {
+		m.absorber[i] = j
+	}
+	return j
+}
+
+// Len is the physical length of the list.
+func (m *MergeSession) Len() int { return len(m.l.list) }
+
+// ClockStart is the first clock of the live cell at i.
+func (m *MergeSession) ClockStart(i int) uint64 { return m.l.list[i].ClockStart() }
+
+// Find returns the live cell holding clock (yjs findIndexSS on its array).
+func (m *MergeSession) Find(clock uint64) (int, bool) {
+	l := m.l.list
+	// Cells keep their own first clock, absorbed or not, so starts stay
+	// sorted; the cell starting at or before clock, followed to its
+	// holder, is the one holding it.
+	i := sort.Search(len(l), func(i int) bool { return l[i].ClockStart() > clock }) - 1
+	if i < 0 {
+		return 0, false
+	}
+	j := m.live(i)
+	if l[j].ClockEnd() < clock {
+		return 0, false
+	}
+	return j, true
+}
+
+// Next returns the live cell right of the live cell i (yjs i+1), or false.
+func (m *MergeSession) Next(i int) (int, bool) {
+	for k := i + 1; k < len(m.l.list); k++ {
+		if !m.dead(k) {
+			return k, true
+		}
+	}
+	return 0, false
+}
+
+// Left returns the live cell left of the live cell i (yjs i-1), or false
+// for the first.
+func (m *MergeSession) Left(i int) (int, bool) {
+	if i < 1 {
+		return 0, false
+	}
+	return m.live(i - 1), true
+}
+
+// MergeWithLefts merges the live cell pos into its left neighbour, and the
+// result into its own, while that succeeds (yjs tryToMergeWithLefts), and
+// returns the number of merges and the cell that absorbed them (pos when
+// none).
+func (m *MergeSession) MergeWithLefts(pos int) (int, int) {
+	cur := pos
+	merged := 0
+	for {
+		left, ok := m.Left(cur)
+		if !ok || !m.l.mergePair(left, cur) {
+			return merged, cur
+		}
+		if m.absorber == nil {
+			m.absorber = map[int]int{}
+		}
+		m.absorber[cur] = left
+		if m.minDead < 0 || cur < m.minDead {
+			m.minDead = cur
+		}
+		cur = left
+		merged++
+	}
+}
+
+// Close removes the absorbed cells, moving each stretch of kept cells
+// between them once.
+func (m *MergeSession) Close() {
+	if m.minDead < 0 {
+		return
+	}
+	l := m.l
+	n := len(l.list)
+	gone := make([]int, 0, len(m.absorber))
+	for i := range m.absorber {
+		gone = append(gone, i)
+	}
+	sort.Ints(gone)
+	w := gone[0]
+	for k, d := range gone {
+		next := n
+		if k+1 < len(gone) {
+			next = gone[k+1]
+		}
+		w += copy(l.list[w:], l.list[d+1:next])
+	}
+	clear(l.list[w:])
+	l.list = l.list[:w]
+	l.count(w - n)
+	m.absorber, m.minDead = nil, -1
+}
+
+// mergePair merges the cell at j into the cell at i, its left neighbour
+// in the list as merges see it, if they can merge: two items that squash
+// (TrySquash), or two GC runs (yjs GC.mergeWith).
+func (l *ClientBlockList) mergePair(i, j int) bool {
+	prev, cur := l.list[i], l.list[j]
+	switch {
+	case prev.Kind == CellKindItem && cur.Kind == CellKindItem &&
+		prev.Item != nil && cur.Item != nil && squashItems(prev.Item, cur.Item):
+		return true
+	case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
+		l.list[i] = CellOfGC(prev.GC.Start, cur.GC.End)
+		return true
+	}
+	return false
+}
+
+// MergeLeftsDownTo is yjs's merge of a transaction's new structs: from the
+// last cell down to first, each cell merges with its lefts (MergeWithLefts),
+// and the walk goes on left of where the merges stopped. A chain can run on
+// left of first. The absorbed cells leave the list in one pass at the end,
+// from the leftmost of them, so the work is linear in the cells walked and
+// moved however many chains merge. Returns the number of cells removed.
+func (l *ClientBlockList) MergeLeftsDownTo(first int) int {
+	if first < 1 {
+		first = 1
+	}
+	n := len(l.list)
+	if first >= n {
+		return 0
+	}
+	// The absorbed cells of each chain, [lo, hi], found right to left.
+	// A chain only reads cells left of its head, so an absorbed cell is
+	// never read again.
+	var absorbed [][2]int
+	for i := n - 1; i >= first; {
+		j := l.mergeChain(i)
+		if j < i {
+			absorbed = append(absorbed, [2]int{j + 1, i})
+		}
+		i = j - 1
+	}
+	if len(absorbed) == 0 {
+		return 0
+	}
+	w := absorbed[len(absorbed)-1][0]
+	for k := len(absorbed) - 1; k >= 0; k-- {
+		next := n
+		if k > 0 {
+			next = absorbed[k-1][0]
+		}
+		w += copy(l.list[w:], l.list[absorbed[k][1]+1:next])
+	}
+	clear(l.list[w:])
+	l.list = l.list[:w]
+	l.count(w - n)
+	return n - w
 }
 
 // ReplaceWithGC converts the cell at index i into a GC cell covering the
@@ -198,8 +398,9 @@ func (l *ClientBlockList) MergeWithLefts(pos int) int {
 //
 // Used by nested-type collection: when a shared type is deleted, each of
 // its children collapses to a garbage-collected range (yjs's parentGCd
-// path in ContentType.gc), encoded as a ref-0 GC struct. Adjacent GC
-// cells produced this way merge into a single run via SquashFrom.
+// path in ContentType.gc), encoded as a ref-0 GC struct. The cells merge
+// with their neighbours only where yjs merges structs (the transaction's
+// delete set and merge candidates, see doc.TransactionMut.mergeDeleted).
 func (l *ClientBlockList) ReplaceWithGC(i int) {
 	if i < 0 || i >= len(l.list) {
 		return

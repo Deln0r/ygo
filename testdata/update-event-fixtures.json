@@ -25064,6 +25064,5939 @@
       ]
     },
     {
+      "name": "gc-runs-after-clear-and-remote-parent-delete",
+      "description": "C holds 1, an array holding 9, and 2; C is deleted under the manager, the manager cleared, and a peer deletes C's parent: the subtree becomes GC structs, and only the first child merges into C's run (C is the already-deleted child the parent's delete meets)",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0105cdcc83da0b002101016d017001000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000321000005026d704100010100040102410101050001cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0104cdcc83da0b01000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000100010000000302410101040101cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b02000100010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410201040201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0300010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410101030301cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410001020401cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000101cdcc83da0b010006",
+          "v2": "0000058d9987b4170000010001000000010101010501cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-subtree-typed-in-several-transactions",
+      "description": "the same subtree typed one op per transaction",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  []
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    []
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ]
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d01700000",
+          "changed": [
+            "m"
+          ],
+          "v2": "0000058d9987b4170000012705026d704100010101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b010700cdcc83da0b000000",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "000006cd9987b4170001000001070100010001000001010100"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b020800cdcc83da0b01017d0100",
+          "changed": [
+            "m/p/0"
+          ],
+          "v2": "000006cd9987b417000102000108010001000001010101027d0100"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0387cdcc83da0b020000",
+          "changed": [
+            "m/p/0"
+          ],
+          "v2": "000006cd9987b41700010400018701000001000001010300"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b040800cdcc83da0b03017d0900",
+          "changed": [
+            "m/p/0/1"
+          ],
+          "v2": "000006cd9987b417000106000108010001000001010101047d0900"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b0588cdcc83da0b03017d0200",
+          "changed": [
+            "m/p/0"
+          ],
+          "v2": "000006cd9987b4170001060001880100000001010101057d0200"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 10,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        },
+        {
+          "step": 11,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0105cdcc83da0b002101016d017001000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000321000005026d704100010100040102410101050001cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0104cdcc83da0b01000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000100010000000302410101040101cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b02000100010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410201040201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0300010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410101030301cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410001020401cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000101cdcc83da0b010006",
+          "v2": "0000058d9987b4170000010001000000010101010501cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-deleted-map-child",
+      "description": "the parent is a map whose key c held the subtree: the deleted winner of c is the already-deleted child the parent's delete meets",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "map"
+            },
+            {
+              "op": "setType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "c",
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                "c"
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                "c"
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                "c",
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                "c"
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170012700cdcc83da0b000163000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000927010800870008008806036d7063410103010000030140000241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            },
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            },
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "key": "c"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            },
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            },
+            {
+              "map:m": {
+                "p": {
+                  "c": [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                }
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": {}
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0106cdcc83da0b002701016d0170012700cdcc83da0b000163000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000927010800870008008806036d7063410103010000030140000241010106007d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170012700cdcc83da0b000163000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000927010800870008008806036d7063410103010000030140000241010106007d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0105cdcc83da0b002101016d017001000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000321000005026d704100010100040102410101050001cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0104cdcc83da0b01000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000100010000000302410101040101cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b02000100010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410201040201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0300010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410101030301cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410001020401cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000101cdcc83da0b010006",
+          "v2": "0000058d9987b4170000010001000000010101010501cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-two-levels",
+      "description": "the deleted array sits two levels below the parent the peer deletes: the already-deleted child is met by its own parent's delete, nested in the collected subtree",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "values": [
+                7
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0108cdcc83da0b002701016d0170000700cdcc83da0b00000700cdcc83da0b01000800cdcc83da0b02017d0187cdcc83da0b03000800cdcc83da0b04017d0988cdcc83da0b04017d0288cdcc83da0b02017d0700",
+            "update_v2": "000006cd9987b41706050003020044000b270007010800870008008805026d704100030100000240020241020108007d017d097d027d0700"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    7
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    7
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    [
+                      1,
+                      [
+                        9
+                      ],
+                      2
+                    ],
+                    7
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    7
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010008",
+            "update_v2": "00000000000001000000000001cdcc83da0b010007"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0108cdcc83da0b002701016d0170000700cdcc83da0b00000700cdcc83da0b01000800cdcc83da0b02017d0187cdcc83da0b03000800cdcc83da0b04017d0988cdcc83da0b04017d0288cdcc83da0b02017d0700",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b41706050003020044000b270007010800870008008805026d704100030100000240020241020108007d017d097d027d0700"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0108cdcc83da0b002701016d0170000700cdcc83da0b00000700cdcc83da0b01000800cdcc83da0b02017d0187cdcc83da0b03000800cdcc83da0b04017d0988cdcc83da0b04017d0288cdcc83da0b02017d0700",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b41706050003020044000b270007010800870008008805026d704100030100000240020241020108007d017d097d027d0700"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010205",
+          "changed": [
+            "m/p/0"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010204"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010008",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010007"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b0200020701",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b0200010500"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0102cdcc83da0b002101016d017001000701cdcc83da0b010008",
+          "v2": "0000058d9987b41700000321000005026d70410001010002010701020001cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0101cdcc83da0b01000701cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010701010101cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0101cdcc83da0b02000601cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010601010201cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0101cdcc83da0b03000501cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010501010301cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0101cdcc83da0b04000401cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010401010401cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000301cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010301010501cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0101cdcc83da0b06000201cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010201010601cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 7
+          },
+          "v1": "0101cdcc83da0b07000101cdcc83da0b010008",
+          "v2": "0000058d9987b4170000010001000000010101010701cdcc83da0b010007"
+        },
+        {
+          "sv": {
+            "3141592653": 8
+          },
+          "v1": "0001cdcc83da0b010008",
+          "v2": "00000000000001000000000001cdcc83da0b010007"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-gc-off",
+      "description": "the reproduction with garbage collection off: nothing is collected, and the merges that run anyway are yjs's",
+      "gc": false,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0105cdcc83da0b010700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b4170404000301000009070008008700080088010001000240000241010105017d017d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b020800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b41703030301000007080087000800880100010001000241010104027d017d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0387cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b4170203040200000587000800880100010001000241000103037d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b41701020600000308008801000100000241000102047d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b0588cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b4170001060001880100000001010101057d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-local-parent-delete",
+      "description": "the parent deleted locally, in a transaction the manager does not track, instead of by a peer",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": "other",
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "other",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        },
+        {
+          "step": 6,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0105cdcc83da0b002101016d017001000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000321000005026d704100010100040102410101050001cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0104cdcc83da0b01000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000100010000000302410101040101cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b02000100010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410201040201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0300010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410101030301cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410001020401cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000101cdcc83da0b010006",
+          "v2": "0000058d9987b4170000010001000000010101010501cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-still-kept",
+      "description": "the parent deleted by a peer while the manager still keeps the subtree: nothing kept is collected",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0105cdcc83da0b010700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b4170404000301000009070008008700080088010001000240000241010105017d017d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b020800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b41703030301000007080087000800880100010001000241010104027d017d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0387cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b4170203040200000587000800880100010001000241000103037d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040800cdcc83da0b03017d0988cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b41701020600000308008801000100000241000102047d097d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b0588cdcc83da0b03017d0201cdcc83da0b010006",
+          "v2": "000006cd9987b4170001060001880100000001010101057d0201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-several-deleted-children",
+      "description": "the parent holds two subtrees and a value between them, all deleted under the manager in separate transactions before the clear: each already-deleted child is a candidate of its own",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 1,
+              "values": [
+                5
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 2,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                2
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                2
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                2,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                2
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "010ccdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0288cdcc83da0b01017d0587cdcc83da0b06000800cdcc83da0b07017d0187cdcc83da0b08000800cdcc83da0b09017d0988cdcc83da0b09017d0200",
+            "update_v2": "000006cd9987b4170a0900030100440a030100001527000700080087000800880187000800870008008805026d70410003010000024003024105010c007d017d097d027d057d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 2,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 1,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ],
+                  5,
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b01000c",
+            "update_v2": "00000000000001000000000001cdcc83da0b01000b"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "010ccdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0288cdcc83da0b01017d0587cdcc83da0b06000800cdcc83da0b07017d0187cdcc83da0b08000800cdcc83da0b09017d0988cdcc83da0b09017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b4170a0900030100440a030100001527000700080087000800880187000800870008008805026d70410003010000024003024105010c007d017d097d027d057d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "010ccdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0288cdcc83da0b01017d0587cdcc83da0b06000800cdcc83da0b07017d0187cdcc83da0b08000800cdcc83da0b09017d0988cdcc83da0b09017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b4170a0900030100440a030100001527000700080087000800880187000800870008008805026d70410003010000024003024105010c007d017d097d027d057d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010705",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010704"
+        },
+        {
+          "step": 4,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010601",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010600"
+        },
+        {
+          "step": 5,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 7,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b01000c",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b01000b"
+        },
+        {
+          "step": 8,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0103cdcc83da0b002101016d017001000a000101cdcc83da0b01000c",
+          "v2": "0000058d9987b41700000321000005026d70410001010003010a0101030001cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0102cdcc83da0b01000a000101cdcc83da0b01000c",
+          "v2": "0000058d9987b4170000010001000000020a0101020101cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0102cdcc83da0b020009000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002090101020201cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0102cdcc83da0b030008000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002080101020301cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040007000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002070101020401cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0102cdcc83da0b050006000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002060101020501cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0102cdcc83da0b060005000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002050101020601cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 7
+          },
+          "v1": "0102cdcc83da0b070004000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002040101020701cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 8
+          },
+          "v1": "0102cdcc83da0b080003000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002030101020801cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 9
+          },
+          "v1": "0102cdcc83da0b090002000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002020101020901cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 10
+          },
+          "v1": "0102cdcc83da0b0a0001000101cdcc83da0b01000c",
+          "v2": "0000058d9987b417000001000100000002410001020a01cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 11
+          },
+          "v1": "0101cdcc83da0b0b000101cdcc83da0b01000c",
+          "v2": "0000058d9987b4170000010001000000010101010b01cdcc83da0b01000b"
+        },
+        {
+          "sv": {
+            "3141592653": 12
+          },
+          "v1": "0001cdcc83da0b01000c",
+          "v2": "00000000000001000000000001cdcc83da0b01000b"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-late-child-and-delete",
+      "description": "a third peer wrote the subtree, with q first; after the collection it appends 3 to C and deletes q in the same transaction: the appended item arrives as GC, a new struct, and yjs's merge of new structs runs on left over the writer's collected cells",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182,
+        141421356
+      ],
+      "managers": [
+        {
+          "doc": 1,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 2,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                "q"
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                2
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 3,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 2,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+            "update_v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 2,
+            "to": 0,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+            "update_v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 1,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001acd6b743010007",
+            "update_v2": "00000000000001000000000001acd6b743010006"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 2,
+          "origin": null,
+          "ops": [
+            {
+              "op": "push",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "values": [
+                3
+              ]
+            },
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2,
+                    3
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 2,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101acd6b7430788acd6b74306017d0301acd6b743010201",
+            "update_v2": "000006ecacef860100010c0001880100000001010101077d0301acd6b743010200"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2,
+                    3
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 2,
+          "origin": "setup",
+          "v1": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001acd6b743010106",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001acd6b743010105"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001acd6b743010007",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001acd6b743010006"
+        },
+        {
+          "step": 7,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0001acd6b743010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001acd6b743010000"
+        },
+        {
+          "step": 8,
+          "doc": 2,
+          "origin": null,
+          "v1": "0101acd6b7430788acd6b74306017d0301acd6b743010201",
+          "changed": [
+            "m/p/0"
+          ],
+          "v2": "000006ecacef860100010c0001880100000001010101077d0301acd6b743010200"
+        },
+        {
+          "step": 9,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101acd6b74307000100",
+          "changed": [],
+          "v2": "000005acacef86010000010001000000010101010700"
+        }
+      ],
+      "diffs_doc": 1,
+      "diffs": [
+        {
+          "sv": {
+            "141421356": 0
+          },
+          "v1": "0102acd6b743002101016d017001000701acd6b743010008",
+          "v2": "000005acacef860100000321000005026d70410001010002010701020001acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 1
+          },
+          "v1": "0101acd6b74301000701acd6b743010008",
+          "v2": "000005acacef86010000010001000000010701010101acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 2
+          },
+          "v1": "0101acd6b74302000601acd6b743010008",
+          "v2": "000005acacef86010000010001000000010601010201acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 3
+          },
+          "v1": "0101acd6b74303000501acd6b743010008",
+          "v2": "000005acacef86010000010001000000010501010301acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 4
+          },
+          "v1": "0101acd6b74304000401acd6b743010008",
+          "v2": "000005acacef86010000010001000000010401010401acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 5
+          },
+          "v1": "0101acd6b74305000301acd6b743010008",
+          "v2": "000005acacef86010000010001000000010301010501acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 6
+          },
+          "v1": "0101acd6b74306000201acd6b743010008",
+          "v2": "000005acacef86010000010001000000010201010601acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 7
+          },
+          "v1": "0101acd6b74307000101acd6b743010008",
+          "v2": "000005acacef86010000010001000000010101010701acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 8
+          },
+          "v1": "0001acd6b743010008",
+          "v2": "00000000000001000000000001acd6b743010007"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-late-child",
+      "description": "a third peer wrote the subtree, with q first; after the collection it appends 3 to C: the appended item arrives as GC, a new struct, and yjs's merge of new structs runs on left over the writer's collected cells",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182,
+        141421356
+      ],
+      "managers": [
+        {
+          "doc": 1,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 2,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                "q"
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                2
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 3,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 2,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+            "update_v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 2,
+            "to": 0,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+            "update_v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 1,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001acd6b743010007",
+            "update_v2": "00000000000001000000000001acd6b743010006"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 2,
+          "origin": null,
+          "ops": [
+            {
+              "op": "push",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "values": [
+                3
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2,
+                    3
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 2,
+            "to": 1,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0101acd6b7430788acd6b74306017d0300",
+            "update_v2": "000006ecacef860100010c0001880100000001010101077d0300"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    "q",
+                    1,
+                    [
+                      9
+                    ],
+                    2,
+                    3
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 2,
+          "origin": "setup",
+          "v1": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+        },
+        {
+          "step": 2,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0106acd6b743002701016d0170000700acd6b74300000800acd6b74301027701717d0187acd6b74303000800acd6b74304017d0988acd6b74304017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006ecacef860104050002040200000b270007000800870008008805026d70410003010000024001030241000106007701717d017d097d0200"
+        },
+        {
+          "step": 4,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001acd6b743010106",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001acd6b743010105"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001acd6b743010007",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001acd6b743010006"
+        },
+        {
+          "step": 7,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0001acd6b743010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001acd6b743010000"
+        },
+        {
+          "step": 8,
+          "doc": 2,
+          "origin": null,
+          "v1": "0101acd6b7430788acd6b74306017d0300",
+          "changed": [
+            "m/p/0"
+          ],
+          "v2": "000006ecacef860100010c0001880100000001010101077d0300"
+        },
+        {
+          "step": 9,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0101acd6b74307000100",
+          "changed": [],
+          "v2": "000005acacef86010000010001000000010101010700"
+        }
+      ],
+      "diffs_doc": 1,
+      "diffs": [
+        {
+          "sv": {
+            "141421356": 0
+          },
+          "v1": "0102acd6b743002101016d017001000701acd6b743010008",
+          "v2": "000005acacef860100000321000005026d70410001010002010701020001acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 1
+          },
+          "v1": "0101acd6b74301000701acd6b743010008",
+          "v2": "000005acacef86010000010001000000010701010101acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 2
+          },
+          "v1": "0101acd6b74302000601acd6b743010008",
+          "v2": "000005acacef86010000010001000000010601010201acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 3
+          },
+          "v1": "0101acd6b74303000501acd6b743010008",
+          "v2": "000005acacef86010000010001000000010501010301acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 4
+          },
+          "v1": "0101acd6b74304000401acd6b743010008",
+          "v2": "000005acacef86010000010001000000010401010401acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 5
+          },
+          "v1": "0101acd6b74305000301acd6b743010008",
+          "v2": "000005acacef86010000010001000000010301010501acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 6
+          },
+          "v1": "0101acd6b74306000201acd6b743010008",
+          "v2": "000005acacef86010000010001000000010201010601acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 7
+          },
+          "v1": "0101acd6b74307000101acd6b743010008",
+          "v2": "000005acacef86010000010001000000010101010701acd6b743010007"
+        },
+        {
+          "sv": {
+            "141421356": 8
+          },
+          "v1": "0001acd6b743010008",
+          "v2": "00000000000001000000000001acd6b743010007"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-children-created-in-the-transaction",
+      "description": "a subtree typed and partly deleted in the transaction that deletes its parent: children newer than the transaction's start are no merge candidates",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            },
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "len": 1
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 1,
+              "values": [
+                5
+              ]
+            },
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 1,
+              "len": 1
+            },
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": []
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0102cdcc83da0b002101016d017001000601cdcc83da0b010007",
+            "update_v2": "0000058d9987b41700000321000005026d70410001010002010601020001cdcc83da0b010006"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": []
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0101cdcc83da0b002701016d01700000",
+          "changed": [
+            "m"
+          ],
+          "v2": "0000058d9987b4170000012705026d704100010101000001010000"
+        },
+        {
+          "step": 1,
+          "doc": 0,
+          "origin": null,
+          "v1": "0101cdcc83da0b01000601cdcc83da0b010007",
+          "changed": [
+            "m"
+          ],
+          "v2": "0000058d9987b4170000010001000000010601010101cdcc83da0b010006"
+        },
+        {
+          "step": 2,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0102cdcc83da0b002101016d017001000601cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "0000058d9987b41700000321000005026d70410001010002010601020001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0102cdcc83da0b002101016d017001000601cdcc83da0b010007",
+          "v2": "0000058d9987b41700000321000005026d70410001010002010601020001cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0101cdcc83da0b01000601cdcc83da0b010007",
+          "v2": "0000058d9987b4170000010001000000010601010101cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0101cdcc83da0b02000501cdcc83da0b010007",
+          "v2": "0000058d9987b4170000010001000000010501010201cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0101cdcc83da0b03000401cdcc83da0b010007",
+          "v2": "0000058d9987b4170000010001000000010401010301cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0101cdcc83da0b04000301cdcc83da0b010007",
+          "v2": "0000058d9987b4170000010001000000010301010401cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000201cdcc83da0b010007",
+          "v2": "0000058d9987b4170000010001000000010201010501cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0101cdcc83da0b06000101cdcc83da0b010007",
+          "v2": "0000058d9987b4170000010001000000010101010601cdcc83da0b010006"
+        },
+        {
+          "sv": {
+            "3141592653": 7
+          },
+          "v1": "0001cdcc83da0b010007",
+          "v2": "00000000000001000000000001cdcc83da0b010006"
+        }
+      ]
+    },
+    {
+      "name": "gc-runs-remote-delete-replayed",
+      "description": "the peer's delete of the parent is delivered twice: the second delivery deletes nothing and merges nothing",
+      "gc": true,
+      "clients": [
+        3141592653,
+        271828182
+      ],
+      "managers": [
+        {
+          "doc": 0,
+          "scope": "map:m"
+        }
+      ],
+      "changed": true,
+      "root_keys": [
+        "map:m"
+      ],
+      "steps": [
+        {
+          "doc": 0,
+          "origin": "setup",
+          "ops": [
+            {
+              "op": "setType",
+              "path": "map:m",
+              "key": "p",
+              "kind": "array"
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 0,
+              "values": [
+                1
+              ]
+            },
+            {
+              "op": "insertType",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 1,
+              "kind": "array"
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0,
+                1
+              ],
+              "index": 0,
+              "values": [
+                9
+              ]
+            },
+            {
+              "op": "insertValues",
+              "path": [
+                "map:m",
+                "p",
+                0
+              ],
+              "index": 2,
+              "values": [
+                2
+              ]
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "apply": {
+            "from": 0,
+            "to": 1,
+            "origin": "remote",
+            "what": "state",
+            "update": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+            "update_v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            null
+          ]
+        },
+        {
+          "manage": 0,
+          "state": [
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 0,
+          "origin": null,
+          "ops": [
+            {
+              "op": "delete",
+              "path": [
+                "map:m",
+                "p"
+              ],
+              "index": 0,
+              "len": 1
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "clear": {
+            "doc": 0,
+            "um": 0
+          },
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {
+                "p": [
+                  [
+                    1,
+                    [
+                      9
+                    ],
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "doc": 1,
+          "origin": null,
+          "ops": [
+            {
+              "op": "mapDelete",
+              "path": "map:m",
+              "key": "p"
+            }
+          ],
+          "state": [
+            {
+              "map:m": {
+                "p": []
+              }
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "from": 1,
+            "to": 0,
+            "origin": "remote",
+            "what": "diff",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        },
+        {
+          "apply": {
+            "replay": 6,
+            "to": 0,
+            "origin": "remote",
+            "update": "0001cdcc83da0b010006",
+            "update_v2": "00000000000001000000000001cdcc83da0b010005"
+          },
+          "state": [
+            {
+              "map:m": {}
+            },
+            {
+              "map:m": {}
+            }
+          ],
+          "stacks": [
+            [
+              false,
+              false
+            ]
+          ]
+        }
+      ],
+      "events": [
+        {
+          "step": 0,
+          "doc": 0,
+          "origin": "setup",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 1,
+          "doc": 1,
+          "origin": "remote",
+          "v1": "0106cdcc83da0b002701016d0170000700cdcc83da0b00000800cdcc83da0b01017d0187cdcc83da0b02000800cdcc83da0b03017d0988cdcc83da0b03017d0200",
+          "changed": [
+            "m"
+          ],
+          "v2": "000006cd9987b417040400030100000b270007000800870008008805026d704100030100000240010241010106007d017d097d0200"
+        },
+        {
+          "step": 3,
+          "doc": 0,
+          "origin": null,
+          "v1": "0001cdcc83da0b010105",
+          "changed": [
+            "m/p"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010104"
+        },
+        {
+          "step": 5,
+          "doc": 1,
+          "origin": null,
+          "v1": "0001cdcc83da0b010006",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        },
+        {
+          "step": 6,
+          "doc": 0,
+          "origin": "remote",
+          "v1": "0001cdcc83da0b010001",
+          "changed": [
+            "m"
+          ],
+          "v2": "00000000000001000000000001cdcc83da0b010000"
+        }
+      ],
+      "diffs_doc": 0,
+      "diffs": [
+        {
+          "sv": {
+            "3141592653": 0
+          },
+          "v1": "0105cdcc83da0b002101016d017001000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000321000005026d704100010100040102410101050001cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 1
+          },
+          "v1": "0104cdcc83da0b01000200010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b41700000100010000000302410101040101cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 2
+          },
+          "v1": "0104cdcc83da0b02000100010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410201040201cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 3
+          },
+          "v1": "0103cdcc83da0b0300010001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410101030301cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 4
+          },
+          "v1": "0102cdcc83da0b040001000101cdcc83da0b010006",
+          "v2": "0000058d9987b417000001000100000002410001020401cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 5
+          },
+          "v1": "0101cdcc83da0b05000101cdcc83da0b010006",
+          "v2": "0000058d9987b4170000010001000000010101010501cdcc83da0b010005"
+        },
+        {
+          "sv": {
+            "3141592653": 6
+          },
+          "v1": "0001cdcc83da0b010006",
+          "v2": "00000000000001000000000001cdcc83da0b010005"
+        }
+      ]
+    },
+    {
       "name": "undo-clear-releases-keep",
       "description": "after clear, a map the manager kept is released: an untracked delete of it is collected",
       "gc": true,

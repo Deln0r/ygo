@@ -121,6 +121,14 @@ type TransactionMut struct {
 	// what each one moved, not every type changed so far.
 	staleMarkers []*block.Branch
 
+	// mergeStructs is yjs transaction._mergeStructs: the right half of
+	// every split made through this transaction (the store records them
+	// here, see Store) and the already-deleted children a type's deletion
+	// met (deleteTypeContent), in that order; mergeSplits merges each back
+	// with its neighbours. Owned by this transaction, so a follow-up's
+	// candidates wait for its own commit.
+	mergeStructs []block.ID
+
 	// deletedByClient is deletedRanges per client, sorted and merged,
 	// built lazily by DeletedThisTxn and gcDeleted and dropped by Delete.
 	deletedByClient map[uint64][]clockRange
@@ -174,6 +182,7 @@ func (d *Doc) newLockedTxn() *TransactionMut {
 		Local:       true,
 		beforeState: d.store.GetStateVector(),
 	}
+	d.store.RecordSplitsInto(&t.mergeStructs)
 	// Work queued while no transaction ran (QueueUnderLock), such as an
 	// UndoManager releasing what a cleared step kept, runs before this
 	// transaction can keep or delete anything.
@@ -450,7 +459,6 @@ func (t *TransactionMut) gcDeleted() {
 		return
 	}
 	bs := t.doc.store
-	touched := map[uint64]uint64{} // client -> smallest deleted clock
 	// Every cell inside the deleted ranges, as yjs tryGcDeleteSet walks
 	// the structs of transaction.deleteSet: a deleted item that a later
 	// integration split has pieces whose heads no Delete call saw. Each
@@ -465,39 +473,68 @@ func (t *TransactionMut) gcDeleted() {
 				break
 			}
 			if it := cell.AsItem(); it != nil && it.IsDeleted() {
-				t.gcDeletedItem(it, touched)
+				t.gcDeletedItem(it)
 			}
 			if !advanceClock(&clock, cell.ClockEnd()) {
 				break
 			}
 		}
 	}
-	// Merge adjacent deleted/GC'd cells per affected client, starting at
-	// the first GC'd clock so the run collapses (and can also absorb a
-	// deleted left neighbour). TrySquash already refuses to merge kept
-	// items, so tracked tombstones stay distinct.
-	for c, minClock := range touched {
+	t.mergeDeleted()
+}
+
+// mergeDeleted is yjs tryMergeDeleteSet: for each client, each range of the
+// transaction's delete set (sorted and merged), last to first, merges the
+// cells from the one after the range's last down to the range's first into
+// their left neighbours. yjs merges only there, at the new structs
+// (squashNewBlocks) and at its _mergeStructs (mergeSplits): a run of GC cells
+// a collected type's subtree became, outside those, stays apart, and a
+// merge reaching further would change the state's bytes. The clients'
+// lists are independent, so their order does not matter.
+func (t *TransactionMut) mergeDeleted() {
+	bs := t.doc.store
+	seen := map[uint64]bool{}
+	for _, r := range t.deletedRanges {
+		c := r.ID.Client
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
 		list := bs.GetClient(c)
 		if list == nil {
 			continue
 		}
-		startIdx, ok := list.FindPivot(minClock)
-		if !ok {
-			startIdx = 1
+		ms := list.BeginMerges()
+		ranges := t.deletedRangesOf(c)
+		for di := len(ranges) - 1; di >= 0; di-- {
+			rg := ranges[di]
+			last, ok := ms.Find(rg.end - 1)
+			if !ok {
+				continue
+			}
+			// min(len-1, last+1): the cell after the range's last.
+			si := last
+			if next, ok := ms.Next(last); ok {
+				si = next
+			}
+			// si -= 1 + merged: on from the cell left of where the merges
+			// stopped.
+			for si > 0 && ms.ClockStart(si) >= rg.start {
+				_, held := ms.MergeWithLefts(si)
+				left, ok := ms.Left(held)
+				if !ok {
+					break
+				}
+				si = left
+			}
 		}
-		list.SquashFrom(startIdx)
+		ms.Close()
 	}
 }
 
 // gcDeletedItem records it for the merge pass and, with GC on and it not
 // kept, frees its content (collapsing a shared type's subtree).
-func (t *TransactionMut) gcDeletedItem(it *block.Item, touched map[uint64]uint64) {
-	// The merge pass below runs whether or not the content is
-	// collected: yjs tryMergeDeleteSet merges the deleted ranges
-	// with GC off too, so a block cut by deletions rejoins.
-	if cur, ok := touched[it.ID.Client]; !ok || it.ID.Clock < cur {
-		touched[it.ID.Client] = it.ID.Clock
-	}
+func (t *TransactionMut) gcDeletedItem(it *block.Item) {
 	if !t.doc.gc || it.IsKeep() {
 		return
 	}
@@ -507,7 +544,7 @@ func (t *TransactionMut) gcDeletedItem(it *block.Item, touched map[uint64]uint64
 	// ContentDeleted marker below. Collect the children before the
 	// content swap destroys the branch pointer.
 	if it.Content.Kind == block.KindType && it.Content.Branch != nil {
-		t.gcNestedChildren(it.Content.Branch, touched)
+		t.gcNestedChildren(it.Content.Branch)
 	}
 	if it.Content.Kind != block.KindDeleted {
 		it.Content = block.Content{Kind: block.KindDeleted, DeletedLen: it.Len}
@@ -524,15 +561,15 @@ func (t *TransactionMut) gcDeletedItem(it *block.Item, touched map[uint64]uint64
 // types recurse depth-first. Children are reached two ways, matching the
 // store's layout: positional items via Branch.Start (walk Right), and
 // keyed items via Branch.Map's winner plus its overwritten left-chain
-// (walk Left). touched records the smallest affected clock per client so
-// the caller's merge pass collapses the adjacent GC cells into one run.
-func (t *TransactionMut) gcNestedChildren(br *block.Branch, touched map[uint64]uint64) {
+// (walk Left). The GC cells are merged only where yjs merges them
+// (mergeDeleted, mergeSplits): replacing a struct adds no merge candidate.
+func (t *TransactionMut) gcNestedChildren(br *block.Branch) {
 	bs := t.doc.store
 	gcItem := func(it *block.Item) {
 		// Depth-first: collapse this child's own subtree first, so a
 		// nested-in-nested type is fully collected.
 		if it.Content.Kind == block.KindType && it.Content.Branch != nil {
-			t.gcNestedChildren(it.Content.Branch, touched)
+			t.gcNestedChildren(it.Content.Branch)
 		}
 		list := bs.GetClient(it.ID.Client)
 		if list == nil {
@@ -543,9 +580,6 @@ func (t *TransactionMut) gcNestedChildren(br *block.Branch, touched map[uint64]u
 			return
 		}
 		list.ReplaceWithGC(idx)
-		if cur, ok := touched[it.ID.Client]; !ok || it.ID.Clock < cur {
-			touched[it.ID.Client] = it.ID.Clock
-		}
 	}
 	for it := br.Start; it != nil; it = it.Right {
 		gcItem(it)
@@ -567,39 +601,55 @@ func (t *TransactionMut) gcNestedChildren(br *block.Branch, touched map[uint64]u
 	br.TextMarkers = nil
 }
 
-// squashNewBlocks collapses runs of same-client adjacent-clock items
-// produced during this transaction into single items, the classic
-// per-character Text.Insert pattern. Mirrors the merge-blocks step of
-// yjs's commit lifecycle; removes the V1 per-item overhead that
-// otherwise inflates document size by roughly 12x on fine-grained text
-// workloads. Squash starts at the first new cell so it can also merge
-// into the prior tail.
 // mergeSplits tries to merge each piece this transaction split off back
 // into its neighbours, from the last split to the first, as yjs merges
 // transaction._mergeStructs: first the cell after the piece with its
 // lefts, and, unless that already took the piece in, the piece with its
 // left.
 func (t *TransactionMut) mergeSplits() {
-	splits := t.doc.store.TakeSplits()
+	splits := t.mergeStructs
+	t.mergeStructs = nil
+	if t.doc.store.RecordingSplitsInto(&t.mergeStructs) {
+		t.doc.store.RecordSplitsInto(nil)
+	}
+	sessions := map[uint64]*store.MergeSession{}
 	for i := len(splits) - 1; i >= 0; i-- {
 		id := splits[i]
-		list := t.doc.store.GetClient(id.Client)
-		if list == nil {
-			continue
+		ms := sessions[id.Client]
+		if ms == nil {
+			list := t.doc.store.GetClient(id.Client)
+			if list == nil {
+				continue
+			}
+			ms = list.BeginMerges()
+			sessions[id.Client] = ms
 		}
-		idx, ok := list.FindPivot(id.Clock)
+		idx, ok := ms.Find(id.Clock)
 		if !ok {
 			continue
 		}
-		if idx+1 < list.Len() && list.MergeWithLefts(idx+1) > 1 {
-			continue
+		if next, ok := ms.Next(idx); ok {
+			if merged, _ := ms.MergeWithLefts(next); merged > 1 {
+				continue
+			}
 		}
 		if idx > 0 {
-			list.MergeWithLefts(idx)
+			ms.MergeWithLefts(idx)
 		}
+	}
+	for _, ms := range sessions {
+		ms.Close()
 	}
 }
 
+// squashNewBlocks merges this transaction's new structs into their left
+// neighbours, the classic per-character Text.Insert pattern among them, as
+// yjs's commit merges the structs of every client whose clock moved: from
+// the last one down to the first new one, each with its lefts, so a merge
+// can run on into the cells before it (a GC run arriving next to a
+// collected subtree joins it). It removes the V1 per-item overhead that
+// otherwise inflates document size by roughly 12x on fine-grained text
+// workloads.
 func (t *TransactionMut) squashNewBlocks() {
 	for c, after := range t.afterState {
 		before := t.beforeState[c]
@@ -610,11 +660,13 @@ func (t *TransactionMut) squashNewBlocks() {
 		if list == nil {
 			continue
 		}
-		startIdx, ok := list.FindPivot(before)
+		// yjs: from the last struct down to max(findIndexSS(beforeClock),
+		// 1), each merging with its lefts (tryToMergeWithLefts).
+		first, ok := list.FindPivot(before)
 		if !ok {
-			startIdx = 0
+			continue
 		}
-		list.SquashFrom(startIdx)
+		list.MergeLeftsDownTo(first)
 	}
 }
 
@@ -705,7 +757,10 @@ func (t *TransactionMut) Doc() *Doc { return t.doc }
 
 // Store returns the doc's BlockStore. Safe to mutate from within
 // this transaction; the write lock prevents concurrent access.
-func (t *TransactionMut) Store() *store.BlockStore { return t.doc.store }
+func (t *TransactionMut) Store() *store.BlockStore {
+	t.doc.store.RecordSplitsInto(&t.mergeStructs)
+	return t.doc.store
+}
 
 // IntegrateContext implementation. These methods make TransactionMut
 // satisfy block.IntegrateContext so Item.Integrate can route store
@@ -725,7 +780,7 @@ func (t *TransactionMut) MaterializeCleanStart(id block.ID) *block.Item {
 	if !ok {
 		return nil
 	}
-	return t.doc.store.Materialize(slc)
+	return t.Store().Materialize(slc)
 }
 
 // MaterializeCleanEnd returns an Item ending exactly at id.Clock
@@ -735,7 +790,7 @@ func (t *TransactionMut) MaterializeCleanEnd(id block.ID) *block.Item {
 	if !ok {
 		return nil
 	}
-	return t.doc.store.Materialize(slc)
+	return t.Store().Materialize(slc)
 }
 
 // Delete tombstones an Item and records its ID for inclusion in the
@@ -782,14 +837,25 @@ func (t *TransactionMut) Delete(item *block.Item) {
 // items go in document order, map entries in the order their keys were
 // first set (yjs _map.forEach).
 func (t *TransactionMut) deleteTypeContent(br *block.Branch) {
+	// A child deleted before this transaction is a merge candidate (yjs
+	// ContentType.delete pushes it to _mergeStructs): once collected, its
+	// cell can join its neighbours, which no other candidate may reach.
 	for it := br.Start; it != nil; it = it.Right {
 		if !it.IsDeleted() {
 			t.Delete(it)
+		} else if it.ID.Clock < t.beforeState[it.ID.Client] {
+			t.mergeStructs = append(t.mergeStructs, it.ID)
 		}
 	}
 	for _, k := range br.MapKeys() {
-		if it := br.Map[k]; it != nil && !it.IsDeleted() {
+		it := br.Map[k]
+		if it == nil {
+			continue
+		}
+		if !it.IsDeleted() {
 			t.Delete(it)
+		} else if it.ID.Clock < t.beforeState[it.ID.Client] {
+			t.mergeStructs = append(t.mergeStructs, it.ID)
 		}
 	}
 	br.Markers.Invalidate()

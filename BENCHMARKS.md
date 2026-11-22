@@ -149,9 +149,11 @@ below for a random client ID.
   The history: ~0.32 ms / edit pre-search-markers, ~0.041 ms / edit
   with markers, about 0.08 ms / edit from commit-time squash + GC
   (which emptied the marker cache on every insert and commit) until
-  1.38.0. A transaction per edit with an update handler takes 2.1 s
-  against 0.87 s for one transaction (same-machine comparison below):
-  the per-transaction work (commit, the update) is now most of it.
+  1.38.0. A transaction per edit with an update handler took 2.1 s
+  against 0.87 s for one transaction until 1.49.0, which takes 0.7 s:
+  every commit that deleted something merged deleted runs from the
+  deletion to the end of the client's list, where yjs merges only around
+  the transaction's delete set (same-machine comparison below).
 
 ## Same-machine comparison with yjs and reearth/ygo
 
@@ -170,20 +172,22 @@ trace, client ID 1, all edits in one transaction, as
 
 Closer to real use: a random client ID, a transaction per edit, an
 update handler attached. Ranges over the runs; reearth/ygo ran once.
+ygo's and yjs's times are from 22 Nov 2026 (ygo 1.49.0, yjs in the same
+session, the machine under other load); reearth/ygo's from 11 Nov.
 ygo's sizes are from 1.39.0, which draws 32-bit client IDs as yjs
 does; 1.38.0's 53-bit IDs gave 354,850-376,756 bytes of V1 and
 7,572,366-8,196,294 bytes of updates.
 
 | Metric            |                 ygo |   reearth/ygo |       yjs |
 |-------------------|--------------------:|--------------:|----------:|
-| Apply edits       |           2.1-2.4 s |         289 s | 1.07-1.15 s |
+| Apply edits       |         0.70-0.73 s |         289 s | 1.02-1.09 s |
 | Doc size V1       |             311,038 |     3,354,087 |   311,038 |
 | Doc size V2       |             159,929 |             - |   159,929 |
 | Bytes of updates  |           6,324,510 | 1,427,198,095 | 6,324,510 |
 
 - With all edits in one transaction ygo takes 0.7 times yjs's time
   and reearth/ygo 5.4 times ygo's; with a transaction per edit ygo
-  takes about twice yjs's time.
+  takes 0.7 times yjs's time too (it took twice until 1.49.0).
 - ygo and yjs produce documents and updates of identical size, with
   equal client IDs and with random ones: both draw 32-bit IDs. A
   random ID below 2^28 (1 draw in 16) takes 4 bytes on the wire

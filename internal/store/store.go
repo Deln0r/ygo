@@ -17,10 +17,12 @@ type BlockStore struct {
 	// order lists the clients in the order their first block arrived,
 	// the order in which yjs iterates store.clients (a Map).
 	order []uint64
-	// splits records the right half of every SplitBlock since the last
-	// TakeSplits: the commit tries to merge each one back with its
-	// neighbours, as yjs does with transaction._mergeStructs.
-	splits []block.ID
+	// splitRec receives the right half of every SplitBlock: the
+	// merge-candidate list (yjs transaction._mergeStructs) of the
+	// transaction the split is made through, which points it here when it
+	// opens and whenever its Store is taken. The commit of that transaction
+	// tries to merge each one back with its neighbours.
+	splitRec *[]block.ID
 	// cells counts the cells of every client's list, kept by the lists
 	// themselves (Cells).
 	cells int
@@ -218,17 +220,19 @@ func (s *BlockStore) SplitBlock(it *block.Item, offset uint64) *block.Item {
 		return nil
 	}
 	l.Insert(idx+1, CellOfItem(right))
-	s.splits = append(s.splits, right.ID)
+	if s.splitRec != nil {
+		*s.splitRec = append(*s.splitRec, right.ID)
+	}
 	return right
 }
 
-// TakeSplits returns the IDs of the right halves split since the last
-// call, in split order, and forgets them.
-func (s *BlockStore) TakeSplits() []block.ID {
-	out := s.splits
-	s.splits = nil
-	return out
-}
+// RecordSplitsInto makes SplitBlock append the right half of each split to
+// rec (nil: record nothing). The transaction a split is made through sets
+// it to its own merge-candidate list.
+func (s *BlockStore) RecordSplitsInto(rec *[]block.ID) { s.splitRec = rec }
+
+// RecordingSplitsInto reports whether SplitBlock appends to rec.
+func (s *BlockStore) RecordingSplitsInto(rec *[]block.ID) bool { return s.splitRec == rec }
 
 // Materialize splits the underlying block on both sides (as needed) so
 // that the returned *Item covers exactly the slice's [Start, End] range

@@ -18,6 +18,25 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.49.0] - 2026-11-22
+
+**Upgrade impact**: a commit now merges deleted and collected runs only where yjs merges them, so a document whose history collected a type after an UndoManager kept and released its subtree can encode a few more GC structs than before, as yjs encodes it. Content is unchanged. A transaction per edit is about three times faster.
+
+### Fixed
+
+- **GC runs merged where yjs leaves them apart.** After a nested array is deleted under an UndoManager, the manager cleared, and the array's parent deleted (by a peer or locally), its subtree becomes GC structs. yjs merges structs only around the transaction's delete set, its new structs and its `_mergeStructs` (split halves, and the already-deleted children a type's deletion meets), so some of those runs stay apart. ygo merged every adjacent run from the deletion to the end of the client's list, so its state wrote one GC struct of length 5 where yjs writes 2, 1, 1, 1. Peers converged on the same content, but the V1 and V2 state bytes differed from yjs's.
+  - A commit now merges as yjs does: the transaction's delete ranges, sorted and merged, from the last to the first (`tryMergeDeleteSet`); the new structs, right to left, each merging as far left as it can (which lets a GC run that arrives next to a collected subtree join it); then the merge candidates, which are the transaction's own (the halves of the splits made through it, and the already-deleted children its type deletions met), so a follow-up transaction's candidates wait for its own commit.
+  - `MergeUpdates` still writes the scratch document's merged runs where yjs's merge copies the updates' structs as they are (entry "MergeUpdates integrates instead of merging bytes").
+
+### Changed
+
+- **A transaction per edit is about three times faster.** The old merge walked to the end of the client's list on every commit that deleted something. On B4 with a random client ID, a transaction per edit and an update handler, ygo takes 0.70-0.73 s against 2.1 s before and 1.02-1.09 s for yjs on the same machine; all edits in one transaction are unchanged. The merges leave the absorbed cells in place until the pass ends and then move the list once, so a long transaction does not copy the list for every merge either.
+
+### Tests
+
+- 12 `gc-runs-*` update-event scenarios from yjs: the subtree typed at once and op by op, a map key's deleted value, two levels down, garbage collection off, the parent deleted locally, still kept, several deleted children, children created in the deleting transaction, the delete delivered twice, and a third peer's late append into the collected subtree with and without a delete; every update event, state and diff byte for byte, as V1, V2 and both by turns.
+- `TestGCMerge_FollowUpOwnsItsCandidates`: a type deleted in a follow-up of another transaction gives the same state as when deleted in a transaction of its own. `TestMergeSession_SameAsImmediateMerges`: 300 seeded lists merged through the session and with each merged cell dropped at once end the same. 9 mutation controls each fail a test.
+
 ## [1.48.1] - 2026-11-22
 
 ### Fixed

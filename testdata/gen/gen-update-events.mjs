@@ -1287,6 +1287,183 @@ const scenarios = [
       undo(0, 0),
     ],
   },
+  // Б12: a type deleted while a manager keeps its subtree, the keep released
+  // (Clear), then its parent deleted: yjs collects the subtree into GC
+  // structs but merges them only at its merge candidates (the transaction's
+  // delete set, new structs, and _mergeStructs: split halves and the
+  // already-deleted children ContentType.delete meets), so runs that are
+  // no candidate stay apart.
+  ...(() => {
+    const P = [M, "p"];
+    const C = [M, "p", 0];
+    const mixedC = (path) => [insv(path, 0, [1]), insType(path, 1, "array"), insv([...path, 1], 0, [9]), insv(path, 2, [2])];
+    const base = (extra = {}) => ({ docs: 2, managers: [{ doc: 0, scope: M }], states: true, diffs: true, ...extra });
+    return [
+      {
+        name: "gc-runs-after-clear-and-remote-parent-delete",
+        description: "C holds 1, an array holding 9, and 2; C is deleted under the manager, the manager cleared, and a peer deletes C's parent: the subtree becomes GC structs, and only the first child merges into C's run (C is the already-deleted child the parent's delete meets)",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), ...mixedC(C)),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 0, 1)),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-subtree-typed-in-several-transactions",
+        description: "the same subtree typed one op per transaction",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array")),
+          txn(0, "setup", insType(P, 0, "array")),
+          ...mixedC(C).map((op) => txn(0, "setup", op)),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 0, 1)),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-deleted-map-child",
+        description: "the parent is a map whose key c held the subtree: the deleted winner of c is the already-deleted child the parent's delete meets",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "map"), setType(P, "c", "array"), ...mixedC([M, "p", "c"])),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, mdel(P, "c")),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-two-levels",
+        description: "the deleted array sits two levels below the parent the peer deletes: the already-deleted child is met by its own parent's delete, nested in the collected subtree",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), insType([M, "p", 0], 0, "array"), ...mixedC([M, "p", 0, 0]), insv([M, "p", 0], 1, [7])),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del([M, "p", 0], 0, 1)),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-gc-off",
+        description: "the reproduction with garbage collection off: nothing is collected, and the merges that run anyway are yjs's",
+        ...base({ gc: false }),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), ...mixedC(C)),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 0, 1)),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-local-parent-delete",
+        description: "the parent deleted locally, in a transaction the manager does not track, instead of by a peer",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), ...mixedC(C)),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 0, 1)),
+          clear(0, 0),
+          txn(0, "other", mdel(M, "p")),
+          apply(0, 1, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-still-kept",
+        description: "the parent deleted by a peer while the manager still keeps the subtree: nothing kept is collected",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), ...mixedC(C)),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 0, 1)),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      {
+        name: "gc-runs-several-deleted-children",
+        description: "the parent holds two subtrees and a value between them, all deleted under the manager in separate transactions before the clear: each already-deleted child is a candidate of its own",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), ...mixedC(C), insv(P, 1, [5]), insType(P, 2, "array"), ...mixedC([M, "p", 2])),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 2, 1)),
+          txn(0, null, del(P, 1, 1)),
+          txn(0, null, del(P, 0, 1)),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+        ],
+      },
+      ...[true, false].map((alsoDelete) => ({
+        name: alsoDelete ? "gc-runs-late-child-and-delete" : "gc-runs-late-child",
+        description: "a third peer wrote the subtree, with q first; after the collection it appends 3 to C" + (alsoDelete ? " and deletes q in the same transaction" : "") + ": the appended item arrives as GC, a new struct, and yjs's merge of new structs runs on left over the writer's collected cells",
+        docs: 3,
+        managers: [{ doc: 1, scope: M }],
+        states: true,
+        diffs: true,
+        diffsDoc: 1,
+        steps: [
+          txn(2, "setup", setType(M, "p", "array"), insType(P, 0, "array"), insv(C, 0, ["q"]), insv(C, 1, [1]), insType(C, 2, "array"), insv([M, "p", 0, 2], 0, [9]), insv(C, 3, [2])),
+          apply(2, 1, "remote", "state"),
+          apply(2, 0, "remote", "state"),
+          manage(0),
+          txn(1, null, del(P, 0, 1)),
+          clear(1, 0),
+          txn(0, null, mdel(M, "p")),
+          apply(0, 1, "remote", "diff"),
+          txn(2, null, push(C, [3]), ...(alsoDelete ? [del(C, 0, 1)] : [])),
+          apply(2, 1, "remote", "diff"),
+        ],
+      })),
+      {
+        name: "gc-runs-children-created-in-the-transaction",
+        description: "a subtree typed and partly deleted in the transaction that deletes its parent: children newer than the transaction's start are no merge candidates",
+        docs: 2,
+        states: true,
+        diffs: true,
+        steps: [
+          txn(0, "setup", setType(M, "p", "array")),
+          txn(0, null, insType(P, 0, "array"), ...mixedC(C), del(C, 1, 1), insv(P, 1, [5]), del(P, 1, 1), mdel(M, "p")),
+          apply(0, 1, "remote", "state"),
+        ],
+      },
+      {
+        name: "gc-runs-remote-delete-replayed",
+        description: "the peer's delete of the parent is delivered twice: the second delivery deletes nothing and merges nothing",
+        ...base(),
+        steps: [
+          txn(0, "setup", setType(M, "p", "array"), insType(P, 0, "array"), ...mixedC(C)),
+          apply(0, 1, "remote", "state"),
+          manage(0),
+          txn(0, null, del(P, 0, 1)),
+          clear(0, 0),
+          txn(1, null, mdel(M, "p")),
+          apply(1, 0, "remote", "diff"),
+          replay(6, 0, "remote"),
+        ],
+      },
+    ];
+  })(),
   {
     name: "undo-clear-releases-keep",
     description: "after clear, a map the manager kept is released: an untracked delete of it is collected",
