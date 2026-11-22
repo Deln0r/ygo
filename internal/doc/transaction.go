@@ -252,6 +252,10 @@ func (t *TransactionMut) Commit() {
 		d.runQueued(f)
 		f.commitLocked()
 	}
+	// No transaction is open now: the store records splits into none, so it
+	// keeps no committed transaction alive (an update handler's encoding
+	// took the last one's Store again).
+	d.store.RecordSplitsInto(nil)
 	d.mu.Unlock()
 }
 

@@ -35,7 +35,7 @@ listed in the core's entries.
 ### Tests
 
 - 12 `gc-runs-*` update-event scenarios from yjs: the subtree typed at once and op by op, a map key's deleted value, two levels down, garbage collection off, the parent deleted locally, still kept, several deleted children, children created in the deleting transaction, the delete delivered twice, and a third peer's late append into the collected subtree with and without a delete; every update event, state and diff byte for byte, as V1, V2 and both by turns.
-- `TestGCMerge_FollowUpOwnsItsCandidates`: a type deleted in a follow-up of another transaction gives the same state as when deleted in a transaction of its own. `TestMergeSession_SameAsImmediateMerges`: 300 seeded lists merged through the session and with each merged cell dropped at once end the same. 9 mutation controls each fail a test.
+- `TestGCMerge_FollowUpOwnsItsCandidates`: a type deleted in a follow-up of another transaction gives the same state as when deleted in a transaction of its own. `TestMergeSession_SameAsImmediateMerges`: 300 seeded lists merged through the session and with each merged cell dropped at once end the same. `TestSquash_PushRunAllocatesLinearly` (20,000 single-value pushes in one transaction), `TestMergeSession_CandidatesOverOneRunAreLinear` (20,000 merge candidates over one run) and `TestCommit_StoreKeepsNoTransaction` (no committed transaction left reachable from the store) guard the merge's cost and memory. 12 mutation controls each fail a test.
 
 ## [1.48.1] - 2026-11-22
 

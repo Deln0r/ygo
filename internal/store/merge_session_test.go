@@ -100,3 +100,41 @@ func TestMergeSession_SameAsImmediateMerges(t *testing.T) {
 		}
 	}
 }
+
+// TestMergeSession_CandidatesOverOneRunAreLinear: candidates over one long
+// run of GC cells, worked last to first as mergeSplits works them (yjs
+// _mergeStructs: a type's already-deleted children), merge the run with the
+// first and then find each cell, and its right neighbour, in a bounded
+// number of hops each: lookups that walked absorber chains and absorbed
+// runs one cell at a time took K hops per candidate.
+func TestMergeSession_CandidatesOverOneRunAreLinear(t *testing.T) {
+	const k = 20000
+	l := &ClientBlockList{}
+	l.list = append(l.list, CellOfItem(&block.Item{ID: block.ID{Client: 1, Clock: 0}, Len: 1, Content: block.Content{Kind: block.KindDeleted, DeletedLen: 1}}))
+	for c := uint64(1); c <= k; c++ {
+		l.list = append(l.list, CellOfGC(c, c))
+	}
+	ms := l.BeginMerges()
+	for c := uint64(k); c >= 1; c-- {
+		idx, ok := ms.Find(c)
+		if !ok {
+			t.Fatalf("clock %d not found", c)
+		}
+		if next, ok := ms.Next(idx); ok {
+			if merged, _ := ms.MergeWithLefts(next); merged > 1 {
+				continue
+			}
+		}
+		if idx > 0 {
+			ms.MergeWithLefts(idx)
+		}
+	}
+	steps := ms.steps
+	ms.Close()
+	if l.Len() != 2 {
+		t.Fatalf("%d cells, want the item and one GC run", l.Len())
+	}
+	if steps > 8*k {
+		t.Fatalf("%d hops for %d candidates, want O(K)", steps, k)
+	}
+}

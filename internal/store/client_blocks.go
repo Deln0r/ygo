@@ -186,18 +186,34 @@ func (l *ClientBlockList) MergeWithLefts(pos int) int {
 }
 
 // mergeChain merges the cell at pos into its left neighbour, that one into
-// its own, and so on while a merge succeeds, leaving the absorbed cells in
-// place; it returns the index of the cell that absorbed them (pos when none
-// merged). The cell at pos is the chain's current head throughout: each
-// merge extends the cell on its left.
+// its own, and so on while a merge succeeds (yjs's order), leaving the
+// absorbed cells in place; it returns the index of the cell that absorbed
+// them (pos when none merged). Whether two cells merge depends only on the
+// two cells as they were, so the chain's extent is found first and the
+// cells are then merged left to right: each payload is appended once to the
+// survivor's, where merging right to left copied the growing tail into
+// every cell on the way.
 func (l *ClientBlockList) mergeChain(pos int) int {
-	i := pos
-	for ; i >= 1; i-- {
-		if !l.mergePair(i-1, i) {
-			return i
-		}
+	j := pos
+	for j >= 1 && l.canMerge(j-1, j) {
+		j--
 	}
-	return i
+	for k := j + 1; k <= pos; k++ {
+		l.mergePair(j, k)
+	}
+	return j
+}
+
+// canMerge reports whether mergePair(i, j) would merge.
+func (l *ClientBlockList) canMerge(i, j int) bool {
+	prev, cur := l.list[i], l.list[j]
+	switch {
+	case prev.Kind == CellKindItem && cur.Kind == CellKindItem && prev.Item != nil && cur.Item != nil:
+		return prev.Item.CanSquash(cur.Item)
+	case prev.Kind == CellKindGC && cur.Kind == CellKindGC:
+		return true
+	}
+	return false
 }
 
 // MergeSession runs a series of yjs tryToMergeWithLefts calls on the list as
@@ -211,7 +227,10 @@ func (l *ClientBlockList) mergeChain(pos int) int {
 type MergeSession struct {
 	l        *ClientBlockList
 	absorber map[int]int // absorbed index -> index of the cell it went into
+	skip     map[int]int // absorbed index -> an index right of it, toward the next live cell
 	minDead  int         // -1 while nothing is absorbed
+	chain    []int       // scratch for MergeWithLefts
+	steps    int         // pointer hops in live and liveFrom (tests)
 }
 
 // BeginMerges starts a MergeSession on l.
@@ -225,20 +244,40 @@ func (m *MergeSession) dead(i int) bool {
 }
 
 // live returns the cell that holds i now: i, or the cell it was absorbed
-// into, followed to one that was not.
+// into, followed to one that was not. Every cell on the way is pointed at
+// it, so a later lookup is short.
 func (m *MergeSession) live(i int) int {
-	j := i
+	root := i
 	for {
-		a, ok := m.absorber[j]
+		a, ok := m.absorber[root]
 		if !ok {
 			break
 		}
-		j = a
+		root = a
+		m.steps++
 	}
-	if j != i {
-		m.absorber[i] = j
+	for k := i; k != root; {
+		next := m.absorber[k]
+		m.absorber[k] = root
+		k = next
 	}
-	return j
+	return root
+}
+
+// liveFrom returns the first cell at or right of k that is not absorbed
+// (len when none), pointing the absorbed cells passed at it.
+func (m *MergeSession) liveFrom(k int) int {
+	root := k
+	for root < len(m.l.list) && m.dead(root) {
+		root = m.skip[root]
+		m.steps++
+	}
+	for k < root {
+		next := m.skip[k]
+		m.skip[k] = root
+		k = next
+	}
+	return root
 }
 
 // Len is the physical length of the list.
@@ -266,12 +305,11 @@ func (m *MergeSession) Find(clock uint64) (int, bool) {
 
 // Next returns the live cell right of the live cell i (yjs i+1), or false.
 func (m *MergeSession) Next(i int) (int, bool) {
-	for k := i + 1; k < len(m.l.list); k++ {
-		if !m.dead(k) {
-			return k, true
-		}
+	k := m.liveFrom(i + 1)
+	if k >= len(m.l.list) {
+		return 0, false
 	}
-	return 0, false
+	return k, true
 }
 
 // Left returns the live cell left of the live cell i (yjs i-1), or false
@@ -288,23 +326,34 @@ func (m *MergeSession) Left(i int) (int, bool) {
 // returns the number of merges and the cell that absorbed them (pos when
 // none).
 func (m *MergeSession) MergeWithLefts(pos int) (int, int) {
-	cur := pos
-	merged := 0
-	for {
+	// The chain's extent first, then the merges left to right (mergeChain).
+	chain := append(m.chain[:0], pos)
+	for cur := pos; ; {
 		left, ok := m.Left(cur)
-		if !ok || !m.l.mergePair(left, cur) {
-			return merged, cur
+		if !ok || !m.l.canMerge(left, cur) {
+			break
 		}
-		if m.absorber == nil {
-			m.absorber = map[int]int{}
-		}
-		m.absorber[cur] = left
-		if m.minDead < 0 || cur < m.minDead {
-			m.minDead = cur
-		}
+		chain = append(chain, left)
 		cur = left
-		merged++
 	}
+	m.chain = chain
+	survivor := chain[len(chain)-1]
+	if len(chain) == 1 {
+		return 0, survivor
+	}
+	if m.absorber == nil {
+		m.absorber, m.skip = map[int]int{}, map[int]int{}
+	}
+	for k := len(chain) - 2; k >= 0; k-- {
+		c := chain[k]
+		m.l.mergePair(survivor, c)
+		m.absorber[c] = survivor
+		m.skip[c] = c + 1
+		if m.minDead < 0 || c < m.minDead {
+			m.minDead = c
+		}
+	}
+	return len(chain) - 1, survivor
 }
 
 // Close removes the absorbed cells, moving each stretch of kept cells
@@ -331,7 +380,7 @@ func (m *MergeSession) Close() {
 	clear(l.list[w:])
 	l.list = l.list[:w]
 	l.count(w - n)
-	m.absorber, m.minDead = nil, -1
+	m.absorber, m.skip, m.minDead = nil, nil, -1
 }
 
 // mergePair merges the cell at j into the cell at i, its left neighbour
@@ -354,8 +403,9 @@ func (l *ClientBlockList) mergePair(i, j int) bool {
 // last cell down to first, each cell merges with its lefts (MergeWithLefts),
 // and the walk goes on left of where the merges stopped. A chain can run on
 // left of first. The absorbed cells leave the list in one pass at the end,
-// from the leftmost of them, so the work is linear in the cells walked and
-// moved however many chains merge. Returns the number of cells removed.
+// from the leftmost of them, so the list is moved once however many chains
+// merge, and each chain's payloads are appended once (mergeChain). Returns
+// the number of cells removed.
 func (l *ClientBlockList) MergeLeftsDownTo(first int) int {
 	if first < 1 {
 		first = 1

@@ -306,33 +306,12 @@ func (i *Item) integrate(ctx IntegrateContext, offset uint64, trackedMarkers boo
 	return false
 }
 
-// originEqual reports whether two *ID pointers name the same origin
-// or are both nil. Used by Integrate's YATA loop.
-func originEqual(a, b *ID) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return a.Equal(*b)
-}
-
-// TrySquash attempts to merge `other` into the receiver, producing a
-// single combined Item that covers both ID ranges. Returns true on
-// success; the caller must then drop `other` from its container.
-//
-// Squash refuses if any of the following fails:
-//   - Same client.
-//   - Adjacent clocks: i.LastClock + 1 == other.ID.Clock.
-//   - Same deleted state.
-//   - other.Origin == i.LastID (i.e. other was inserted with i as
-//     its left neighbour at insertion time).
-//   - other.RightOrigin == i.RightOrigin (immutable invariants line up).
-//   - i.Right == other (current linked-list pointers agree).
-//   - Neither is in a Move range or has been redone.
-//   - Neither is weak-linked.
-//   - Content.TrySquash succeeds for the kind-specific payload.
-//
-// Mirrors yrs/src/block.rs:848-876 ItemPtr::try_squash.
-func (i *Item) TrySquash(other *Item) bool {
+// CanSquash reports whether TrySquash(other) would merge other into i,
+// without changing either. Each condition is on the two items as they are,
+// and a merge leaves the ones a later merge of the result reads (i's start,
+// origins, deletion and flags; other's) as they were, so a run of items each
+// of which can squash into its left neighbour merges whole in either order.
+func (i *Item) CanSquash(other *Item) bool {
 	if i.ID.Client != other.ID.Client {
 		return false
 	}
@@ -361,7 +340,37 @@ func (i *Item) TrySquash(other *Item) bool {
 	if i.IsLinked() || other.IsLinked() {
 		return false
 	}
-	if !i.Content.TrySquash(&other.Content) {
+	return i.Content.CanSquash(&other.Content)
+}
+
+// originEqual reports whether two *ID pointers name the same origin
+// or are both nil. Used by Integrate's YATA loop.
+func originEqual(a, b *ID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
+}
+
+// TrySquash attempts to merge `other` into the receiver, producing a
+// single combined Item that covers both ID ranges. Returns true on
+// success; the caller must then drop `other` from its container.
+//
+// Squash refuses if any of the following fails:
+//   - Same client.
+//   - Adjacent clocks: i.LastClock + 1 == other.ID.Clock.
+//   - Same deleted state.
+//   - other.Origin == i.LastID (i.e. other was inserted with i as
+//     its left neighbour at insertion time).
+//   - other.RightOrigin == i.RightOrigin (immutable invariants line up).
+//   - i.Right == other (current linked-list pointers agree).
+//   - Neither is in a Move range or has been redone.
+//   - Neither is weak-linked.
+//   - Content.TrySquash succeeds for the kind-specific payload.
+//
+// Mirrors yrs/src/block.rs:848-876 ItemPtr::try_squash.
+func (i *Item) TrySquash(other *Item) bool {
+	if !i.CanSquash(other) || !i.Content.TrySquash(&other.Content) {
 		return false
 	}
 	// Merge: extend i to cover other's clocks; rewire neighbours. A kept

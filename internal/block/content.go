@@ -264,6 +264,19 @@ func (c *Content) splitDeleted(offset uint64) (Content, error) {
 	return right, nil
 }
 
+// CanSquash reports whether TrySquash(other) would succeed: the same kind,
+// one whose payloads concatenate.
+func (c *Content) CanSquash(other *Content) bool {
+	if c.Kind != other.Kind {
+		return false
+	}
+	switch c.Kind {
+	case KindAny, KindDeleted, KindJSON, KindString:
+		return true
+	}
+	return false
+}
+
 // TrySquash extends the receiver to absorb other's payload, returning
 // true on success. Squashable kinds: Any (slice append), Deleted
 // (length sum), JSON (slice append), String (concat). Non-matching
