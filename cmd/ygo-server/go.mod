@@ -3,7 +3,7 @@ module github.com/Deln0r/ygo/cmd/ygo-server
 go 1.26.0
 
 require (
-	github.com/Deln0r/ygo v1.48.1
+	github.com/Deln0r/ygo v1.49.0
 	github.com/Deln0r/ygo/persist/sqlite v1.47.0
 )
 

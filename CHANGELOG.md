@@ -27,6 +27,7 @@ listed in the core's entries.
 - **GC runs merged where yjs leaves them apart.** After a nested array is deleted under an UndoManager, the manager cleared, and the array's parent deleted (by a peer or locally), its subtree becomes GC structs. yjs merges structs only around the transaction's delete set, its new structs and its `_mergeStructs` (split halves, and the already-deleted children a type's deletion meets), so some of those runs stay apart. ygo merged every adjacent run from the deletion to the end of the client's list, so its state wrote one GC struct of length 5 where yjs writes 2, 1, 1, 1. Peers converged on the same content, but the V1 and V2 state bytes differed from yjs's.
   - A commit now merges as yjs does: the transaction's delete ranges, sorted and merged, from the last to the first (`tryMergeDeleteSet`); the new structs, right to left, each merging as far left as it can (which lets a GC run that arrives next to a collected subtree join it); then the merge candidates, which are the transaction's own (the halves of the splits made through it, and the already-deleted children its type deletions met), so a follow-up transaction's candidates wait for its own commit.
   - `MergeUpdates` still writes the scratch document's merged runs where yjs's merge copies the updates' structs as they are (entry "MergeUpdates integrates instead of merging bytes").
+  - `gomobile`, `cmd/yserve` and `cmd/ygo-server` v1.49.0 carry the fix and the speed-up below.
 
 ### Changed
 

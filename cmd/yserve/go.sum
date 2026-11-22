@@ -1,5 +1,5 @@
-github.com/Deln0r/ygo v1.48.1 h1:dKZjvysAo5aMO0MA/IFvhm+qZpOgynHq79SmDLhJ2OQ=
-github.com/Deln0r/ygo v1.48.1/go.mod h1:keGZ3CEtNsv+3kYp7enCPKdaHAGlnU/KOv0hj1F9sFA=
+github.com/Deln0r/ygo v1.49.0 h1:+prhqlxgkM5lN6AJ0s6DA4/pbQ19TOYKNgtJIaLzK6Q=
+github.com/Deln0r/ygo v1.49.0/go.mod h1:keGZ3CEtNsv+3kYp7enCPKdaHAGlnU/KOv0hj1F9sFA=
 github.com/Deln0r/ygo/persist/sqlite v1.47.0 h1:9BI70jj1eoo2zGJLKYvv+kk00veezaktFeelob8Lw2Y=
 github.com/Deln0r/ygo/persist/sqlite v1.47.0/go.mod h1:SyYUoKEAjMB8HD92Bf8riNpu99YMU+svczND+4bSPRc=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
