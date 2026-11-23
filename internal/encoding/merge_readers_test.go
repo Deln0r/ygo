@@ -187,7 +187,8 @@ func heldTieStreams(n int) [][]Block {
 }
 
 // TestMergeStreams_HeldTieSortingIsBounded: such a merge gives yjs's result,
-// and its sorting stops at the budget with ErrUpdateTooDense.
+// and its sorting stops at the sort that passes the budget, with
+// ErrUpdateTooDense.
 func TestMergeStreams_HeldTieSortingIsBounded(t *testing.T) {
 	streams := heldTieStreams(300)
 	want, cmps := mergeStreamsReferenceCount(streams)
@@ -198,8 +199,13 @@ func TestMergeStreams_HeldTieSortingIsBounded(t *testing.T) {
 	if g, w := describeBlocks(got), describeBlocks(want); g != w {
 		t.Fatalf("got  %s\nwant %s", g, w)
 	}
-	if _, _, err := mergeStreams(streams, cmps/2); !errors.Is(err, ErrUpdateTooDense) {
+	_, _, work, err := mergeStreamsWork(streams, cmps/2)
+	if !errors.Is(err, ErrUpdateTooDense) {
 		t.Fatalf("a budget of half yjs's %d comparisons: err %v, want ErrUpdateTooDense", cmps, err)
+	}
+	// It stops at the sort that passes the budget, not after the merge.
+	if work > cmps/2+int64(len(streams))*16 {
+		t.Fatalf("stopped after %d of yjs's %d comparisons, budget %d", work, cmps, cmps/2)
 	}
 }
 
