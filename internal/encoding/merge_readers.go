@@ -54,8 +54,12 @@ func (r *mergeReader) curr() *Block { return r.cur.curr() }
 
 func newMergeReaders(streams [][]Block, budget int64) *mergeReaders {
 	rs := &mergeReaders{lastDone: -1, budget: budget, small: len(streams) <= smallMerge, pair: len(streams) <= 2}
+	readers := make([]mergeReader, len(streams))
+	ptrs := make([]*mergeReader, 2*len(streams))
+	rs.all, rs.heap = ptrs[:0:len(streams)], ptrs[len(streams):len(streams)]
 	for i, st := range streams {
-		r := &mergeReader{idx: i, cur: structCursor{list: st}, pos: int64(i), kind: -1}
+		r := &readers[i]
+		*r = mergeReader{idx: i, cur: structCursor{list: st}, pos: int64(i), kind: -1}
 		rs.all = append(rs.all, r)
 		rs.track(r)
 		if r.curr() != nil {
@@ -67,8 +71,7 @@ func newMergeReaders(streams [][]Block, budget int64) *mergeReaders {
 	if rs.pair {
 		// Always the array: V8 sorts two by one comparison of the second
 		// with the first, which a tie answers -1, so they swap.
-		rs.order = append([]*mergeReader(nil), rs.heap...)
-		rs.heap = rs.heap[:0]
+		rs.order, rs.heap = rs.heap, nil
 		return rs
 	}
 	if rs.tie() {
