@@ -69,7 +69,7 @@ func GenerateWith(seed uint64, opts GenOptions) Scenario {
 	for i := 0; i < steps; i++ {
 		s.Steps = append(s.Steps, g.step(s.Peers))
 	}
-	s.Steps = append(s.Steps, Step{K: StepFinal})
+	s.Steps = append(s.Steps, Step{K: StepFinal}, Step{K: StepUnwind})
 	return s
 }
 

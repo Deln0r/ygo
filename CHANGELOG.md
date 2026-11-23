@@ -36,16 +36,17 @@ Both found by the differential fuzzer below.
 - **A differential fuzzer against yjs** (`internal/difffuzz`). A seed gives a scenario of two to five peers with different client IDs (up to 2^53-1), garbage collection on or off, and UndoManagers with explicit capture boundaries. The peers edit text (inserts with and without attributes, formats, embeds, deltas, cuts inside surrogate pairs), arrays, maps, nested types and XML, undo and redo, and exchange updates in V1 and V2: in order, reversed, shuffled, twice, in part or without the earliest (so updates wait in the pending queue), as state diffs, merged and diffed. ygo replays the scenario through its public API and yjs through a Node worker (`testdata/gen/difffuzz-oracle.mjs`), and the runs are compared at every step:
   - each update event, V1 and V2, byte for byte;
   - the bytes a sync, merge or diff sends;
-  - in a share of scenarios, the observer events of the array and map (deep) and the text, with their paths and changes;
-  - each touched peer's V1 and V2 state, state vector, pending queue, content and undo stacks;
+  - in a share of scenarios, the observer events of the array and map (deep) and the text, in the order the callbacks ran and grouped by callback, with their paths, changes and the identity of any shared type in them;
+  - the result of each undo and redo, and at the end the number of undos and then redos each UndoManager makes until nothing changes;
+  - each touched peer's V1 and V2 state, state vector, pending queue, content and whether it can undo and redo;
   - at the end, that the peers converged wherever yjs's did (yjs's peers can end apart where two of them cut one surrogate pair differently, and ygo's then end apart the same way).
   - A divergence is shrunk with yjs in the loop and kept in `testdata/difffuzz/`, whose scenarios replay without Node to yjs's traces (`testdata/difffuzz-fixtures.json`, `TestDifferential_Corpus`). CI runs 300 seeds on every push (fixtures job) and 30,000 new seeds every night (`fuzz` workflow, `differential vs yjs`). With the two fixes above, seeds 1 to 30,000 run the same in both.
 
 ### Tests
 
 - 4 corpus scenarios: format with empty attributes over a surrogate pair (two shapes), and an undo of merged deleted values of a map key and of an XML attribute.
-- The harness's own tests: a seed gives one scenario and survives JSON; generated steps never fail in ygo; a flipped event byte, a missing and an extra event, changed sent bytes, a changed view, state or pending flag, and a changed, missing or extra observer event are each found at the step they were planted in; a planted divergence shrinks to the one transaction that made it; the worker client refuses a reply for another id, of another schema or without a trace, one that does not come in time, a worker writing to stderr and one exiting with a status.
-- 12 mutation controls each fail a test.
+- The harness's own tests: a seed gives one scenario and survives JSON; generated steps never fail in ygo; a flipped event byte, a missing and an extra event, changed sent bytes, a changed view, state or pending flag, and a changed, missing or extra observer event are each found at the step they were planted in; a planted divergence shrinks to the one transaction that made it; the worker client refuses a reply for another id, of another schema or without a trace, one that does not come in time, a worker that stops reading its requests, a worker writing to stderr and one exiting with a status.
+- 17 mutation controls each fail a test.
 
 ## [1.50.0] - 2026-11-23
 

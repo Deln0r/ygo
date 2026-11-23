@@ -56,11 +56,13 @@ function mulberry32(seed) {
 
 // A value in an event: shared types by kind only (run.go eventValue).
 function eventValue(v) {
-  if (v instanceof Y.Map) return "$map";
-  if (v instanceof Y.Array) return "$array";
-  if (v instanceof Y.XmlText) return "$xt";
-  if (v instanceof Y.Text) return "$text";
-  if (v instanceof Y.XmlFragment) return "$xml";
+  let kind = null;
+  if (v instanceof Y.Map) kind = "$map";
+  else if (v instanceof Y.Array) kind = "$array";
+  else if (v instanceof Y.XmlText) kind = "$xt";
+  else if (v instanceof Y.Text) kind = "$text";
+  else if (v instanceof Y.XmlFragment) kind = "$xml";
+  if (kind !== null) return v._item ? `${kind}@${v._item.id.client}:${v._item.id.clock}` : kind;
   if (v === undefined) return null;
   return canon(v);
 }
@@ -68,11 +70,21 @@ function eventValue(v) {
 // The view: the same tagged tree as run.go's view, objects rebuilt with
 // their keys sorted (array-index keys come first in JavaScript anyway), so
 // JSON.stringify writes what anyval.AppendStringify writes.
+// Keys in code point order, as Go's sort.Strings orders UTF-8; objects
+// without a prototype, so a "__proto__" key is a key.
+const byCodePoint = (a, b) => {
+  const A = Array.from(a), B = Array.from(b);
+  for (let i = 0; i < Math.min(A.length, B.length); i++) {
+    const x = A[i].codePointAt(0), y = B[i].codePointAt(0);
+    if (x !== y) return x - y;
+  }
+  return A.length - B.length;
+};
 function canon(v) {
   if (Array.isArray(v)) return v.map(canon);
-  if (v !== null && typeof v === "object" && !(v instanceof Y.AbstractType)) {
-    const o = {};
-    for (const k of Object.keys(v).sort()) o[k] = canon(v[k]);
+  if (v !== null && typeof v === "object" && !(v instanceof Y.AbstractType) && !(v instanceof Uint8Array)) {
+    const o = Object.create(null);
+    for (const k of Object.keys(v).sort(byCodePoint)) o[k] = canon(v[k]);
     return o;
   }
   return valueView(v);
@@ -87,8 +99,8 @@ function valueView(v) {
   return v;
 }
 function mapView(m) {
-  const o = {};
-  for (const k of Array.from(m.keys()).sort()) o[k] = valueView(m.get(k));
+  const o = Object.create(null);
+  for (const k of Array.from(m.keys()).sort(byCodePoint)) o[k] = valueView(m.get(k));
   return o;
 }
 function textView(t) {
@@ -170,8 +182,8 @@ function textOp(t, op) {
   const a = attrs(op.attrs);
   switch (op.o) {
     case "ins":
-      if (a === undefined) t.insert(insIdx(op.pos, l), op.s);
-      else t.insert(insIdx(op.pos, l), op.s, a);
+      if (a === undefined) t.insert(insIdx(op.pos, l), op.s ?? "");
+      else t.insert(insIdx(op.pos, l), op.s ?? "", a);
       return;
     case "del": {
       const r = delRange(op.pos, op.len, l);
@@ -214,21 +226,21 @@ function runOp(p, op) {
   }
   if (t instanceof Y.Map) {
     switch (op.o) {
-      case "set": t.set(op.key, value(op.v)); return;
-      case "mdel": t.delete(op.key); return;
-      case "setmap": t.set(op.key, new Y.Map()); return;
-      case "setarr": t.set(op.key, new Y.Array()); return;
-      case "settext": t.set(op.key, new Y.Text()); return;
+      case "set": t.set(op.key ?? "", value(op.v)); return;
+      case "mdel": t.delete(op.key ?? ""); return;
+      case "setmap": t.set(op.key ?? "", new Y.Map()); return;
+      case "setarr": t.set(op.key ?? "", new Y.Array()); return;
+      case "settext": t.set(op.key ?? "", new Y.Text()); return;
       case "clear": t.clear(); return;
     }
     throw new Error(`map op ${op.o}`);
   }
   if (t instanceof Y.XmlFragment) {
-    if (t instanceof Y.XmlElement && op.o === "setattr") { t.setAttribute(op.key, op.s || ""); return; }
-    if (t instanceof Y.XmlElement && op.o === "rmattr") { t.removeAttribute(op.key); return; }
+    if (t instanceof Y.XmlElement && op.o === "setattr") { t.setAttribute(op.key ?? "", op.s ?? ""); return; }
+    if (t instanceof Y.XmlElement && op.o === "rmattr") { t.removeAttribute(op.key ?? ""); return; }
     const l = t.length;
     switch (op.o) {
-      case "insel": t.insert(insIdx(op.pos, l), [new Y.XmlElement(op.s)]); return;
+      case "insel": t.insert(insIdx(op.pos, l), [new Y.XmlElement(op.s ?? "")]); return;
       case "instext": t.insert(insIdx(op.pos, l), [new Y.XmlText()]); return;
       case "del": { const r = delRange(op.pos, op.len, l); if (r) t.delete(r[0], r[1]); return; }
     }
@@ -257,8 +269,9 @@ export function run(s) {
     if (s.observe) {
       const rec = (root, evs) => {
         if (!cur) return;
+        cur.batch++;
         for (const e of evs) {
-          const o = { peer: i, root, path: JSON.stringify(e.path), kind: "", change: "" };
+          const o = { batch: cur.batch, peer: i, root, path: JSON.stringify(e.path), kind: "", change: "" };
           if (e.target instanceof Y.Map) {
             o.kind = "map";
             const keys = Array.from(e.changes.keys.entries()).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
@@ -328,7 +341,7 @@ export function run(s) {
   };
   const steps = [];
   for (const st of s.steps) {
-    const out = { events: [], obs: [] };
+    const out = { events: [], obs: [], batch: 0 };
     cur = out;
     let touched = [];
     try {
@@ -412,6 +425,19 @@ export function run(s) {
           touched = peers.map((_, i) => i);
           break;
         }
+        case "unwind": {
+          out.depths = [];
+          peers.forEach((p, i) => {
+            if (!p.um) return;
+            let u = 0, d = 0;
+            while (u < 1000 && p.um.undo() !== null) u++;
+            while (d < 1000 && p.um.redo() !== null) d++;
+            out.depths.push(u, d);
+            touched.push(i);
+          });
+          if (out.depths.length === 0) delete out.depths;
+          break;
+        }
         default:
           out.err = `unknown step ${st.k}`;
       }
@@ -421,7 +447,7 @@ export function run(s) {
     cur = null;
     if (!out.skip && !(out.err && out.err.startsWith("unknown"))) out.peers = touched.map(state);
     if (out.events.length === 0) delete out.events;
-    out.obs.sort((a, b) => a.peer - b.peer || (a.root < b.root ? -1 : a.root > b.root ? 1 : 0));
+    delete out.batch;
     if (out.obs.length === 0) delete out.obs;
     steps.push(out);
   }

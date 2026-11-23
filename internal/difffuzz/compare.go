@@ -53,10 +53,9 @@ func Compare(s Scenario, g, j Trace) *Divergence {
 	// surrogate pair in different places, each replacing the halves it cut
 	// with U+FFFD locally. The steps above already hold Go to yjs there;
 	// Go's peers must converge wherever yjs's do.
-	if converged(j) == nil {
-		if d := converged(g); d != nil {
+	if converged(s, j) == nil {
+		if d := Converged(s, g); d != nil {
 			d.Field += ".go"
-			d.Step, d.Kind = len(g.Steps)-1, StepFinal
 			return d
 		}
 	}
@@ -78,6 +77,9 @@ func compareStep(g, j StepTrace) *Divergence {
 	}
 	if g.Sent != j.Sent {
 		return diff("sent", "", g.Sent, j.Sent)
+	}
+	if show(g.Depths) != show(j.Depths) {
+		return diff("depths", "", show(g.Depths), show(j.Depths))
 	}
 	if len(g.Events) != len(j.Events) {
 		return diff("events", "count", show(g.Events), show(j.Events))
@@ -121,22 +123,33 @@ func compareStep(g, j StepTrace) *Divergence {
 	return nil
 }
 
-// Converged checks that the peers of one trace ended together.
-func Converged(tr Trace) *Divergence {
-	d := converged(tr)
+// Converged checks that the peers of one trace of s were together after
+// its last final step.
+func Converged(s Scenario, tr Trace) *Divergence {
+	d := converged(s, tr)
 	if d != nil {
-		d.Step, d.Kind = len(tr.Steps)-1, StepFinal
+		d.Step, d.Kind = finalStep(s), StepFinal
 	}
 	return d
 }
 
+func finalStep(s Scenario) int {
+	for i := len(s.Steps) - 1; i >= 0; i-- {
+		if s.Steps[i].K == StepFinal {
+			return i
+		}
+	}
+	return -1
+}
+
 // converged checks the final step: every peer with the same view and state
 // vector, nothing pending.
-func converged(tr Trace) *Divergence {
-	if len(tr.Steps) == 0 {
+func converged(s Scenario, tr Trace) *Divergence {
+	f := finalStep(s)
+	if f < 0 || f >= len(tr.Steps) {
 		return nil
 	}
-	last := tr.Steps[len(tr.Steps)-1]
+	last := tr.Steps[f]
 	if last.Err != "" || len(last.Peers) == 0 {
 		return nil
 	}

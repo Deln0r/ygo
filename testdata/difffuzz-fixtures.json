@@ -262,6 +262,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 1,
         "root": "t",
         "path": "[]",
@@ -317,6 +318,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 0,
         "root": "t",
         "path": "[]",
@@ -324,6 +326,7 @@
         "change": "[{\"insert\":\"🎉����🎉\"}]"
        },
        {
+        "batch": 2,
         "peer": 2,
         "root": "t",
         "path": "[]",
@@ -496,6 +499,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 0,
         "root": "m",
         "path": "[]",
@@ -530,6 +534,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 3,
         "root": "m",
         "path": "[]",
@@ -563,6 +568,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 3,
         "root": "m",
         "path": "[]",
@@ -597,6 +603,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 0,
         "root": "m",
         "path": "[]",
@@ -631,6 +638,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 3,
         "root": "m",
         "path": "[]",
@@ -666,6 +674,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 3,
         "root": "m",
         "path": "[]",
@@ -700,6 +709,7 @@
       ],
       "obs": [
        {
+        "batch": 1,
         "peer": 3,
         "root": "m",
         "path": "[]",
@@ -775,13 +785,7 @@
       ],
       "obs": [
        {
-        "peer": 0,
-        "root": "m",
-        "path": "[]",
-        "kind": "map",
-        "change": "[{\"action\":\"update\",\"key\":\"k2\",\"old\":null}]"
-       },
-       {
+        "batch": 1,
         "peer": 1,
         "root": "m",
         "path": "[]",
@@ -789,13 +793,7 @@
         "change": "[{\"action\":\"add\",\"key\":\"k2\"}]"
        },
        {
-        "peer": 1,
-        "root": "m",
-        "path": "[]",
-        "kind": "map",
-        "change": "[{\"action\":\"update\",\"key\":\"k2\",\"old\":null}]"
-       },
-       {
+        "batch": 2,
         "peer": 2,
         "root": "m",
         "path": "[]",
@@ -803,6 +801,23 @@
         "change": "[{\"action\":\"add\",\"key\":\"k2\"}]"
        },
        {
+        "batch": 3,
+        "peer": 0,
+        "root": "m",
+        "path": "[]",
+        "kind": "map",
+        "change": "[{\"action\":\"update\",\"key\":\"k2\",\"old\":null}]"
+       },
+       {
+        "batch": 4,
+        "peer": 1,
+        "root": "m",
+        "path": "[]",
+        "kind": "map",
+        "change": "[{\"action\":\"update\",\"key\":\"k2\",\"old\":null}]"
+       },
+       {
+        "batch": 5,
         "peer": 2,
         "root": "m",
         "path": "[]",

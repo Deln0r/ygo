@@ -27,6 +27,7 @@ on:
       - "internal/undo/**"
       - "internal/difffuzz/**"
       - "testdata/gen/difffuzz-*.mjs"
+      - "difffuzz_test.go"
       - ".github/workflows/fuzz.yml"
   pull_request:
     branches: [main]
@@ -38,6 +39,9 @@ on:
       - "internal/block/**"
       - "internal/types/**"
       - "internal/undo/**"
+      - "internal/difffuzz/**"
+      - "testdata/gen/difffuzz-*.mjs"
+      - "difffuzz_test.go"
   workflow_dispatch:
 
 jobs:

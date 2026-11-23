@@ -41,7 +41,7 @@ func TestRun_GeneratedOpsAreValid(t *testing.T) {
 				t.Fatalf("seed %d step %d (%s): %s", seed, i, s.Steps[i].K, st.Err)
 			}
 		}
-		if d := Converged(tr); d != nil {
+		if d := Converged(s, tr); d != nil {
 			t.Fatalf("seed %d: %v", seed, d)
 		}
 	}

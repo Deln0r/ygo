@@ -45,6 +45,7 @@ const (
 	StepMerge   = "merge"   // To applies the merge of From's undelivered events
 	StepDiff    = "diff"    // To applies that merge diffed against To's state vector
 	StepFinal   = "final"   // every peer syncs with every other until nothing changes
+	StepUnwind  = "unwind"  // after final: each undo peer undoes until nothing changes, then redoes
 )
 
 // Delivery orders.

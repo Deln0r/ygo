@@ -104,8 +104,21 @@ func (o *Oracle) Run(s Scenario, timeout time.Duration) (Trace, error) {
 	if err != nil {
 		return Trace{}, err
 	}
-	if _, err := o.in.Write(append(b, '\n')); err != nil {
-		return Trace{}, o.fail(fmt.Errorf("difffuzz: write to the oracle: %w", err))
+	// The deadline covers writing the request too: a worker that stops
+	// reading would block a write larger than the pipe's buffer.
+	deadline := time.After(timeout)
+	written := make(chan error, 1)
+	go func() {
+		_, err := o.in.Write(append(b, '\n'))
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			return Trace{}, o.fail(fmt.Errorf("difffuzz: write to the oracle: %w", err))
+		}
+	case <-deadline:
+		return Trace{}, o.fail(fmt.Errorf("difffuzz: the oracle took more than %v to read seed %d", timeout, s.Seed))
 	}
 	select {
 	case line, ok := <-o.lines:
@@ -127,7 +140,7 @@ func (o *Oracle) Run(s Scenario, timeout time.Duration) (Trace, error) {
 			return Trace{}, o.fail(fmt.Errorf("difffuzz: oracle reply without a trace of schema %d", Schema))
 		}
 		return *rep.Trace, nil
-	case <-time.After(timeout):
+	case <-deadline:
 		return Trace{}, o.fail(fmt.Errorf("difffuzz: the oracle took more than %v on seed %d", timeout, s.Seed))
 	}
 }

@@ -72,6 +72,29 @@ func TestOracle_RefusesBadReplies(t *testing.T) {
 			}
 		})
 	}
+	// A worker that never reads: a request larger than the pipe's buffer
+	// blocks the write, and the deadline still holds.
+	t.Run("never reads", func(t *testing.T) {
+		script := fakeOracle(t, "")
+		src := "setInterval(() => {}, 1000);\n"
+		if err := os.WriteFile(script, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		o, err := StartOracle(script)
+		if err != nil {
+			t.Fatal(err)
+		}
+		big := Generate(1)
+		big.Steps = append([]Step{{K: StepTxn, Ops: []Op{{Root: "t", Want: WantText, O: OpIns, S: strings.Repeat("a", 1<<20)}}}}, big.Steps...)
+		start := time.Now()
+		if _, err := o.Run(big, time.Second); err == nil || !strings.Contains(err.Error(), "took more than") {
+			t.Fatalf("Run: %v, want a timeout", err)
+		}
+		if d := time.Since(start); d > 10*time.Second {
+			t.Fatalf("Run returned after %v", d)
+		}
+		_ = o.Close()
+	})
 	if _, err := StartOracle(filepath.Join(t.TempDir(), "missing.mjs")); !errors.Is(err, ErrNoOracle) {
 		t.Fatalf("a missing script: %v, want ErrNoOracle", err)
 	}

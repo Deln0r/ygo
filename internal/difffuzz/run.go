@@ -27,14 +27,18 @@ type StepTrace struct {
 	Sent   string      `json:"sent,omitempty"`
 	Events []Event     `json:"events,omitempty"`
 	Peers  []PeerState `json:"peers,omitempty"`
-	// Obs are the observer events of the step (Scenario.Observe), grouped
-	// by peer and root (a, m, t), each group in the order the callbacks ran.
+	// Obs are the observer events of the step (Scenario.Observe), in the
+	// order the callbacks ran; Batch numbers the callback each came in.
 	Obs []ObsEvent `json:"obs,omitempty"`
+	// Depths are, for an unwind step, each undo peer's count of undos that
+	// changed something until none did, then of redos.
+	Depths []int `json:"depths,omitempty"`
 }
 
 // ObsEvent is one observer event: where it fired, the path of its target
 // below the root, the target's kind and the change, as JSON.
 type ObsEvent struct {
+	Batch  int    `json:"batch"`
 	Peer   int    `json:"peer"`
 	Root   string `json:"root"`
 	Path   string `json:"path"`
@@ -105,6 +109,7 @@ type runner struct {
 	peers []*peer
 	cur   *StepTrace
 	stats *Stats
+	batch int // observer callbacks so far in the step
 }
 
 // Run replays s through ygo and returns its trace.
@@ -179,14 +184,9 @@ func Run(s Scenario, opts RunOptions) Trace {
 
 func (r *runner) step(st Step) (out StepTrace) {
 	r.cur = &out
+	r.batch = 0
 	defer func() {
 		r.cur = nil
-		sort.SliceStable(out.Obs, func(a, b int) bool {
-			if out.Obs[a].Peer != out.Obs[b].Peer {
-				return out.Obs[a].Peer < out.Obs[b].Peer
-			}
-			return out.Obs[a].Root < out.Obs[b].Root
-		})
 		if e := recover(); e != nil {
 			out.Err = fmt.Sprintf("panic: %v", e)
 		}
@@ -323,6 +323,21 @@ func (r *runner) step(st Step) (out StepTrace) {
 		for i := range r.peers {
 			touched = append(touched, i)
 		}
+	case StepUnwind:
+		for i, p := range r.peers {
+			if p.um == nil {
+				continue
+			}
+			u, d := 0, 0
+			for u < unwindMax && p.um.Undo() {
+				u++
+			}
+			for d < unwindMax && p.um.Redo() {
+				d++
+			}
+			out.Depths = append(out.Depths, u, d)
+			touched = append(touched, i)
+		}
 	default:
 		out.Err = "unknown step " + st.K
 		return out
@@ -332,6 +347,9 @@ func (r *runner) step(st Step) (out StepTrace) {
 	}
 	return out
 }
+
+// unwindMax bounds an unwind step's undos and redos per peer.
+const unwindMax = 1000
 
 func pick(e event, v2 bool) []byte {
 	if v2 {
@@ -815,8 +833,9 @@ func (r *runner) observe(i int, p *peer) {
 		if r.cur == nil {
 			return
 		}
+		r.batch++
 		for _, ev := range evs {
-			o := ObsEvent{Peer: i, Root: root}
+			o := ObsEvent{Batch: r.batch, Peer: i, Root: root}
 			switch e := ev.(type) {
 			case *ygo.MapEvent:
 				o.Path, o.Kind, o.Change = pathJSON(e.Path), "map", mapChange(e.Keys)
@@ -850,22 +869,32 @@ func pathJSON(path []any) string {
 	return string(anyval.AppendStringify(nil, out))
 }
 
-// eventValue is a value in an event: shared types by kind only (their
-// content at callback time is not part of the change).
+// eventValue is a value in an event: a shared type by its kind and the ID
+// of the item that made it (its content at callback time is not part of
+// the change).
 func eventValue(v any) any {
-	switch v.(type) {
+	kind := ""
+	var br *ygo.Branch
+	switch x := v.(type) {
 	case *ygo.Map:
-		return "$map"
+		kind, br = "$map", x.Branch()
 	case *ygo.Array:
-		return "$array"
+		kind, br = "$array", x.Branch()
 	case *ygo.Text:
-		return "$text"
+		kind, br = "$text", x.Branch()
 	case *ygo.XmlText:
-		return "$xt"
-	case *ygo.XmlElement, *ygo.XmlFragment:
-		return "$xml"
+		kind, br = "$xt", x.Branch()
+	case *ygo.XmlElement:
+		kind, br = "$xml", x.Branch()
+	case *ygo.XmlFragment:
+		kind, br = "$xml", x.Branch()
+	default:
+		return v
 	}
-	return v
+	if br == nil || br.Item == nil {
+		return kind
+	}
+	return fmt.Sprintf("%s@%d:%d", kind, br.Item.ID.Client, br.Item.ID.Clock)
 }
 
 func mapChange(keys map[string]ygo.KeyChange) string {

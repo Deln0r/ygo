@@ -3,6 +3,7 @@ package ygo_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -68,6 +69,22 @@ func TestDifferential_Seeds(t *testing.T) {
 		return difffuzz.Compare(s, difffuzz.Run(s, difffuzz.RunOptions{}), js), nil
 	}
 	failed := 0
+	save := func(seed uint64, suffix string, sc difffuzz.Scenario, d *difffuzz.Divergence) {
+		dir := os.Getenv("YGO_DIFFFUZZ_OUT")
+		if dir == "" {
+			return
+		}
+		b, err := json.MarshalIndent(map[string]any{"note": fmt.Sprintf("seed %d: %v", seed, d), "scenario": sc}, "", " ")
+		if err == nil {
+			err = os.MkdirAll(dir, 0o755)
+		}
+		if err == nil {
+			err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("seed-%d%s.json", seed, suffix)), append(b, '\n'), 0o644)
+		}
+		if err != nil {
+			t.Errorf("seed %d: saving the scenario: %v", seed, err)
+		}
+	}
 	for seed := from; seed < from+n; seed++ {
 		s := difffuzz.Generate(seed)
 		d, err := check(s)
@@ -77,19 +94,30 @@ func TestDifferential_Seeds(t *testing.T) {
 		if d == nil {
 			continue
 		}
+		// The original first: shrinking needs the oracle again and may fail.
+		save(seed, "", s, d)
+		var shrinkErr error
 		small := difffuzz.Shrink(s, d.Class(), 400, func(c difffuzz.Scenario) *difffuzz.Divergence {
+			if shrinkErr != nil {
+				return nil
+			}
 			d, err := check(c)
 			if err != nil {
-				t.Fatalf("seed %d while shrinking: %v", seed, err)
+				shrinkErr = err
+				return nil
 			}
 			return d
 		})
-		sd, _ := check(small)
-		b, _ := json.Marshal(small)
-		if dir := os.Getenv("YGO_DIFFFUZZ_OUT"); dir != "" {
-			_ = os.MkdirAll(dir, 0o755)
-			_ = os.WriteFile(filepath.Join(dir, "seed-"+strconv.FormatUint(seed, 10)+".json"), b, 0o644)
+		if shrinkErr != nil {
+			raw, _ := json.Marshal(s)
+			t.Fatalf("seed %d diverges: %v\nshrinking failed: %v\n%s", seed, d, shrinkErr, raw)
 		}
+		sd, err := check(small)
+		if err != nil {
+			t.Fatalf("seed %d: rechecking the shrunk scenario: %v", seed, err)
+		}
+		save(seed, "-shrunk", small, sd)
+		b, _ := json.Marshal(small)
 		t.Errorf("seed %d diverges: %v\nshrunk to %d steps: %v\n%s", seed, d, len(small.Steps), sd, b)
 		if failed++; failed >= 3 {
 			t.Fatal("stopping after 3 diverging seeds")
