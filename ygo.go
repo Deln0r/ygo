@@ -443,7 +443,7 @@ func RestoreSnapshot(d *Doc, snap Snapshot) (*Doc, error) {
 		// as stored (V1 cannot carry an undefined format value or embed).
 		// Any other error is returned.
 		v1 := encoding.EncodeSnapshotAsUpdateV1(txn.Store(), snap)
-		if _, _, verr := encoding.DecodeUpdate(v1); errors.Is(verr, lib0.ErrInvalidUTF8) {
+		if _, _, verr := encoding.DecodeOwnUpdate(v1); errors.Is(verr, lib0.ErrInvalidUTF8) {
 			updateV1, err = v1, nil
 		}
 	}

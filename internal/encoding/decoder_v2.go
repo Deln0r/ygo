@@ -26,7 +26,7 @@ type DecoderV2 struct {
 	restPos int
 
 	// ownBytes marks bytes ygo itself encoded from a document, which may
-	// hold a shared type ref a release before 1.53.0 accepted (7 to 255).
+	// hold a shared type ref a release before 1.53.0 accepted (checkTypeRef).
 	ownBytes bool
 
 	keyClock   *lib0.IntDiffOptRleDecoder

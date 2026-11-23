@@ -339,9 +339,17 @@ func DecodeUpdate(buf []byte) (*Update, []byte, error) {
 
 // DecodeStoredUpdate is DecodeUpdate for bytes ygo itself stored: strings
 // are read as stored, so an update a release before v1.26 stored with
-// invalid UTF-8 still decodes, unchanged (lib0.ReadVarStringAsStored).
+// invalid UTF-8 still decodes, unchanged (lib0.ReadVarStringAsStored), and
+// shared type refs as releases before 1.53.0 read them (checkTypeRef).
 func DecodeStoredUpdate(buf []byte) (*Update, []byte, error) {
 	return decodeUpdate(buf, storedStrings)
+}
+
+// DecodeOwnUpdate is DecodeUpdate for bytes ygo just encoded from its own
+// document: strings are read strictly, shared type refs as
+// DecodeStoredUpdate reads them.
+func DecodeOwnUpdate(buf []byte) (*Update, []byte, error) {
+	return decodeUpdate(buf, ownStrings)
 }
 
 func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
@@ -404,6 +412,9 @@ func decodeUpdateInto(buf []byte, strs stringMode, raw *rawUpdate) (*Update, []b
 			}
 			if visit {
 				raw.visit(&b)
+				// The struct is not kept, so neither are the orders of its
+				// content: a fresh table per struct.
+				orders = orderTable{}
 			} else {
 				blocks = append(blocks, b)
 			}

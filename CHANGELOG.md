@@ -39,16 +39,16 @@ Decoding (`ApplyUpdate`, `ApplyUpdateV2` and every update utility) now refuses a
 
 ### Fixed
 
-- **A shared type ref past 6 is refused**, as yjs refuses it (its `readContentType` throws). ygo read the refs 7 to 255 as a shared type of no kind yjs knows, and a ref past 255 as its low byte: 256 became an array. Bytes ygo itself stored (`DecodeStoredUpdate`) or encoded from a document (snapshots) keep the refs 7 to 255, so a document that holds one still loads.
+- **A shared type ref past 6 is refused** on the wire, as yjs refuses it (its `readContentType` throws). ygo read the refs 7 to 255 as a shared type of no kind yjs knows, and a ref past 255 as its low byte: 256 became an array. Bytes ygo itself stored (`DecodeStoredUpdate`, which stores, compaction and versions use) or encoded from a document (snapshots) read every ref as before, since a store may hold an update as a client sent it, so a document that holds one still loads, compacts and restores.
 - **The V2 feature flag is read as yjs reads it**: a varuint, ignored. ygo refused anything but a single 0 byte.
 - **An empty struct or client section may start at clock 2^53**, where a run may already end, as yjs reads it. ygo refused it.
 
 ### Tests
 
 - 49 updates written by hand in V1 and V2 (V2 through yjs's encoder, not a conversion): clients ascending, a client in two sections and in two runs from 0, sections with a gap and going backwards, a run not starting at 0, Skips first, later and opening a later client's run, zero-length structs, delete-only, no delete set, a single 0 byte, trailing bytes, repeated, overlapping and zero-length delete ranges, items with and without origins, shared type refs 0, 6, 7 and 256, a V2 feature flag of 1 and an overlong one, negative V2 origin clocks, empty structs at clock 2^53 (also applied, the document's state vector against yjs's); yjs's conversion both ways (or its error), state vector and meta (or their errors) of each, byte for byte. The same three for the first 16 inputs and the merge of every merge fixture scenario (2,232 more cases).
-- The state vector and meta of 36 bytes of V2 holding a million empty arrays hold under 100 MB while they read it (keeping the structs held about 500 MB). Bytes ygo stored with a type ref 7 to 255 still decode.
+- The state vector and meta of 36 bytes of V2 holding a million empty arrays hold under 100 MB while they read it (keeping the structs held about 500 MB), and of 200,000 objects of distinct key orders under 16 MB (their orders are not kept either). Stored bytes with type refs 7, 255 and 256 decode as before, and a stored document holding one and a string with invalid UTF-8 restores from a snapshot.
 - The differential fuzzer delivers a quarter of its events converted from the other format and compares each conversion's bytes, state vector and meta with yjs's before it is applied, and the state vector and meta of every update a sync, merge or diff sends. 2,000 seeds pass.
-- 19 mutation controls each fail a test.
+- 22 mutation controls each fail a test.
 
 ## [1.52.0] - 2026-11-23
 

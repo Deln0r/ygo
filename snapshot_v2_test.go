@@ -103,3 +103,23 @@ func TestRestoreSnapshot_LegacyInvalidStrings(t *testing.T) {
 		t.Fatalf("restored %x, want the stored %x", got, want)
 	}
 }
+
+// TestRestoreSnapshot_LegacyStringsAndTypeRef: a stored document holding a
+// shared type ref yjs does not read (7, which releases before 1.53.0
+// accepted) and a string with invalid UTF-8 restores, as before: the V1
+// fallback's probe reads the type ref as stored bytes do and still finds the
+// invalid string.
+func TestRestoreSnapshot_LegacyStringsAndTypeRef(t *testing.T) {
+	stored, _ := hex.DecodeString("0201020007010161070101000401017401ff00")
+	d := ygo.NewDocWithOptions(ygo.Options{DisableGC: true})
+	if err := encoding.ApplyStoredUpdate(d, stored); err != nil {
+		t.Fatal(err)
+	}
+	r, err := ygo.RestoreSnapshot(d, ygo.CreateSnapshot(d))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ygo.EncodeStateAsUpdate(r), ygo.EncodeStateAsUpdate(d); hex.EncodeToString(got) != hex.EncodeToString(want) {
+		t.Fatalf("restored %x, want the stored %x", got, want)
+	}
+}

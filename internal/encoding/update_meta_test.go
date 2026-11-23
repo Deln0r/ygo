@@ -1,12 +1,17 @@
 package encoding
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Deln0r/ygo/internal/block"
+	"github.com/Deln0r/ygo/internal/lib0"
 )
 
 // denseEmptyArraysV2 is 36 bytes of V2 holding a million empty arrays,
@@ -71,24 +76,62 @@ func TestStateVectorAndMeta_DenseV2HoldNoStructs(t *testing.T) {
 	}
 }
 
-// TestTypeRef_RefusedOnTheWireKeptWhenStored: a shared type ref past 6 is
-// refused as yjs refuses it, but bytes ygo itself stored or encoded keep
-// the refs 7 to 255 that releases before 1.53.0 accepted; 256 was read as 0
-// and never stored.
-func TestTypeRef_RefusedOnTheWireKeptWhenStored(t *testing.T) {
+// heterogeneousObjectsV1 is a V1 update of n ContentAny structs under root
+// "a", each one object {z: null, a<i>: null}: n shapes of key order, which
+// a decode keeps in its order table.
+func heterogeneousObjectsV1(n int) []byte {
+	buf := lib0.WriteVarUint(nil, 1)
+	buf = lib0.WriteVarUint(buf, uint64(n))
+	buf = lib0.WriteVarUint(buf, 1)
+	buf = lib0.WriteVarUint(buf, 0)
+	for i := 0; i < n; i++ {
+		buf = append(buf, 8, 1)
+		buf = lib0.WriteVarString(buf, "a")
+		buf = lib0.WriteVarUint(buf, 1)
+		buf = append(buf, 118)
+		buf = lib0.WriteVarUint(buf, 2)
+		buf = lib0.WriteVarString(buf, "z")
+		buf = append(buf, 126)
+		buf = lib0.WriteVarString(buf, "a"+strconv.Itoa(i))
+		buf = append(buf, 126)
+	}
+	return append(buf, 0)
+}
+
+// TestStateVectorAndMeta_KeepNoKeyOrders: the orders of the values read are
+// not kept either.
+func TestStateVectorAndMeta_KeepNoKeyOrders(t *testing.T) {
+	const n = 200000
+	in := heterogeneousObjectsV1(n)
+	var sv []byte
+	var err error
+	if peak := peakHeap(func() { sv, err = StateVectorFromUpdateBytes(in, false, 0) }); peak > 16<<20 {
+		t.Errorf("the state vector held %d MB", peak>>20)
+	}
+	if want := lib0.WriteVarUint([]byte{1, 1}, n); err != nil || !bytes.Equal(sv, want) {
+		t.Fatalf("state vector %x, %v; want %x", sv, err, want)
+	}
+	if peak := peakHeap(func() { _, err = ParseUpdateMetaBytes(in, false, 0) }); peak > 16<<20 || err != nil {
+		t.Errorf("the meta held %d MB, %v", peak>>20, err)
+	}
+}
+
+// TestTypeRef_RefusedOnTheWireReadAsBeforeWhenStored: a shared type ref past
+// 6 is refused as yjs refuses it, but bytes ygo itself stored or encoded read
+// every ref as releases before 1.53.0 did (256 as its low byte, an array): a
+// store may hold an update as a client sent it.
+func TestTypeRef_RefusedOnTheWireReadAsBeforeWhenStored(t *testing.T) {
 	v1 := map[string]string{"7": "01010100070101740700", "255": "0101010007010174ff0100", "256": "0101010007010174800200"}
 	for ref, h := range v1 {
 		in, _ := hex.DecodeString(h)
 		if _, _, err := DecodeUpdate(in); !errors.Is(err, ErrUnknownTypeRef) {
 			t.Errorf("V1 ref %s on the wire: %v", ref, err)
 		}
-		_, _, err := DecodeStoredUpdate(in)
-		if ref == "256" {
-			if !errors.Is(err, ErrUnknownTypeRef) {
-				t.Errorf("V1 ref 256 stored: %v", err)
-			}
-		} else if err != nil {
+		if _, _, err := DecodeStoredUpdate(in); err != nil {
 			t.Errorf("V1 ref %s stored: %v", ref, err)
+		}
+		if _, _, err := DecodeOwnUpdate(in); err != nil {
+			t.Errorf("V1 ref %s own bytes: %v", ref, err)
 		}
 	}
 	v2 := map[string]string{"7": "000001010000010703017401010101070001010000", "256": "00000101000001070301740101010280040001010000"}
@@ -97,13 +140,13 @@ func TestTypeRef_RefusedOnTheWireKeptWhenStored(t *testing.T) {
 		if _, err := DecodeUpdateV2(in); !errors.Is(err, ErrUnknownTypeRef) {
 			t.Errorf("V2 ref %s on the wire: %v", ref, err)
 		}
-		_, err := DecodeOwnUpdateV2(in)
-		if ref == "256" {
-			if !errors.Is(err, ErrUnknownTypeRef) {
-				t.Errorf("V2 ref 256 own bytes: %v", err)
-			}
-		} else if err != nil {
+		if _, err := DecodeOwnUpdateV2(in); err != nil {
 			t.Errorf("V2 ref %s own bytes: %v", ref, err)
 		}
+	}
+	in, _ := hex.DecodeString(v1["256"])
+	u, _, _ := DecodeStoredUpdate(in)
+	if c := u.Blocks[1][0].Item.Content; c.Branch == nil || c.Branch.TypeRef != block.TypeRefArray {
+		t.Errorf("stored ref 256 read as %+v, want an array as before", c)
 	}
 }

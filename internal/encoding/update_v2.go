@@ -408,6 +408,9 @@ func decodeUpdateV2With(buf []byte, maxClients, structBudget int, raw *rawUpdate
 			}
 			if visit {
 				raw.visit(&b)
+				// The struct is not kept, so neither are the orders of its
+				// content: a fresh table per struct.
+				dec.orders = orderTable{}
 			} else {
 				blocks = append(blocks, b)
 			}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/Deln0r/ygo/internal/anyval"
@@ -219,7 +218,7 @@ func decodeContent(buf []byte, refNum uint8, strs stringMode, t *orderTable) (bl
 			return block.Content{}, buf, err
 		}
 		buf = buf[n:]
-		if err := checkTypeRef(typeRefU, strs == storedStrings); err != nil {
+		if err := checkTypeRef(typeRefU, strs.oldTypeRefs()); err != nil {
 			return block.Content{}, buf, err
 		}
 		typeRef := block.TypeRef(typeRefU)
@@ -289,11 +288,11 @@ func (a *anyOrders) orders(t *orderTable) *block.Orders {
 var ErrUnknownTypeRef = errors.New("encoding: unknown shared type ref")
 
 // checkTypeRef refuses a type ref yjs cannot read. Bytes ygo itself stored
-// (lenient) keep the refs 7 to 255 a release before 1.53.0 accepted, so a
-// document holding one still loads; a ref past 255 was never stored (it was
-// read as its low byte).
+// or encoded (lenient) read any ref as releases before 1.53.0 read it (past
+// 255, as its low byte): a store may hold the update a client sent as it
+// came, and a document that holds such a type still loads.
 func checkTypeRef(ref uint64, lenient bool) error {
-	if ref <= uint64(block.TypeRefXmlText) || (lenient && ref <= math.MaxUint8) {
+	if lenient || ref <= uint64(block.TypeRefXmlText) {
 		return nil
 	}
 	return fmt.Errorf("%w: %d", ErrUnknownTypeRef, ref)
