@@ -61,6 +61,13 @@ func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
 // bounds the sorting done where a GC and an item tie (mergeReaders;
 // negative: no bound); past it the error wraps ErrUpdateTooDense.
 func mergeStreams(streams [][]Block, budget int64) (out []Block, lastDone int, err error) {
+	out, lastDone, _, err = mergeStreamsWork(streams, budget)
+	return out, lastDone, err
+}
+
+// mergeStreamsWork is mergeStreams that also returns the sorting work done
+// around ties (mergeReaders.work).
+func mergeStreamsWork(streams [][]Block, budget int64) (out []Block, lastDone int, work int64, err error) {
 	n := 0
 	for _, st := range streams {
 		n += len(st)
@@ -74,7 +81,7 @@ func mergeStreams(streams [][]Block, budget int64) (out []Block, lastDone int, e
 		cd, ok := rs.front()
 		if !ok {
 			if rs.err != nil {
-				return nil, -1, rs.err
+				return nil, -1, rs.work, rs.err
 			}
 			break
 		}
@@ -138,7 +145,7 @@ func mergeStreams(streams [][]Block, budget int64) (out []Block, lastDone int, e
 	if have {
 		out = append(out, cw)
 	}
-	return out, rs.lastDone, nil
+	return out, rs.lastDone, rs.work, nil
 }
 
 // mergeQueue is mergeStructs of the queue (q) and a leftover (r), client by

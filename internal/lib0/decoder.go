@@ -25,7 +25,8 @@ func ReadVarUint(buf []byte) (uint64, int, error) {
 	var n uint64
 	var shift uint
 	for i, b := range buf {
-		if i == 10 && b > 1 {
+		// The tenth byte holds bit 63 alone: anything more is past 64 bits.
+		if i == 9 && b > 1 {
 			return 0, 0, ErrOverflow
 		}
 		n |= uint64(b&0x7f) << shift
@@ -56,10 +57,15 @@ func ReadVarInt(buf []byte) (int64, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	if consumed > 9 {
+	// The magnitude takes 6 bits of the first byte and the rest above them;
+	// past 64 bits, or past what an int64 holds, it overflows.
+	if consumed > 9 || rest > math.MaxUint64>>6 {
 		return 0, 0, ErrOverflow
 	}
 	mag |= rest << 6
+	if (!negative && mag > math.MaxInt64) || mag > 1<<63 {
+		return 0, 0, ErrOverflow
+	}
 	return signedFromMagnitude(mag, negative), 1 + consumed, nil
 }
 

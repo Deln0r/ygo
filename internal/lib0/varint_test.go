@@ -64,6 +64,38 @@ func TestReadVarUint_Overflow(t *testing.T) {
 	if _, _, err := ReadVarUint(overflow); err != ErrOverflow {
 		t.Errorf("oversized varuint: got %v, want ErrOverflow", err)
 	}
+	// 2^64+1 in ten bytes: the tenth byte's bit 1 is bit 64, which wrapped
+	// to 1 before.
+	past := []byte{0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02}
+	if v, _, err := ReadVarUint(past); err != ErrOverflow {
+		t.Errorf("2^64+1: got %d, %v, want ErrOverflow", v, err)
+	}
+	max := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01}
+	if v, n, err := ReadVarUint(max); err != nil || v != math.MaxUint64 || n != 10 {
+		t.Errorf("2^64-1: got %d, %d, %v", v, n, err)
+	}
+}
+
+func TestReadVarInt_Overflow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   []byte
+	}{
+		// 6 bits, then 2^58 above them: bit 64.
+		{"past 64 bits", []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x04}},
+		// 2^63 (2^57 above the 6 bits), positive: past an int64.
+		{"2^63", []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02}},
+		// 2^63+1, negative: past an int64.
+		{"-(2^63+1)", []byte{0xc1, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02}},
+	} {
+		if v, _, err := ReadVarInt(tc.in); err != ErrOverflow {
+			t.Errorf("%s: got %d, %v, want ErrOverflow", tc.name, v, err)
+		}
+	}
+	minInt := []byte{0xc0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02}
+	if v, _, err := ReadVarInt(minInt); err != nil || v != math.MinInt64 {
+		t.Errorf("-2^63: got %d, %v", v, err)
+	}
 }
 
 func TestWriteVarInt_KnownValues(t *testing.T) {

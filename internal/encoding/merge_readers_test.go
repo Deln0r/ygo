@@ -203,6 +203,27 @@ func TestMergeStreams_HeldTieSortingIsBounded(t *testing.T) {
 	}
 }
 
+// TestMergeStreams_BudgetCoversLeavingTheArray: a tie at the highest client
+// resolves first, the array stays a few sorts and is left while 200 other
+// readers merge; the work counted to the end, leaving included, is what the
+// budget bounds, so one comparison less stops the merge.
+func TestMergeStreams_BudgetCoversLeavingTheArray(t *testing.T) {
+	streams := [][]Block{{gcRun(500, 0, 1)}, {deletedItem(500, 0, 1)}}
+	for c := uint64(200); c >= 1; c-- {
+		streams = append(streams, []Block{gcRun(c, 0, 1)})
+	}
+	_, _, work, err := mergeStreamsWork(streams, -1)
+	if err != nil || work == 0 {
+		t.Fatalf("work %d, err %v", work, err)
+	}
+	if _, _, err := mergeStreams(streams, work); err != nil {
+		t.Fatalf("a budget of the work done: %v", err)
+	}
+	if _, _, err := mergeStreams(streams, work-1); !errors.Is(err, ErrUpdateTooDense) {
+		t.Fatalf("a budget one under the work done (%d): err %v, want ErrUpdateTooDense", work, err)
+	}
+}
+
 // TestMergeStreams_TiesThatComeAndGoCostWhatYjsSorts: n pairs of readers,
 // each pair tied at its client's clock 2 once the first reader has written
 // clock 0, one pair after the other. Building the array for every tie would

@@ -193,6 +193,10 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 		rs.order = nil
 		rs.low = 0
 		heap.Init(&rs.heap)
+		if rs.budget >= 0 && rs.work > rs.budget {
+			rs.err = &sortTooCostlyError{budget: rs.budget}
+			return nil, false
+		}
 	}
 	if len(rs.heap) == 0 {
 		return nil, false
