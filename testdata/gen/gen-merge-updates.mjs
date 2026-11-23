@@ -20,6 +20,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import * as Y from "yjs";
+import * as encoding from "lib0/encoding";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outPath = process.env.OUT || resolve(here, "..", "merge-update-fixtures.json");
@@ -339,6 +340,110 @@ function scenario(name, inputs, svs = []) {
     diffs: [new Uint8Array([0]), svOf([[1, 2]])].map((sv) => ({ sv: toHex(sv), v1: "", v2: toHex(Y.diffUpdateV2(Y.mergeUpdatesV2([u1.v2, u2v2]), sv)) })),
     input_diffs: [],
   });
+}
+
+// V1 bytes written by hand: one client section of structs, then an empty
+// delete set. Each struct is a function of the encoder.
+function handUpdate(client, clock, ...structs) {
+  const e = encoding.createEncoder();
+  encoding.writeVarUint(e, 1);
+  encoding.writeVarUint(e, structs.length);
+  encoding.writeVarUint(e, client);
+  encoding.writeVarUint(e, clock);
+  for (const s of structs) s(e);
+  encoding.writeVarUint(e, 0);
+  return encoding.toUint8Array(e);
+}
+const gcStruct = (len, info = 0) => (e) => { encoding.writeUint8(e, info); encoding.writeVarUint(e, len); };
+const skipStruct = (len) => (e) => { encoding.writeUint8(e, 10); encoding.writeVarUint(e, len); };
+// A string item with no origins under the root "t".
+const strStruct = (str) => (e) => { encoding.writeUint8(e, 4); encoding.writeVarUint(e, 1); encoding.writeVarString(e, "t"); encoding.writeVarString(e, str); };
+const emptyUpdate = new Uint8Array([0, 0]);
+
+// A GC and an item tied at client 1, the lowest, while 300 higher clients
+// merge: yjs sorts every reader at every step, ygo keeps the array while the
+// tie lasts. And 50 ties that come and go, one client after the other: the
+// first reader writes clock 0, then holds an item at 2 that the second
+// reader holds as a GC.
+{
+  const higher = [];
+  for (let c = 301; c >= 2; c--) higher.push(raw(handUpdate(c, 0, gcStruct(1))));
+  const gc1 = raw(handUpdate(1, 0, gcStruct(1)));
+  const item1 = raw(handUpdate(1, 0, strStruct("x")));
+  scenario("a tie held at the lowest client while 300 merge, GC first", [...higher, gc1, item1]);
+  scenario("a tie held at the lowest client while 300 merge, item first", [...higher, item1, gc1]);
+  const pairs = [];
+  for (let c = 50; c >= 1; c--) {
+    pairs.push(raw(handUpdate(c, 0, strStruct("a"), skipStruct(1), strStruct("b"))), raw(handUpdate(c, 2, gcStruct(1))));
+  }
+  scenario("50 ties that come and go", pairs);
+}
+
+// Structs yjs reads that are not as yjs writes them, each merged with an
+// empty update (one update alone comes back as it is) and applied to a
+// document: subdocument options, which yjs rebuilds from the Doc it makes
+// (gc only when false, autoLoad only when true, meta unless null, other
+// keys dropped, opts.guid for the GUID); a GC with the item bits set; a
+// parent info written as an overlong varuint. V1 and V2 written by hand (V2
+// has no parent-info varuint; there the V2 input is yjs's conversion).
+{
+  // handUpdateV2 writes one client section through yjs's V2 encoder.
+  const handUpdateV2 = (write) => {
+    const enc = new Y.UpdateEncoderV2();
+    encoding.writeVarUint(enc.restEncoder, 1);
+    encoding.writeVarUint(enc.restEncoder, 1);
+    enc.writeClient(1);
+    encoding.writeVarUint(enc.restEncoder, 0);
+    write(enc);
+    encoding.writeVarUint(enc.restEncoder, 0);
+    return enc.toUint8Array();
+  };
+  const docRefV2 = (opts) => handUpdateV2((enc) => {
+    enc.writeInfo(9);
+    enc.writeParentInfo(true);
+    enc.writeString("t");
+    enc.writeString("g");
+    enc.writeAny(opts);
+  });
+  const gcV2 = (len, info) => handUpdateV2((enc) => {
+    enc.writeInfo(info);
+    enc.writeLen(len);
+  });
+  const docRef = (opts) => handUpdate(1, 0, (e) => {
+    encoding.writeUint8(e, 9);
+    encoding.writeVarUint(e, 1);
+    encoding.writeVarString(e, "t");
+    encoding.writeVarString(e, "g");
+    encoding.writeAny(e, opts);
+  });
+  const parentInfo = (info, rest) => handUpdate(1, 0, (e) => {
+    encoding.writeUint8(e, 4);
+    for (const b of info) encoding.writeUint8(e, b);
+    rest(e);
+    encoding.writeVarString(e, "a");
+  });
+  const both = (opts) => pair(docRef(opts), docRefV2(opts));
+  const asRead = [
+    ["subdocument options: gc true", both({ gc: true })],
+    ["subdocument options: gc false, autoLoad 1, meta null, another key", both({ gc: false, autoLoad: 1, meta: null, extra: 5 })],
+    ["subdocument options: opts.guid, gc 0, autoLoad empty, meta", both({ meta: { b: 1 }, guid: "h", gc: 0, autoLoad: "" })],
+    ["subdocument options: undefined gc and meta, autoLoad true", both({ gc: undefined, autoLoad: true, meta: undefined })],
+    ["subdocument options: not an object", both(5)],
+    ["a GC with info 0x20", pair(handUpdate(1, 0, gcStruct(2, 0x20)), gcV2(2, 0x20))],
+    ["a GC with info 0xe0", pair(handUpdate(1, 0, gcStruct(3, 0xe0)), gcV2(3, 0xe0))],
+    ["a parent info of 1 as an overlong varuint", raw(parentInfo([0x81, 0x00], (e) => encoding.writeVarString(e, "x")))],
+    ["a parent info of 2 as an overlong varuint, then a parent ID", raw(parentInfo([0x82, 0x00], (e) => { encoding.writeVarUint(e, 5); encoding.writeVarUint(e, 0); }))],
+  ];
+  for (const [name, u] of asRead) {
+    scenario(name, [u, raw(emptyUpdate)]);
+    const d1 = new Y.Doc();
+    Y.applyUpdate(d1, u.v1);
+    const d2 = new Y.Doc();
+    Y.applyUpdateV2(d2, u.v2);
+    const s1 = toHex(Y.encodeStateAsUpdate(d1));
+    if (s1 !== toHex(Y.encodeStateAsUpdate(d2))) throw new Error(`${name}: V1 and V2 apply differ`);
+    scenarios[scenarios.length - 1].apply_v1 = s1;
+  }
 }
 
 writeFileSync(outPath, JSON.stringify({ generator: "gen-merge-updates.mjs (yjs 13.6.33)", scenarios }, null, 1) + "\n");

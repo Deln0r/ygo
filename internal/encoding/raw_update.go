@@ -149,39 +149,41 @@ func readRawDeleteSetV2(dec *DecoderV2) (*rawDeleteSet, error) {
 // set, in set order, then sorted by clock (stably) and joined where they
 // touch or overlap (sortAndMergeDeleteSet), a zero-length range that
 // touches nothing kept.
+//
+// yjs collects a client's ranges by scanning the sets after the first that
+// has it; this collects them in one pass, in the same order.
 func mergeRawDeleteSets(dss []*rawDeleteSet) *rawDeleteSet {
 	out := newRawDeleteSet()
 	for _, ds := range dss {
 		for _, c := range ds.clients {
-			if _, ok := out.ranges[c]; ok {
-				continue
+			if _, ok := out.ranges[c]; !ok {
+				out.clients = append(out.clients, c)
 			}
-			var all []Range
-			for _, o := range dss {
-				all = append(all, o.ranges[c]...)
-			}
-			slices.SortStableFunc(all, func(a, b Range) int {
-				switch {
-				case a.Start < b.Start:
-					return -1
-				case a.Start > b.Start:
-					return 1
-				}
-				return 0
-			})
-			j := 1
-			for i := 1; i < len(all); i++ {
-				left, right := &all[j-1], all[i]
-				if left.Start+left.Length >= right.Start {
-					left.Length = max(left.Length, right.Start+right.Length-left.Start)
-				} else {
-					all[j] = right
-					j++
-				}
-			}
-			out.clients = append(out.clients, c)
-			out.ranges[c] = all[:j]
+			out.ranges[c] = append(out.ranges[c], ds.ranges[c]...)
 		}
+	}
+	for _, c := range out.clients {
+		all := out.ranges[c]
+		slices.SortStableFunc(all, func(a, b Range) int {
+			switch {
+			case a.Start < b.Start:
+				return -1
+			case a.Start > b.Start:
+				return 1
+			}
+			return 0
+		})
+		j := 1
+		for i := 1; i < len(all); i++ {
+			left, right := &all[j-1], all[i]
+			if left.Start+left.Length >= right.Start {
+				left.Length = max(left.Length, right.Start+right.Length-left.Start)
+			} else {
+				all[j] = right
+				j++
+			}
+		}
+		out.ranges[c] = all[:j]
 	}
 	return out
 }
@@ -349,6 +351,14 @@ func (r *rawUpdate) merged() []Block {
 	return out
 }
 
+// mergeSortBudget is the sorting a merge of total input bytes may do where a
+// GC and an item tie at one clock: 16 comparisons a byte, at least 16 << 20.
+// yjs sorts every reader at every step; ygo only around such a tie, so only
+// inputs that hold one while many other readers merge come near it.
+func mergeSortBudget(total int) int64 {
+	return 16 * int64(max(total, 1<<20))
+}
+
 // MergeUpdateBytes is yjs mergeUpdates (v2 false) or mergeUpdatesV2 of two
 // updates or more: their structs merged without integrating them
 // (mergeStreams), their delete sets merged. V2 inputs are decoded one after
@@ -376,7 +386,10 @@ func MergeUpdateBytes(updates [][]byte, v2 bool, floor int) ([]byte, error) {
 		streams = append(streams, raw.merged())
 		dss = append(dss, raw.ds)
 	}
-	structs, _ := mergeStreams(streams)
+	structs, _, err := mergeStreams(streams, mergeSortBudget(total))
+	if err != nil {
+		return nil, err
+	}
 	return writeRawUpdate(structs, mergeRawDeleteSets(dss), v2, floor, "the merged update")
 }
 

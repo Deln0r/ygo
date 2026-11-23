@@ -240,10 +240,7 @@ func decodeContent(buf []byte, refNum uint8, strs stringMode, t *orderTable) (bl
 		if err != nil {
 			return block.Content{}, buf, err
 		}
-		opts, _ := optsAny.(map[string]any)
-		if opts == nil {
-			opts = map[string]any{}
-		}
+		guid, opts := docOptsAsRead(guid, optsAny)
 		return block.Content{Kind: block.KindDoc, DocGuid: guid, DocOpts: opts}, tail, nil
 	default:
 		return block.Content{}, buf, fmt.Errorf("encoding.DecodeContent: unsupported content kind %d (tech-debt.md)", refNum)

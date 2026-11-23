@@ -51,25 +51,31 @@ func mergeStructs(a, b []Block) []Block {
 // last (0 for a, 1 for b), which decides the order the two readers meet the
 // next client in (mergeQueue).
 func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
-	return mergeStreams([][]Block{a, b})
+	out, lastDone, _ = mergeStreams([][]Block{a, b}, -1)
+	return out, lastDone
 }
 
 // mergeStreams is the struct loop of yjs mergeUpdatesV2 for any number of
 // readers (streams[i] is reader i's structs, Skips dropped). It returns the
-// structs to write, Skips included, and which reader ran out last.
-func mergeStreams(streams [][]Block) (out []Block, lastDone int) {
+// structs to write, Skips included, and which reader ran out last. budget
+// bounds the sorting done where a GC and an item tie (mergeReaders;
+// negative: no bound); past it the error wraps ErrUpdateTooDense.
+func mergeStreams(streams [][]Block, budget int64) (out []Block, lastDone int, err error) {
 	n := 0
 	for _, st := range streams {
 		n += len(st)
 	}
 	out = make([]Block, 0, n+1)
-	rs := newMergeReaders(streams)
+	rs := newMergeReaders(streams, budget)
 	var cw Block // yjs currWrite
 	have := false
 	end := func() uint64 { return blockStartClock(cw) + blockLen(cw) }
 	for {
 		cd, ok := rs.front()
 		if !ok {
+			if rs.err != nil {
+				return nil, -1, rs.err
+			}
 			break
 		}
 		firstClient := blockClient(cd.curr())
@@ -132,7 +138,7 @@ func mergeStreams(streams [][]Block) (out []Block, lastDone int) {
 	if have {
 		out = append(out, cw)
 	}
-	return out, rs.lastDone
+	return out, rs.lastDone, nil
 }
 
 // mergeQueue is mergeStructs of the queue (q) and a leftover (r), client by

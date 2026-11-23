@@ -449,6 +449,11 @@ func decodeBlock(buf []byte, id block.ID, strs stringMode, orders *orderTable) (
 	info := buf[0]
 	buf = buf[1:]
 
+	// yjs reads a GC wherever the content bits are 0 (info & BITS5), and a
+	// Skip only as 10 exactly (its lazy reader; an item otherwise).
+	if info&0x1f == 0 {
+		info = 0
+	}
 	switch info {
 	case 0: // BLOCK_GC_REF_NUMBER
 		l, n, err := lib0.ReadVarUint(buf)
@@ -491,12 +496,14 @@ func decodeBlock(buf []byte, id block.ID, strs stringMode, orders *orderTable) (
 
 	parent := block.Parent{Kind: block.ParentUnknown}
 	if cantCopyParentInfo {
-		if len(buf) < 1 {
-			return Block{}, buf, lib0.ErrTruncated
+		// A varuint, as yjs reads it (readVarUint(...) === 1): an overlong
+		// 1 names a root too.
+		parentInfo, n, err := lib0.ReadVarUint(buf)
+		if err != nil {
+			return Block{}, buf, err
 		}
-		parentInfo := buf[0]
-		buf = buf[1:]
-		if parentInfo == 0x01 {
+		buf = buf[n:]
+		if parentInfo == 1 {
 			name, n, err := strs.readString(buf)
 			if err != nil {
 				return Block{}, buf, err

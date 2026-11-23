@@ -1,6 +1,10 @@
 package encoding
 
-import "container/heap"
+import (
+	"container/heap"
+	"fmt"
+	"math/bits"
+)
 
 // mergeReaders keeps the readers of mergeStreams in the order yjs's loop has
 // them: each step it drops the readers that ran out and sorts the rest with
@@ -11,7 +15,13 @@ import "container/heap"
 // is the stable sort of the order before, and the readers are a heap ordered
 // by (compareStructs, position), O(log n) a step. Where such a pair exists,
 // the order is an array sorted by the port of V8's sort (v8Sort), as yjs
-// sorts it.
+// sorts it, and it stays an array for as many sorts after the tie as
+// building it cost (log n), so ties that come and go cost what yjs's
+// sorting costs, not more.
+//
+// The array's sorting is bounded by budget (comparisons, and n log n to
+// build the array): a tie held while other readers merge makes every step
+// sort every reader, as yjs always does.
 type mergeReaders struct {
 	all      []*mergeReader
 	heap     readerHeap
@@ -19,6 +29,10 @@ type mergeReaders struct {
 	low      int64          // next position for a reader put first
 	ties     map[structKey]*[2]int
 	tied     int // keys holding both a GC and an item
+	calm     int // sorts in a row of the array without a tie
+	work     int64
+	budget   int64 // the most work allowed; negative: no bound
+	err      error
 	frontR   *mergeReader
 	lastDone int
 }
@@ -36,8 +50,8 @@ type structKey struct{ client, clock uint64 }
 
 func (r *mergeReader) curr() *Block { return r.cur.curr() }
 
-func newMergeReaders(streams [][]Block) *mergeReaders {
-	rs := &mergeReaders{lastDone: -1}
+func newMergeReaders(streams [][]Block, budget int64) *mergeReaders {
+	rs := &mergeReaders{lastDone: -1, budget: budget}
 	for i, st := range streams {
 		r := &mergeReader{idx: i, cur: structCursor{list: st}, pos: int64(i), kind: -1}
 		rs.all = append(rs.all, r)
@@ -69,7 +83,7 @@ func (rs *mergeReaders) track(r *mergeReader) {
 		if c := rs.ties[r.key]; c != nil {
 			before := c[0] > 0 && c[1] > 0
 			c[r.kind]--
-			if before && !(c[0] > 0 && c[1] > 0) {
+			if before && (c[0] == 0 || c[1] == 0) {
 				rs.tied--
 			}
 			if c[0] == 0 && c[1] == 0 {
@@ -132,7 +146,16 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 		}
 		rs.frontR = nil
 	}
-	if rs.tied > 0 {
+	if rs.order != nil {
+		if rs.tied > 0 {
+			rs.calm = 0
+		} else {
+			rs.calm++
+		}
+	}
+	// Without a tie the sort is the stable sort of the array as it stands,
+	// so keeping the array is exact too.
+	if rs.tied > 0 || (rs.order != nil && rs.calm <= bits.Len(uint(len(rs.order)))) {
 		if rs.order == nil {
 			// The array yjs sorts: the reader that moved first (lowest
 			// position), the others in the order the last sort left, which
@@ -140,8 +163,19 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 			rs.order = append([]*mergeReader(nil), rs.heap...)
 			sortByPos(rs.order)
 			rs.heap = rs.heap[:0]
+			rs.calm = 0
+			rs.work += int64(len(rs.order)) * int64(bits.Len(uint(len(rs.order)))+1)
 		}
-		v8Sort(rs.order, func(x, y *mergeReader) int { return compareStructs(x.curr(), y.curr()) })
+		cmps := int64(0)
+		v8Sort(rs.order, func(x, y *mergeReader) int {
+			cmps++
+			return compareStructs(x.curr(), y.curr())
+		})
+		rs.work += cmps
+		if rs.budget >= 0 && rs.work > rs.budget {
+			rs.err = &sortTooCostlyError{budget: rs.budget}
+			return nil, false
+		}
 		if len(rs.order) == 0 {
 			return nil, false
 		}
@@ -155,6 +189,7 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 			r.index = i
 		}
 		rs.heap = append(rs.heap[:0], rs.order...)
+		rs.work += int64(len(rs.order))
 		rs.order = nil
 		rs.low = 0
 		heap.Init(&rs.heap)
@@ -165,6 +200,16 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 	rs.frontR = rs.heap[0]
 	return rs.frontR, true
 }
+
+// sortTooCostlyError is the merge's sorting past its budget. It is
+// ErrUpdateTooDense for errors.Is, whose text speaks of V2 decoding.
+type sortTooCostlyError struct{ budget int64 }
+
+func (e *sortTooCostlyError) Error() string {
+	return fmt.Sprintf("encoding: the inputs hold a GC and an item tied at one clock for more sorting than their length pays for (%d comparisons)", e.budget)
+}
+
+func (e *sortTooCostlyError) Is(target error) bool { return target == ErrUpdateTooDense }
 
 func sortByPos(rs []*mergeReader) {
 	// Positions are distinct; the heap's order is (key, position), and the

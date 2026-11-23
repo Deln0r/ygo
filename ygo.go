@@ -614,6 +614,12 @@ var ErrNestedTooDeep = encoding.ErrAnyTooDeep
 // a struct, so a valid update can hold more structs than bytes (a million
 // deleted characters fit in 42); the floor keeps what such an update may
 // cost to what the largest V1 message the server takes already costs.
+//
+// MergeUpdates and MergeUpdatesV2 also return it for inputs that keep a GC
+// and an item tied at one clock while many other inputs merge: yjs sorts
+// every input at every step, ygo only while such a tie lasts, and that
+// sorting is bounded at 16 comparisons a byte of the inputs (at least
+// 16,777,216).
 // Test with errors.Is.
 var ErrUpdateTooDense = encoding.ErrUpdateTooDense
 
@@ -707,7 +713,11 @@ func MissingSV(d *Doc) []byte {
 // merged without integrating them, so each input's runs stay as they were
 // written (a run of one-character updates stays a run of one-character
 // items, where a document would squash them), what overlaps is cut where
-// yjs cuts it, and the delete sets are merged.
+// yjs cuts it, and the delete sets are merged. Content is written with
+// ygo's encoders, whose differences from yjs's are listed in
+// docs/tech-debt.md ("MergeUpdates integrates instead of merging bytes").
+// Inputs that keep a GC and an item tied at one clock while many others
+// merge can return ErrUpdateTooDense.
 //
 // For a server or transport that coalesces update bytes without holding
 // a document. ygo's own stores compact with persist.MergeUpdates, which
@@ -773,7 +783,8 @@ func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
 
 // DiffUpdate returns the part of a V1 update that a peer identified by
 // remoteSV (a wire-encoded state vector, e.g. from EncodeStateVector or
-// EncodeStateVectorFromUpdate) is missing: yjs diffUpdate, byte for byte.
+// EncodeStateVectorFromUpdate) is missing: yjs diffUpdate, byte for byte,
+// with MergeUpdates' content-encoding exceptions.
 // Trim a stored update before sending it to a peer that already has part of
 // it.
 //

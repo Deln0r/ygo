@@ -428,6 +428,11 @@ func decodeBlockV2(dec *DecoderV2, id block.ID) (Block, error) {
 		return Block{}, fmt.Errorf("decodeBlockV2 info: %w", err)
 	}
 
+	// yjs reads a GC wherever the content bits are 0 (info & BITS5), and a
+	// Skip only as 10 exactly (its lazy reader; an item otherwise).
+	if info&0x1f == 0 {
+		info = 0
+	}
 	switch info {
 	case 0: // GC — len from len column.
 		l, err := dec.ReadLen()
@@ -596,10 +601,7 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 doc opts: %w", err)
 		}
-		opts, _ := optsAny.(map[string]any)
-		if opts == nil {
-			opts = map[string]any{}
-		}
+		guid, opts := docOptsAsRead(guid, optsAny)
 		return block.Content{Kind: block.KindDoc, DocGuid: guid, DocOpts: opts}, nil
 	default:
 		return block.Content{}, fmt.Errorf("DecodeContentV2: unsupported content kind %d", refNum)

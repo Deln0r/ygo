@@ -148,6 +148,54 @@ func encodeAnyOrdered(buf []byte, v any, o *block.KeyOrder) []byte {
 	}
 }
 
+// docOptsAsRead gives a subdocument reference's GUID and options as yjs
+// holds them once it has read them (readContentDoc builds
+// new Doc({ guid, ...opts }) and the ContentDoc constructor writes its
+// options back from the Doc): gc only when JavaScript reads it as false (an
+// undefined gc is the default, true), autoLoad only when it reads as true,
+// meta unless it is null or undefined, every other key dropped, and a
+// string opts.guid in place of the GUID.
+func docOptsAsRead(guid string, v any) (string, map[string]any) {
+	opts := map[string]any{}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return guid, opts
+	}
+	if g, ok := m["guid"].(string); ok {
+		guid = g
+	}
+	if gc, ok := m["gc"]; ok && gc != (block.Undefined{}) && !jsTruthy(gc) {
+		opts["gc"] = false
+	}
+	if al, ok := m["autoLoad"]; ok && jsTruthy(al) {
+		opts["autoLoad"] = true
+	}
+	if meta, ok := m["meta"]; ok && meta != nil && meta != (block.Undefined{}) {
+		opts["meta"] = meta
+	}
+	return guid, opts
+}
+
+// jsTruthy is JavaScript's truthiness of a decoded Any value: false, 0, -0,
+// NaN, the empty string, null, undefined and the BigInt 0 are false.
+func jsTruthy(v any) bool {
+	switch x := v.(type) {
+	case nil, block.Undefined:
+		return false
+	case bool:
+		return x
+	case string:
+		return x != ""
+	case int64:
+		return x != 0
+	case float64:
+		return x != 0 && !math.IsNaN(x)
+	case block.BigInt:
+		return x != 0
+	}
+	return true
+}
+
 // EncodeDocOpts appends a subdocument's options as the lib0 Any object
 // yjs writes for them. yjs builds that object in a fixed order, gc,
 // autoLoad, meta (ContentDoc's constructor), where EncodeAny sorts keys,
