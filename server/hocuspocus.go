@@ -54,11 +54,14 @@ func (c *conn) routed(envelope []byte) []byte {
 	return append(out, envelope...)
 }
 
-// hocuspocusSession owns one socket, writer and send queue. Its read loop
-// alone owns keys and pending; document broadcasts only use conn.enqueue.
-// The transport is a conn without a document, reusing the bounded writer
-// and close path used by y-websocket.
+// hocuspocusSession owns one socket, writer and send queue. keys and
+// pending belong to whoever holds mu: the read loop while it handles a
+// frame, releaseAll, and CloseDocument while it releases a key; document
+// broadcasts only use conn.enqueue. The transport is a conn without a
+// document, reusing the bounded writer and close path used by y-websocket.
+// Lock order: mu, then the server's docsMu, then a document's connsMu.
 type hocuspocusSession struct {
+	mu                            sync.Mutex
 	server                        *Server
 	transport                     *conn
 	request                       *http.Request
@@ -164,7 +167,7 @@ func (s *Server) serveHocuspocus(w http.ResponseWriter, r *http.Request) {
 			t.closeFromServer(4401, "expected a binary Hocuspocus frame")
 			return
 		}
-		if !session.handle(raw) {
+		if !session.handleLocked(raw) {
 			return
 		}
 	}
@@ -361,12 +364,37 @@ func (s *hocuspocusSession) releaseKey(key string) {
 	}
 }
 
+// handleLocked is handle under mu, released also when an adopter's hook
+// panics in it (releaseAll then takes mu again).
+func (s *hocuspocusSession) handleLocked(raw []byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handle(raw)
+}
+
 func (s *hocuspocusSession) releaseAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Defer each release so an adopter's panicking OnDisconnect cannot
 	// strand the other keys. Socket cleanup is independently deferred.
 	for key := range s.keys {
 		defer s.releaseKey(key)
 	}
+}
+
+// closeDocument releases c's key, as CloseDocument closes a document: the
+// key stops receiving the document's broadcasts, its connection is
+// released once, and the provider gets the protocol's Close for it. The
+// socket and the session's other documents stay. A key already released or
+// admitted again is left alone.
+func (s *hocuspocusSession) closeDocument(c *conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keys[c.key] != c {
+		return
+	}
+	s.releaseKey(c.key)
+	_ = s.reply(c.key, syncpkg.EncodeClose("document closed by the server"))
 }
 
 // looksLikeHocuspocus recognizes a document-prefixed first frame on the

@@ -208,6 +208,52 @@ client should disable editing in its UI (and reload or re-sync if it
 edited anyway) to avoid diverging from the server. Server-side
 enforcement is the backstop, not the client's only guard.
 
+### Changing documents from the server
+
+Since 1.52.0 server code can change a document the way a client does. The
+write is applied to the server's copy, queued to every connection of the
+document (y-websocket and Hocuspocus, read-only viewers included), stored,
+published on the Backplane and reported to `OnChange`:
+
+```go
+// One transaction; roots through the *In accessors.
+update, err := srv.Apply(ctx, "doc-42", func(txn *ygo.TransactionMut) error {
+    ygo.MapIn(txn, "meta").Set(txn, "status", "published")
+    return nil
+})
+
+// An update from elsewhere (a job, another system): checked, applied, sent.
+err = srv.ApplyUpdate(ctx, "doc-42", update)
+
+// Hold a document open across several writes and reads.
+d, err := srv.OpenDocument(ctx, "doc-42")
+defer d.Close()
+state, _ := d.State() // the server's copy as one V1 update
+
+// Take a document out of the server: refused while clients are connected
+// unless forced, which closes y-websocket connections with 1001 and sends
+// Hocuspocus providers the Close for that document only.
+err = srv.CloseDocument(ctx, "doc-42", true)
+```
+
+- A document no client holds is loaded for the call as a connection would load
+  it (Store, then `OnLoadDocument`, counted against `MaxDocs`), then evicted or
+  parked as after a last disconnect. On a server without a Store, a document a
+  server write changed stays resident until `CloseDocument` or `Close`, so the
+  write is not lost.
+- `ApplyUpdate` applies the update to the server's document as well as sending
+  it, so a client that connects later gets it in its sync.
+- The transaction of each write has a new `*server.ServerOrigin` as its origin.
+  `fn` runs under the document's write lock: it must not call the server for the
+  same document or wait on its clients. Edits made before `fn` returns an error
+  or panics are committed and sent all the same.
+- `Options.OnServerWrite` sees each write before it happens and can refuse it
+  (`ErrWriteRefused`).
+- `Close` waits, within its context, for open Documents and writes in progress,
+  and the document API returns `ErrServerClosed` after it.
+- A Store error after the write was applied and sent comes back wrapped in
+  `ErrNotStored`.
+
 ## Operational notes
 
 - **Single-writer storage.** SQLite serializes writes at the file

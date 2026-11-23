@@ -198,6 +198,13 @@ type Options struct {
 	// server are stalled, not just this document's creation.
 	OnLoadDocument func(docName string) ([]byte, error)
 
+	// OnServerWrite, if non-nil, is called before each server write
+	// (Apply, ApplyUpdate, on the Server or a Document) with what it is
+	// about to write; a non-nil error refuses the write (ErrWriteRefused
+	// wraps it) before anything changes. It cannot refuse a write already
+	// committed. It runs on the caller's goroutine, without server locks.
+	OnServerWrite func(ctx context.Context, w ServerWrite) error
+
 	// VersionInterval enables periodic auto-versioning: every
 	// interval, each document that received updates since the last
 	// sweep is captured as a named version ("auto") via
@@ -499,6 +506,12 @@ type Server struct {
 	// fell behind their send queue (Stats.SlowClientsClosed).
 	slowClientsClosed atomic.Int64
 
+	// ops counts the server's own document operations (open Documents,
+	// CloseDocument) so Close can wait for them to finish their effects
+	// before it flushes and closes the Backplane. Add only under docsMu
+	// while closed is false.
+	ops sync.WaitGroup
+
 	// closeLimit bounds every close the server starts
 	// (defaultCloseHandshakeLimit; tests shorten it).
 	closeLimit time.Duration
@@ -725,11 +738,27 @@ func (s *Server) Flush(ctx context.Context, docName string) error {
 // backplane, but continues past errors so partial failure leaves no
 // leaks.
 func (s *Server) Close(ctx context.Context) error {
+	// No new server operation starts from here (they check closed when
+	// they pin), and those already running finish their effects - store,
+	// publish, fan-out - before the flush and the Backplane close below.
+	s.docsMu.Lock()
+	s.closed = true
+	s.docsMu.Unlock()
+	var firstErr error
+	opsDone := make(chan struct{})
+	go func() {
+		s.ops.Wait()
+		close(opsDone)
+	}()
+	select {
+	case <-opsDone:
+	case <-ctx.Done():
+		firstErr = fmt.Errorf("server: waiting for open documents: %w", ctx.Err())
+	}
 	s.stopVersioning()
 	s.stopAwarenessSweep()
 	s.stopIdleSweep()
 	s.docsMu.Lock()
-	s.closed = true
 	names := make([]string, 0, len(s.docs))
 	var parked []*docState
 	for name, st := range s.docs {
@@ -755,7 +784,6 @@ func (s *Server) Close(ctx context.Context) error {
 		// The final flush for these names happens in the walk below.
 	}
 
-	var firstErr error
 	for _, name := range names {
 		if s.opts.Store != nil {
 			if err := s.opts.Store.Flush(ctx, name); err != nil && firstErr == nil {
@@ -1048,6 +1076,47 @@ type docState struct {
 
 	connsMu sync.RWMutex
 	conns   map[*conn]struct{}
+
+	// pins counts open server Documents (OpenDocument) and server writes
+	// in flight; a pinned document is not settled (parked or evicted) when
+	// its last connection leaves. Guarded by docsMu.
+	pins int
+	// retain keeps a document resident after its last connection and pin
+	// are gone: set when a server write changed it on a server without a
+	// Store, where evicting would lose the write. Guarded by docsMu.
+	retain bool
+	// closing is non-nil while CloseDocument closes this document: new
+	// connections and pins for its name wait for it to be closed, then
+	// load afresh. closeWake is signalled when a connection or pin leaves
+	// while it closes. Guarded by docsMu.
+	closing   chan struct{}
+	closeWake chan struct{}
+}
+
+// errDocClosing is returned by getOrCreateDocLocked when CloseDocument
+// started closing the document between a caller's waitNotClosing and its
+// lookup; the caller waits again.
+var errDocClosing = errors.New("server: document is closing")
+
+// waitNotClosing waits until no CloseDocument is closing docName.
+func (s *Server) waitNotClosing(ctx context.Context, docName string) error {
+	for {
+		s.docsMu.Lock()
+		st := s.docs[docName]
+		var ch chan struct{}
+		if st != nil {
+			ch = st.closing
+		}
+		s.docsMu.Unlock()
+		if ch == nil {
+			return nil
+		}
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // errServerDocsFull is returned by getOrCreateDocLocked when admitting a
@@ -1069,6 +1138,9 @@ var errServerConnsFull = errors.New("server: connection limit reached")
 // with eviction: it is the mechanism that closes the split-room window.
 func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*docState, error) {
 	if state, ok := s.docs[docName]; ok {
+		if state.closing != nil {
+			return nil, errDocClosing
+		}
 		return state, nil
 	}
 
@@ -1275,6 +1347,19 @@ func (s *Server) reserveConn() bool {
 }
 
 func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
+	// A document CloseDocument is closing is waited for, then loaded afresh.
+	for {
+		if err := s.waitNotClosing(ctx, docName); err != nil {
+			return nil, nil, false, err
+		}
+		c, state, ok, err = s.admitDocumentOnce(ctx, docName, ws, session, key, reserved)
+		if !errors.Is(err, errDocClosing) {
+			return c, state, ok, err
+		}
+	}
+}
+
+func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
 	// Global connection cap: refuse before creating or loading a room so a
@@ -1300,6 +1385,7 @@ func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocke
 	c = s.newConn(state, ws)
 	if session != nil {
 		c.session = session
+		c.key = key
 		c.route = syncpkg.EncodeRoute(key)
 		c.queue = session.transport.queue
 		c.handler.Hocuspocus = true
@@ -1370,7 +1456,15 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	if remaining > 0 {
 		return
 	}
+	s.settle(ctx, state)
+}
 
+// settle parks or evicts a document that has no connection left, as its
+// last disconnect does: releaseConn calls it, and so does the close of the
+// last server Document on it. A document still pinned, retained (server
+// writes without a Store) or being closed by CloseDocument stays; a closing
+// one wakes its closer instead.
+func (s *Server) settle(ctx context.Context, state *docState) {
 	// Evict atomically: under docsMu, confirm the registry still maps this
 	// exact docState (identity, not just name) and it still has no
 	// connections (rechecked under connsMu). In the window since we read
@@ -1387,7 +1481,15 @@ func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
 	s.docsMu.Lock()
 	if cur, ok := s.docs[state.name]; ok && cur == state {
 		state.connsMu.Lock()
-		if len(state.conns) == 0 {
+		switch {
+		case len(state.conns) > 0 || state.pins > 0:
+		case state.closing != nil:
+			select {
+			case state.closeWake <- struct{}{}:
+			default:
+			}
+		case state.retain && s.opts.Store == nil && !s.closed:
+		default:
 			if s.opts.DocIdleTimeout > 0 && !s.closed {
 				// Park instead of evicting: the document stays resident (and,
 				// with a Backplane, keeps applying foreign updates) so a quick
@@ -1475,6 +1577,7 @@ type conn struct {
 	// A Hocuspocus document shares its session's transport and queue.
 	// route and session are immutable before this conn enters its room.
 	session  *hocuspocusSession
+	key      string // the Hocuspocus document key
 	route    []byte
 	sendMu   sync.Mutex
 	ready    bool // gates broadcasts before admission and after per-key CLOSE
@@ -1858,63 +1961,7 @@ func (c *conn) onAppliedUpdate(envelope []byte) {
 		(frame.SyncSub == syncpkg.SyncStep2 || frame.SyncSub == syncpkg.SyncUpdate) &&
 		len(frame.Payload) > 0:
 		// A document update.
-		if c.server.opts.Store != nil {
-			if err := c.server.opts.Store.StoreUpdate(context.Background(), c.state.name, frame.Payload); err != nil {
-				// A failed persist must not be invisible, and must not mark
-				// the document dirty: auto-versioning would then capture
-				// in-memory state that was never durably stored. Log and skip
-				// the dirty mark, but still notify OnChange below — the
-				// document did change in memory and on peers.
-				log.Printf("server: persist update for %q: %v", c.state.name, err)
-			} else {
-				c.server.markVersionDirty(c.state.name)
-				if every := c.server.opts.FlushEvery; every > 0 {
-					interval := int64(every)
-					if k := c.state.flushFailStreak.Load(); k > 0 {
-						if k > 5 {
-							k = 5
-						}
-						interval <<= k
-					}
-					if n := c.state.persistsSinceFlush.Add(1); n%interval == 0 {
-						// Amortized compaction: one synchronous Flush per interval,
-						// on the goroutine that crossed the threshold. A failure is
-						// logged, not fatal - the incremental log is intact - and
-						// backs the interval off geometrically (see flushFailStreak)
-						// so a persistently failing store is not re-merged and
-						// re-logged every N updates forever.
-						switch err := c.server.opts.Store.Flush(context.Background(), c.state.name); {
-						case err == nil:
-							c.state.flushFailStreak.Store(0)
-						case errors.Is(err, persist.ErrIncompleteLog):
-							// Not a store failure: a concurrently-arriving update's
-							// dependency has not been stored yet (applied-then-
-							// persisted ordering makes this window normal). The gap
-							// heals within moments; retry at the next threshold
-							// without logging or backing off.
-						default:
-							c.state.flushFailStreak.Add(1)
-							log.Printf("server: auto-flush %q: %v", c.state.name, err)
-						}
-					}
-				}
-			}
-		}
-		if c.server.opts.OnChange != nil {
-			c.server.opts.OnChange(c.state.name, frame.Payload)
-		}
-		if c.server.opts.Backplane != nil {
-			// Fan this locally-applied update out to the other instances. A
-			// failure is logged, not fatal to THIS instance: the update is
-			// already applied, broadcast to local clients, and (if configured)
-			// persisted. But a dropped publish is a dropped causal dependency
-			// on a peer, not a single lost delta: a peer that misses it
-			// silently parks every later edit from that client until the
-			// document reloads from the shared Store (which only happens on
-			// eviction), so a backplane with at-most-once delivery trades this
-			// away by design.
-			c.publishBackplane(context.Background(), backplaneKindDoc, frame.Payload)
-		}
+		_ = c.server.afterUpdate(c.state, frame.Payload)
 
 	case frame.Type == syncpkg.MessageAwareness && len(frame.Payload) > 0 && c.server.opts.Backplane != nil:
 		// A presence update. Relayed to other instances but never persisted
@@ -1928,19 +1975,93 @@ func (c *conn) onAppliedUpdate(envelope []byte) {
 	}
 }
 
+// afterUpdate does what follows an applied document update once it is
+// queued to the document's connections, for a client's update
+// (onAppliedUpdate) and for the server's own writes (Document): it stores
+// the update (only a successful store marks the version dirty and counts
+// towards FlushEvery), publishes it on the Backplane so other instances
+// converge, then calls OnChange, after the publish so a panicking OnChange
+// cannot stop it. It returns the Store's error, which is also logged.
+func (s *Server) afterUpdate(st *docState, payload []byte) error {
+	var storeErr error
+	if s.opts.Store != nil {
+		if err := s.opts.Store.StoreUpdate(context.Background(), st.name, payload); err != nil {
+			// A failed persist must not be invisible, and must not mark
+			// the document dirty: auto-versioning would then capture
+			// in-memory state that was never durably stored. Log and skip
+			// the dirty mark, but still notify OnChange below — the
+			// document did change in memory and on peers.
+			log.Printf("server: persist update for %q: %v", st.name, err)
+			storeErr = err
+		} else {
+			s.markVersionDirty(st.name)
+			if every := s.opts.FlushEvery; every > 0 {
+				interval := int64(every)
+				if k := st.flushFailStreak.Load(); k > 0 {
+					if k > 5 {
+						k = 5
+					}
+					interval <<= k
+				}
+				if n := st.persistsSinceFlush.Add(1); n%interval == 0 {
+					// Amortized compaction: one synchronous Flush per interval,
+					// on the goroutine that crossed the threshold. A failure is
+					// logged, not fatal - the incremental log is intact - and
+					// backs the interval off geometrically (see flushFailStreak)
+					// so a persistently failing store is not re-merged and
+					// re-logged every N updates forever.
+					switch err := s.opts.Store.Flush(context.Background(), st.name); {
+					case err == nil:
+						st.flushFailStreak.Store(0)
+					case errors.Is(err, persist.ErrIncompleteLog):
+						// Not a store failure: a concurrently-arriving update's
+						// dependency has not been stored yet (applied-then-
+						// persisted ordering makes this window normal). The gap
+						// heals within moments; retry at the next threshold
+						// without logging or backing off.
+					default:
+						st.flushFailStreak.Add(1)
+						log.Printf("server: auto-flush %q: %v", st.name, err)
+					}
+				}
+			}
+		}
+	}
+	if s.opts.Backplane != nil {
+		// Fan this locally-applied update out to the other instances. A
+		// failure is logged, not fatal to THIS instance: the update is
+		// already applied, broadcast to local clients, and (if configured)
+		// persisted. But a dropped publish is a dropped causal dependency
+		// on a peer, not a single lost delta: a peer that misses it
+		// silently parks every later edit from that client until the
+		// document reloads from the shared Store (which only happens on
+		// eviction), so a backplane with at-most-once delivery trades this
+		// away by design.
+		s.publishBackplane(context.Background(), st, backplaneKindDoc, payload)
+	}
+	if s.opts.OnChange != nil {
+		s.opts.OnChange(st.name, payload)
+	}
+	return storeErr
+}
+
 // publishBackplane publishes a kind-tagged payload to the Backplane, logging
 // (not failing) on error. The caller has already applied and broadcast the
 // change locally. ctx bounds the publish: document updates pass a background
 // context (a dropped delta would diverge a peer, so the no-drop backpressure
 // is intentional), while presence updates pass a deadline-bounded context so
 // a wedged peer cannot stall the read loop or teardown over best-effort data.
-func (c *conn) publishBackplane(ctx context.Context, kind byte, payload []byte) {
+func (s *Server) publishBackplane(ctx context.Context, st *docState, kind byte, payload []byte) {
 	msg := make([]byte, 0, len(payload)+1)
 	msg = append(msg, kind)
 	msg = append(msg, payload...)
-	if err := c.server.opts.Backplane.Publish(ctx, c.state.name, msg); err != nil {
-		log.Printf("server: backplane publish for %q: %v", c.state.name, err)
+	if err := s.opts.Backplane.Publish(ctx, st.name, msg); err != nil {
+		log.Printf("server: backplane publish for %q: %v", st.name, err)
 	}
+}
+
+func (c *conn) publishBackplane(ctx context.Context, kind byte, payload []byte) {
+	c.server.publishBackplane(ctx, c.state, kind, payload)
 }
 
 // closeReason fits s into a WebSocket close frame, whose reason may be at
@@ -2015,7 +2136,6 @@ func (c *conn) readLoop(ctx context.Context) {
 	}
 }
 
-// ErrServerClosed is returned from operations on a Server that has
-// been Closed. Reserved for future use; currently no method returns
-// it.
+// ErrServerClosed is returned by the server's document API (OpenDocument,
+// Apply, ApplyUpdate, CloseDocument) after Close.
 var ErrServerClosed = errors.New("server: closed")

@@ -18,6 +18,31 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.52.0] - 2026-11-23
+
+**Upgrade impact**: on the client path a stored update is now published on the `Backplane` before `OnChange` is called (it was after), so an `OnChange` that panics no longer keeps the update from other instances. `Server.Close` now waits, within its context, for open `Document`s and server writes in progress. `cmd/yserve` and `cmd/ygo-server` are unchanged.
+
+### Added
+
+- **Changing documents from the server** (`server`). A server write goes the way a client's update goes: it is applied to the server's copy, queued to every connection of the document (y-websocket and Hocuspocus, read-only viewers included), stored in the `Store` (with `FlushEvery` and auto-versioning counting it), published on the `Backplane` and reported to `OnChange`.
+  - `Server.Apply(ctx, docName, fn)` runs `fn` in one write transaction (roots through `ygo.MapIn` and the other `*In` accessors) and returns the update it made, nil when nothing changed. Edits made before `fn` returns an error or panics are committed and sent, then the error is returned or the panic goes on.
+  - `Server.ApplyUpdate(ctx, docName, update)` checks a V1 update (it must decode, with nothing after it: `ErrInvalidUpdate`), applies it to the server's copy and sends it as given. A fan-out that does not apply leaves clients that connect later with the old state; this one does not.
+  - `Server.OpenDocument(ctx, docName)` returns a `Document` that holds the document resident until its `Close`, across its clients' disconnects, with `Apply`, `ApplyUpdate` and `State` (the server's copy as one V1 update).
+  - `Server.CloseDocument(ctx, docName, force)` takes a document out of the server: refused while clients are connected (`ErrDocumentHasConnections`) unless forced, which closes its y-websocket connections with 1001 and sends Hocuspocus providers the protocol's Close for that document only (the socket and its other documents stay). Connections and opens for the name wait for the close and then load it afresh from the Store.
+  - `Options.OnServerWrite` sees each write before it happens and can refuse it (`ErrWriteRefused`).
+  - Each write's transaction has a new `*server.ServerOrigin` as its origin, so observers and update handlers on the server's documents can tell server writes apart.
+  - A document no client holds is loaded for the write as a connection would load it (Store, then `OnLoadDocument`, counted against `MaxDocs`: `ErrTooManyDocuments`), then evicted or parked as after a last disconnect. On a server without a `Store`, a document a server write changed stays resident until `CloseDocument` or `Close`, so the write is not lost.
+  - A `Store` error after the write was applied and sent is returned wrapped in `ErrNotStored`. After `Close`, the document API returns `ErrServerClosed`.
+
+### Tests
+
+- A server write reaches a y-websocket client, a Hocuspocus document and a client of a second instance on the same Backplane, is stored and reported once, all with the update `Apply` returns; it reaches a read-only viewer and a client that has not finished its sync yet.
+- A document not resident is loaded, written, stored and evicted (or parked); without a Store it is kept, and a document only read is not.
+- Edits before an error or a panic are sent; a write that changes nothing sends nothing; an update waiting for a dependency is held, stored and integrates when the dependency comes; undecodable and trailing bytes are refused with nothing applied; `OnServerWrite` sees and refuses writes.
+- `CloseDocument` refusals, and a forced close of a y-websocket connection (1001) and of one Hocuspocus document of a socket whose other document keeps working, then a fresh load; an open `Document` holds its document across a disconnect; `Close` waits for an open `Document` (up to its context) and for a write in progress, and refuses the API after it; a panicking `OnChange` still lets the write reach another instance.
+- 80 server writes from four goroutines race 15 clients connecting, editing and leaving (under the race detector, 10 runs): each `Apply` returns only its own update, and the server and the Store end with every item.
+- 17 mutation controls each fail a test.
+
 ## [1.51.0] - 2026-11-23
 
 **Upgrade impact**: `Text.Format` with no attributes now splits the text at the range's ends, as yjs does: a surrogate pair cut there becomes U+FFFD on that peer, as in yjs, where ygo kept the character and its state bytes differed from yjs's. An undo that brings back a map key or an XML attribute whose deleted values had merged brings back the merged item whole: the key reads its last value, and the client's clock moves on by the item's length, as in yjs.
