@@ -1110,7 +1110,7 @@ var errDocClosing = errors.New("server: document is closing")
 // waitNotClosing waits until no CloseDocument is closing docName. For a
 // server operation (op) it returns ErrServerClosed once Close has begun,
 // waiting or not; a connection waits the close out.
-func (s *Server) waitNotClosing(ctx context.Context, docName string, op bool) error {
+func (s *Server) waitNotClosing(ctx context.Context, docName string, op bool, abort <-chan struct{}) error {
 	for {
 		s.docsMu.Lock()
 		if op && s.closed {
@@ -1133,6 +1133,8 @@ func (s *Server) waitNotClosing(ctx context.Context, docName string, op bool) er
 		select {
 		case <-ch:
 		case <-closed:
+		case <-abort:
+			return errDocClosing
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -1368,8 +1370,15 @@ func (s *Server) reserveConn() bool {
 
 func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, raw net.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
 	// A document CloseDocument is closing is waited for, then loaded afresh.
+	// A Hocuspocus session stops waiting when its socket closes: it holds
+	// keys of its own, maybe on that very document, which only its read loop
+	// releases, after the wait.
+	var abort <-chan struct{}
+	if session != nil {
+		abort = session.transport.queue.done
+	}
 	for {
-		if err := s.waitNotClosing(ctx, docName, false); err != nil {
+		if err := s.waitNotClosing(ctx, docName, false, abort); err != nil {
 			return nil, nil, false, err
 		}
 		c, state, ok, err = s.admitDocumentOnce(ctx, docName, ws, raw, session, key, reserved)
@@ -1431,11 +1440,6 @@ func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *webs
 // and closes its socket, so every released connection ends with its
 // transport closed.
 func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
-	// Once per connection: CloseDocument releases a Hocuspocus document
-	// from outside its session, which releases the key again later.
-	if !c.released.CompareAndSwap(false, true) {
-		return
-	}
 	state.connsMu.Lock()
 	delete(state.conns, c)
 	remaining := len(state.conns)
@@ -1604,16 +1608,12 @@ type conn struct {
 
 	// A Hocuspocus document shares its session's transport and queue.
 	// route and session are immutable before this conn enters its room.
-	session *hocuspocusSession
-	key     string // the Hocuspocus document key
-	route   []byte
-	sendMu  sync.Mutex
-	ready   bool // gates broadcasts before admission and after per-key CLOSE
-	// closedByServer marks a Hocuspocus document CloseDocument closed; its
-	// session drops the key when it next handles it. Guarded by sendMu.
-	closedByServer bool
-	released       atomic.Bool // releaseConn ran
-	accepted       bool        // OnConnect accepted; only the session read loop uses this
+	session  *hocuspocusSession
+	key      string // the Hocuspocus document key
+	route    []byte
+	sendMu   sync.Mutex
+	ready    bool // gates broadcasts before admission and after per-key CLOSE
+	accepted bool // OnConnect accepted; only the session read loop uses this
 }
 
 var connIDCounter atomic.Uint64

@@ -231,9 +231,10 @@ state, _ := d.State() // the server's copy as one V1 update
 d.Close()
 
 // Take a document out of the server: refused while clients are connected
-// unless forced, which closes y-websocket connections with 1001 and sends
-// Hocuspocus providers the Close for that document only. It waits for every
-// open Document on it to be closed, so do not call it while holding one.
+// unless forced, which closes with 1001 its y-websocket connections and the
+// Hocuspocus sockets holding it (their other documents reconnect). It waits
+// for every open Document on it to be closed, so do not call it while
+// holding one.
 err = srv.CloseDocument(ctx, "doc-42", true)
 ```
 
@@ -253,9 +254,10 @@ err = srv.CloseDocument(ctx, "doc-42", true)
 - `Close` waits, within its context, for open Documents and writes in progress,
   and the document API (Documents opened before it included) returns
   `ErrServerClosed` after it. It also drops documents retained without a Store.
-- For a Hocuspocus document closed by `CloseDocument`, `OnDisconnect` runs on
-  the provider's session when it next sends something for that document or
-  disconnects.
+- A forced `CloseDocument` closes a whole Hocuspocus socket, because only the
+  socket's own read loop may release its documents (a frame it is handling
+  could otherwise land on the closed copy); the provider reconnects and
+  re-attaches the socket's other documents.
 - A Store error after the write was applied and sent comes back wrapped in
   `ErrNotStored`.
 

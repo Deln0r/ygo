@@ -101,7 +101,7 @@ func (s *Server) pin(ctx context.Context, docName string) (*docState, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := s.waitNotClosing(ctx, docName, true); err != nil {
+		if err := s.waitNotClosing(ctx, docName, true, nil); err != nil {
 			return nil, err
 		}
 		st, err := s.pinOnce(ctx, docName)
@@ -393,9 +393,14 @@ func (s *Server) CloseDocument(ctx context.Context, docName string, force bool) 
 
 // closeDocument is CloseDocument's work once st is marked closing.
 func (s *Server) closeDocument(st *docState) {
+	// A connection releases itself on its own goroutine once its read loop
+	// ends, after any frame it is handling: closing its socket is what lets
+	// it go. A Hocuspocus session is closed as a whole (its other documents
+	// reconnect, as providers do after any drop): its read loop alone owns
+	// its keys and their frames in progress.
 	for _, c := range st.snapshotConns() {
 		if c.session != nil {
-			c.closeDocumentByServer()
+			c.session.transport.closeFromServer(websocket.StatusGoingAway, closedByServerReason)
 		} else {
 			c.closeFromServer(websocket.StatusGoingAway, closedByServerReason)
 		}

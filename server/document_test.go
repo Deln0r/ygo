@@ -85,6 +85,21 @@ func storeItems(t *testing.T, st *memstore.Store, name string) []any {
 	return stateItems(t, merged)
 }
 
+// readUntilClosed reads a socket in the background until it closes, as a
+// provider does (answering the server's close), and reports the close code.
+func readSocketUntilClosed(ctx context.Context, ws *websocket.Conn) <-chan websocket.StatusCode {
+	ch := make(chan websocket.StatusCode, 1)
+	go func() {
+		for {
+			if _, _, err := ws.Read(ctx); err != nil {
+				ch <- websocket.CloseStatus(err)
+				return
+			}
+		}
+	}()
+	return ch
+}
+
 // TestApply_ReachesEveryRecipient: a server write reaches a y-websocket
 // client, a Hocuspocus document and a client of another instance on the
 // same Backplane, is stored, and is reported to OnChange once, all with the
@@ -305,9 +320,9 @@ func TestOnServerWrite(t *testing.T) {
 }
 
 // TestCloseDocument: refusals, then a forced close that ends a y-websocket
-// connection with 1001 and closes the Hocuspocus document while the
-// session's other document stays; the next connection loads the stored
-// state afresh.
+// connection and the Hocuspocus socket holding the document (its other
+// document with it) with 1001; the next connection loads the stored state
+// afresh, and the socket's other document opens again on a new socket.
 func TestCloseDocument(t *testing.T) {
 	store := memstore.New()
 	url, s := startTestServer(t, server.Options{Store: store})
@@ -331,31 +346,22 @@ func TestCloseDocument(t *testing.T) {
 		t.Fatalf("with connections: %v", err)
 	}
 
-	// The y-websocket client reads on, so it answers the server's close.
-	closed := make(chan websocket.StatusCode, 1)
-	go func() {
-		for {
-			if _, _, err := y.conn.Read(y.ctx); err != nil {
-				closed <- websocket.CloseStatus(err)
-				return
-			}
-		}
-	}()
+	// The clients read on, so they answer the server's close.
+	yClosed := readSocketUntilClosed(y.ctx, y.conn)
+	hpClosed := readSocketUntilClosed(hp.ctx, hp.ws)
 	if err := s.CloseDocument(context.Background(), "doc", true); err != nil {
 		t.Fatal(err)
 	}
-	if code := <-closed; code != websocket.StatusGoingAway {
+	if code := <-yClosed; code != websocket.StatusGoingAway {
 		t.Fatalf("y-websocket closed with %v", code)
 	}
-	if f := hp.want(t, "doc", syncpkg.MessageClose); !strings.Contains(string(f.Payload), "closed") {
-		t.Fatalf("Hocuspocus close: %q", f.Payload)
+	if code := <-hpClosed; code != websocket.StatusGoingAway {
+		t.Fatalf("Hocuspocus socket closed with %v", code)
 	}
-	if st := s.Stats(); st.Documents != 1 || len(st.Docs) != 1 || st.Docs[0].Name != "other" {
-		t.Fatalf("stats %+v", st)
-	}
-	// The session's other document still works.
-	hp.send(t, "other", syncpkg.EncodeSyncUpdate(hpUpdate(t, "still-open")))
-	hp.want(t, "other", syncpkg.MessageSyncStatus)
+	// The socket's other document reopens on a new socket.
+	hp2 := hpDial(t, url)
+	hp2.auth(t, "other", "", syncpkg.ScopeReadWrite)
+	hpSync(t, hp2, "other")
 	// A new connection loads the stored state.
 	y2 := dialClient(t, url, "doc", 17)
 	defer y2.close()
@@ -605,21 +611,18 @@ func TestApply_OnChangePanicStillPublishes(t *testing.T) {
 }
 
 // TestCloseDocument_HocuspocusOnDisconnectPanic: OnDisconnect for a
-// Hocuspocus document closed by CloseDocument runs on its session (whose
-// panic net/http recovers), not on the closer, so a panicking hook does not
-// take the process down; the server goes on serving.
+// Hocuspocus document closed by CloseDocument runs on its session as the
+// socket closes (net/http recovers its panic), not on the closer, so a
+// panicking hook does not take the process down; the server goes on serving.
 func TestCloseDocument_HocuspocusOnDisconnectPanic(t *testing.T) {
 	url, s := startTestServer(t, server.Options{OnDisconnect: func(string, string) { panic("OnDisconnect") }})
 	hp := hpDial(t, url)
 	hp.auth(t, "doc", "", syncpkg.ScopeReadWrite)
 	hpSync(t, hp, "doc")
+	readSocketUntilClosed(hp.ctx, hp.ws)
 	if err := s.CloseDocument(context.Background(), "doc", true); err != nil {
 		t.Fatal(err)
 	}
-	hp.want(t, "doc", syncpkg.MessageClose)
-	// The session meets the closed key again: it drops it, OnDisconnect
-	// panics there and net/http recovers.
-	hp.send(t, "doc", syncpkg.EncodeSyncStep1([]byte{0}))
 	other := dialClient(t, url, "other", 30)
 	defer other.close()
 	syncClient(t, other)
@@ -661,8 +664,9 @@ func TestOpenDocument_LoadPanic(t *testing.T) {
 
 // TestCloseDocument_SecondKeyWhileClosing: while CloseDocument waits for an
 // open Document, the same Hocuspocus session attaches a second key to the
-// document; its admission waits for the close without blocking the close,
-// which releases the first key from outside the session.
+// document. Its admission waits for the close, and stops waiting when the
+// close shuts the socket, so the session's read loop releases its first key
+// and the close completes once the Document is closed.
 func TestCloseDocument_SecondKeyWhileClosing(t *testing.T) {
 	url, s := startTestServer(t, server.Options{})
 	hp := hpDial(t, url)
@@ -672,11 +676,12 @@ func TestCloseDocument_SecondKeyWhileClosing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The second key's admission waits for the close once it starts.
+	hp.send(t, "doc\x00two", syncpkg.EncodeAuthToken(""))
+	readSocketUntilClosed(hp.ctx, hp.ws)
+	time.Sleep(20 * time.Millisecond)
 	closed := make(chan error, 1)
 	go func() { closed <- s.CloseDocument(context.Background(), "doc", true) }()
-	hp.want(t, "doc", syncpkg.MessageClose)
-	// The second key's admission now waits for the close.
-	hp.send(t, "doc\x00two", syncpkg.EncodeAuthToken(""))
 	select {
 	case err := <-closed:
 		t.Fatalf("CloseDocument returned with a Document open: %v", err)
@@ -691,8 +696,12 @@ func TestCloseDocument_SecondKeyWhileClosing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("CloseDocument deadlocked with the session's admission")
 	}
-	if f := hp.want(t, "doc\x00two", syncpkg.MessageAuth); f.AuthSub != syncpkg.AuthAuthenticated {
-		t.Fatalf("second key: %+v", f)
+	deadline := time.Now().Add(2 * time.Second)
+	for s.Stats().Documents != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("after the close: %+v", s.Stats())
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -815,8 +824,8 @@ func TestCloseDocument_RacesConnections(t *testing.T) {
 	wg.Wait()
 }
 
-// TestCloseDocument_HocuspocusReattach: after CloseDocument closed a
-// Hocuspocus document, the provider attaching the key again gets a fresh
+// TestCloseDocument_HocuspocusReattach: after CloseDocument closed the
+// socket of a Hocuspocus document, a provider reconnecting gets a fresh
 // admission on the reloaded document, which receives server writes.
 func TestCloseDocument_HocuspocusReattach(t *testing.T) {
 	store := memstore.New()
@@ -828,10 +837,11 @@ func TestCloseDocument_HocuspocusReattach(t *testing.T) {
 		t.Fatal(err)
 	}
 	hp.want(t, "doc", syncpkg.MessageSync)
+	readSocketUntilClosed(hp.ctx, hp.ws)
 	if err := s.CloseDocument(context.Background(), "doc", true); err != nil {
 		t.Fatal(err)
 	}
-	hp.want(t, "doc", syncpkg.MessageClose)
+	hp = hpDial(t, url)
 	hp.auth(t, "doc", "", syncpkg.ScopeReadWrite)
 	if got := hpSync(t, hp, "doc"); fmt.Sprint(got) != "[before]" {
 		t.Fatalf("reattached sync %v", got)
