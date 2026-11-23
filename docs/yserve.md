@@ -227,12 +227,13 @@ err = srv.ApplyUpdate(ctx, "doc-42", update)
 
 // Hold a document open across several writes and reads.
 d, err := srv.OpenDocument(ctx, "doc-42")
-defer d.Close()
 state, _ := d.State() // the server's copy as one V1 update
+d.Close()
 
 // Take a document out of the server: refused while clients are connected
 // unless forced, which closes y-websocket connections with 1001 and sends
-// Hocuspocus providers the Close for that document only.
+// Hocuspocus providers the Close for that document only. It waits for every
+// open Document on it to be closed, so do not call it while holding one.
 err = srv.CloseDocument(ctx, "doc-42", true)
 ```
 
@@ -250,7 +251,11 @@ err = srv.CloseDocument(ctx, "doc-42", true)
 - `Options.OnServerWrite` sees each write before it happens and can refuse it
   (`ErrWriteRefused`).
 - `Close` waits, within its context, for open Documents and writes in progress,
-  and the document API returns `ErrServerClosed` after it.
+  and the document API (Documents opened before it included) returns
+  `ErrServerClosed` after it. It also drops documents retained without a Store.
+- For a Hocuspocus document closed by `CloseDocument`, `OnDisconnect` runs on
+  the provider's session when it next sends something for that document or
+  disconnects.
 - A Store error after the write was applied and sent comes back wrapped in
   `ErrNotStored`.
 

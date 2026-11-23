@@ -69,6 +69,9 @@ type Document struct {
 	st     *docState
 	mu     sync.Mutex
 	closed bool
+	// active counts calls in progress: Close waits for them, so a write
+	// never lands on a document already let go.
+	active sync.WaitGroup
 }
 
 // OpenDocument loads the document as a connection would (from the Store,
@@ -98,29 +101,33 @@ func (s *Server) pin(ctx context.Context, docName string) (*docState, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := s.waitNotClosing(ctx, docName); err != nil {
+		if err := s.waitNotClosing(ctx, docName, true); err != nil {
 			return nil, err
 		}
-		s.docsMu.Lock()
-		if s.closed {
-			s.docsMu.Unlock()
-			return nil, ErrServerClosed
-		}
-		st, err := s.getOrCreateDocLocked(ctx, docName)
+		st, err := s.pinOnce(ctx, docName)
 		if errors.Is(err, errDocClosing) {
-			s.docsMu.Unlock()
 			continue
 		}
-		if err != nil {
-			s.docsMu.Unlock()
-			return nil, err
-		}
-		st.pins++
-		st.idleSince = time.Time{}
-		s.ops.Add(1)
-		s.docsMu.Unlock()
-		return st, nil
+		return st, err
 	}
+}
+
+// pinOnce is one attempt of pin under docsMu, released by defer: the load
+// (Store, OnLoadDocument) runs under it and may panic.
+func (s *Server) pinOnce(ctx context.Context, docName string) (*docState, error) {
+	s.docsMu.Lock()
+	defer s.docsMu.Unlock()
+	if s.closed {
+		return nil, ErrServerClosed
+	}
+	st, err := s.getOrCreateDocLocked(ctx, docName)
+	if err != nil {
+		return nil, err
+	}
+	st.pins++
+	st.idleSince = time.Time{}
+	s.ops.Add(1)
+	return st, nil
 }
 
 // unpin drops a hold pin took; the last one settles a document without
@@ -150,24 +157,37 @@ func (d *Document) Close() {
 	}
 	d.closed = true
 	d.mu.Unlock()
+	d.active.Wait()
 	d.s.unpin(d.st)
 }
 
-func (d *Document) usable() error {
+// begin admits a call: refused after the Document's Close
+// (ErrDocumentClosed) or the server's (ErrServerClosed); end ends it.
+func (d *Document) begin() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
 		return ErrDocumentClosed
 	}
+	d.s.docsMu.Lock()
+	closed := d.s.closed
+	d.s.docsMu.Unlock()
+	if closed {
+		return ErrServerClosed
+	}
+	d.active.Add(1)
 	return nil
 }
+
+func (d *Document) end() { d.active.Done() }
 
 // State is the server's copy of the document as one V1 update
 // (EncodeStateAsUpdate), the pending buffer included.
 func (d *Document) State() ([]byte, error) {
-	if err := d.usable(); err != nil {
+	if err := d.begin(); err != nil {
 		return nil, err
 	}
+	defer d.end()
 	return encoding.EncodeStateAsUpdateWithPending(d.st.doc), nil
 }
 
@@ -189,9 +209,10 @@ func (d *Document) State() ([]byte, error) {
 // A Store error is returned wrapped in ErrNotStored, after the update was
 // applied and sent.
 func (d *Document) Apply(ctx context.Context, fn func(txn *doc.TransactionMut) error) ([]byte, error) {
-	if err := d.usable(); err != nil {
+	if err := d.begin(); err != nil {
 		return nil, err
 	}
+	defer d.end()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -249,9 +270,10 @@ func (d *Document) Apply(ctx context.Context, fn func(txn *doc.TransactionMut) e
 // A Store error is returned wrapped in ErrNotStored, after the update was
 // applied and sent.
 func (d *Document) ApplyUpdate(ctx context.Context, update []byte) error {
-	if err := d.usable(); err != nil {
+	if err := d.begin(); err != nil {
 		return err
 	}
+	defer d.end()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -350,6 +372,9 @@ func (s *Server) CloseDocument(ctx context.Context, docName string, force bool) 
 	}
 	st.closing = make(chan struct{})
 	st.closeWake = make(chan struct{}, 1)
+	// Not parked while it closes: the idle sweep and MaxIdleDocs only take
+	// parked documents.
+	st.idleSince = time.Time{}
 	s.ops.Add(1)
 	s.docsMu.Unlock()
 	done := make(chan struct{})
@@ -370,9 +395,9 @@ func (s *Server) CloseDocument(ctx context.Context, docName string, force bool) 
 func (s *Server) closeDocument(st *docState) {
 	for _, c := range st.snapshotConns() {
 		if c.session != nil {
-			c.session.closeDocument(c)
+			c.closeDocumentByServer()
 		} else {
-			c.closeFromServer(websocket.StatusGoingAway, "document closed by the server")
+			c.closeFromServer(websocket.StatusGoingAway, closedByServerReason)
 		}
 	}
 	for {

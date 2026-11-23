@@ -61,7 +61,7 @@ func (s *Server) sweepIdle(ctx context.Context) {
 	var expired []*docState
 	s.docsMu.Lock()
 	for name, st := range s.docs {
-		if st.idleSince.IsZero() || st.idleSince.After(cutoff) {
+		if st.idleSince.IsZero() || st.idleSince.After(cutoff) || st.closing != nil || st.pins > 0 {
 			continue
 		}
 		st.connsMu.Lock()
@@ -86,7 +86,7 @@ func (s *Server) evictOldestIdleLocked(limit int) *docState {
 	idle := 0
 	var oldest *docState
 	for _, st := range s.docs {
-		if st.idleSince.IsZero() {
+		if st.idleSince.IsZero() || st.closing != nil || st.pins > 0 {
 			continue
 		}
 		idle++

@@ -28,11 +28,11 @@ listed in the core's entries.
   - `Server.Apply(ctx, docName, fn)` runs `fn` in one write transaction (roots through `ygo.MapIn` and the other `*In` accessors) and returns the update it made, nil when nothing changed. Edits made before `fn` returns an error or panics are committed and sent, then the error is returned or the panic goes on.
   - `Server.ApplyUpdate(ctx, docName, update)` checks a V1 update (it must decode, with nothing after it: `ErrInvalidUpdate`), applies it to the server's copy and sends it as given. A fan-out that does not apply leaves clients that connect later with the old state; this one does not.
   - `Server.OpenDocument(ctx, docName)` returns a `Document` that holds the document resident until its `Close`, across its clients' disconnects, with `Apply`, `ApplyUpdate` and `State` (the server's copy as one V1 update).
-  - `Server.CloseDocument(ctx, docName, force)` takes a document out of the server: refused while clients are connected (`ErrDocumentHasConnections`) unless forced, which closes its y-websocket connections with 1001 and sends Hocuspocus providers the protocol's Close for that document only (the socket and its other documents stay). Connections and opens for the name wait for the close and then load it afresh from the Store.
+  - `Server.CloseDocument(ctx, docName, force)` takes a document out of the server: refused while clients are connected (`ErrDocumentHasConnections`) unless forced, which closes its y-websocket connections with 1001 and sends Hocuspocus providers the protocol's Close for that document only (the socket and its other documents stay; `OnDisconnect` for it runs on the provider's session when it next sends something for that document or disconnects). It waits for every open `Document` on the document. Connections and opens for the name wait for the close and then load it afresh from the Store.
   - `Options.OnServerWrite` sees each write before it happens and can refuse it (`ErrWriteRefused`).
   - Each write's transaction has a new `*server.ServerOrigin` as its origin, so observers and update handlers on the server's documents can tell server writes apart.
   - A document no client holds is loaded for the write as a connection would load it (Store, then `OnLoadDocument`, counted against `MaxDocs`: `ErrTooManyDocuments`), then evicted or parked as after a last disconnect. On a server without a `Store`, a document a server write changed stays resident until `CloseDocument` or `Close`, so the write is not lost.
-  - A `Store` error after the write was applied and sent is returned wrapped in `ErrNotStored`. After `Close`, the document API returns `ErrServerClosed`.
+  - A `Store` error after the write was applied and sent is returned wrapped in `ErrNotStored`. After `Close`, the document API returns `ErrServerClosed`, for Documents opened before it too, and an open waiting for a closing document is woken with it; `Close` also drops documents retained without a Store. A `Document`'s `Close` waits for its calls in progress.
 
 ### Tests
 
@@ -40,8 +40,9 @@ listed in the core's entries.
 - A document not resident is loaded, written, stored and evicted (or parked); without a Store it is kept, and a document only read is not.
 - Edits before an error or a panic are sent; a write that changes nothing sends nothing; an update waiting for a dependency is held, stored and integrates when the dependency comes; undecodable and trailing bytes are refused with nothing applied; `OnServerWrite` sees and refuses writes.
 - `CloseDocument` refusals, and a forced close of a y-websocket connection (1001) and of one Hocuspocus document of a socket whose other document keeps working, then a fresh load; an open `Document` holds its document across a disconnect; `Close` waits for an open `Document` (up to its context) and for a write in progress, and refuses the API after it; a panicking `OnChange` still lets the write reach another instance.
-- 80 server writes from four goroutines race 15 clients connecting, editing and leaving (under the race detector, 10 runs): each `Apply` returns only its own update, and the server and the Store end with every item.
-- 17 mutation controls each fail a test.
+- 80 server writes from four goroutines race 15 clients connecting, editing and leaving (under the race detector, 10 runs): each `Apply` returns only its own update, and the server and the Store end with every item. Forced closes race clients connecting and leaving without a hang.
+- A Hocuspocus session attaching a second key to a document while `CloseDocument` waits for an open `Document` does not deadlock the close; a key attached again after a close gets a fresh admission; a panicking `OnDisconnect` for a closed Hocuspocus document does not stop the server; a panicking `OnLoadDocument` in `OpenDocument` leaves the server usable; a `Document`'s `Close` waits for a call in progress; `Close` wakes an open waiting for a closing document with `ErrServerClosed`, refuses calls on Documents opened before it and drops retained documents.
+- CONTROLS_PLACEHOLDER mutation controls each fail a test.
 
 ## [1.51.0] - 2026-11-23
 

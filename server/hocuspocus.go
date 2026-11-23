@@ -54,14 +54,12 @@ func (c *conn) routed(envelope []byte) []byte {
 	return append(out, envelope...)
 }
 
-// hocuspocusSession owns one socket, writer and send queue. keys and
-// pending belong to whoever holds mu: the read loop while it handles a
-// frame, releaseAll, and CloseDocument while it releases a key; document
-// broadcasts only use conn.enqueue. The transport is a conn without a
-// document, reusing the bounded writer and close path used by y-websocket.
-// Lock order: mu, then the server's docsMu, then a document's connsMu.
+// hocuspocusSession owns one socket, writer and send queue. Its read loop
+// alone owns keys and pending; document broadcasts only use conn.enqueue,
+// and CloseDocument only marks a key's conn closedByServer (the read loop
+// then drops the key). The transport is a conn without a document, reusing
+// the bounded writer and close path used by y-websocket.
 type hocuspocusSession struct {
-	mu                            sync.Mutex
 	server                        *Server
 	transport                     *conn
 	request                       *http.Request
@@ -167,7 +165,7 @@ func (s *Server) serveHocuspocus(w http.ResponseWriter, r *http.Request) {
 			t.closeFromServer(4401, "expected a binary Hocuspocus frame")
 			return
 		}
-		if !session.handleLocked(raw) {
+		if !session.handle(raw) {
 			return
 		}
 	}
@@ -196,6 +194,11 @@ func (s *hocuspocusSession) handle(raw []byte) bool {
 	if syncpkg.RouteDocName(key) == "" {
 		s.transport.closeFromServer(websocket.StatusPolicyViolation, "no document name in the URL")
 		return false
+	}
+	// A key whose document CloseDocument closed is gone: drop it, and treat
+	// this frame as one for a new key (a provider attaching again).
+	if c := s.keys[key]; c != nil && c.isClosedByServer() {
+		s.releaseKey(key)
 	}
 	frame, _, err := syncpkg.DecodeEnvelope(envelope)
 	if err != nil {
@@ -256,7 +259,7 @@ func (s *hocuspocusSession) handle(raw []byte) bool {
 			return false
 		}
 		var ok bool
-		c, _, ok, err = s.server.admitDocument(s.request.Context(), syncpkg.RouteDocName(key), s.transport.ws, s, key, false)
+		c, _, ok, err = s.server.admitDocument(s.request.Context(), syncpkg.RouteDocName(key), s.transport.ws, nil, s, key, false)
 		if err != nil || !ok {
 			s.transport.closeFromServer(websocket.StatusTryAgainLater, "document admission failed")
 			return false
@@ -280,6 +283,10 @@ func (s *hocuspocusSession) handle(raw []byte) bool {
 		// reply or draining queued messages. IdleTimeout still applies.
 		s.onAdmission()
 		if err := c.activateHocuspocus(isToken); err != nil {
+			if errors.Is(err, errClosedByServer) {
+				s.releaseKey(key)
+				return s.reply(key, syncpkg.EncodeClose(closedByServerReason)) == nil
+			}
 			return false
 		}
 		if snap := c.state.awareness.EncodeLive(); len(snap) > 0 && snap[0] != 0 {
@@ -314,6 +321,10 @@ func (s *hocuspocusSession) handle(raw []byte) bool {
 // up the room, and a broadcast after the peer sees it must not be dropped.
 func (c *conn) activateHocuspocus(auth bool) error {
 	c.sendMu.Lock()
+	if c.closedByServer {
+		c.sendMu.Unlock()
+		return errClosedByServer
+	}
 	if !auth {
 		c.ready = true
 		c.sendMu.Unlock()
@@ -364,17 +375,7 @@ func (s *hocuspocusSession) releaseKey(key string) {
 	}
 }
 
-// handleLocked is handle under mu, released also when an adopter's hook
-// panics in it (releaseAll then takes mu again).
-func (s *hocuspocusSession) handleLocked(raw []byte) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.handle(raw)
-}
-
 func (s *hocuspocusSession) releaseAll() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	// Defer each release so an adopter's panicking OnDisconnect cannot
 	// strand the other keys. Socket cleanup is independently deferred.
 	for key := range s.keys {
@@ -382,19 +383,34 @@ func (s *hocuspocusSession) releaseAll() {
 	}
 }
 
-// closeDocument releases c's key, as CloseDocument closes a document: the
-// key stops receiving the document's broadcasts, its connection is
-// released once, and the provider gets the protocol's Close for it. The
-// socket and the session's other documents stay. A key already released or
-// admitted again is left alone.
-func (s *hocuspocusSession) closeDocument(c *conn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.keys[c.key] != c {
-		return
+// closeDocumentByServer is CloseDocument's close of a Hocuspocus document,
+// from outside its session: the key stops receiving broadcasts, a provider
+// that was told it is in gets the protocol's Close (queued, not waited for),
+// and the document lets the connection go (releaseConn, once). The session
+// drops the key and calls OnDisconnect when it next handles that key or
+// ends; the socket and its other documents stay.
+func (c *conn) closeDocumentByServer() {
+	c.sendMu.Lock()
+	c.closedByServer = true
+	wasReady := c.ready
+	c.ready = false
+	if wasReady {
+		c.queue.pushFanout(c.routed(syncpkg.EncodeClose(closedByServerReason)))
 	}
-	s.releaseKey(c.key)
-	_ = s.reply(c.key, syncpkg.EncodeClose("document closed by the server"))
+	c.sendMu.Unlock()
+	c.server.releaseConn(context.Background(), c.state, c)
+}
+
+const closedByServerReason = "document closed by the server"
+
+// errClosedByServer is activateHocuspocus's refusal of a key CloseDocument
+// closed while it was being admitted.
+var errClosedByServer = errors.New("server: document closed by the server")
+
+func (c *conn) isClosedByServer() bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	return c.closedByServer
 }
 
 // looksLikeHocuspocus recognizes a document-prefixed first frame on the

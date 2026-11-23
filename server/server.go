@@ -511,6 +511,9 @@ type Server struct {
 	// before it flushes and closes the Backplane. Add only under docsMu
 	// while closed is false.
 	ops sync.WaitGroup
+	// closedCh is closed when Close begins, waking server operations that
+	// wait for a closing document.
+	closedCh chan struct{}
 
 	// closeLimit bounds every close the server starts
 	// (defaultCloseHandshakeLimit; tests shorten it).
@@ -606,6 +609,7 @@ func New(opts Options) *Server {
 		opts:       opts,
 		docs:       map[string]*docState{},
 		closeLimit: defaultCloseHandshakeLimit,
+		closedCh:   make(chan struct{}),
 	}
 	s.startVersioning()
 	s.startAwarenessSweep()
@@ -742,7 +746,12 @@ func (s *Server) Close(ctx context.Context) error {
 	// they pin), and those already running finish their effects - store,
 	// publish, fan-out - before the flush and the Backplane close below.
 	s.docsMu.Lock()
-	s.closed = true
+	if !s.closed {
+		s.closed = true
+		if s.closedCh != nil { // a Server not made by New (white-box tests)
+			close(s.closedCh)
+		}
+	}
 	s.docsMu.Unlock()
 	var firstErr error
 	opsDone := make(chan struct{})
@@ -767,7 +776,8 @@ func (s *Server) Close(ctx context.Context) error {
 		// else would ever evict them, and their backplane subscriptions must
 		// not outlive the server. Docs with live connections tear down via
 		// their own releaseConn as usual.
-		if !st.idleSince.IsZero() {
+		// Retained documents (server writes without a Store) end here too.
+		if (!st.idleSince.IsZero() || st.retain) && st.pins == 0 && st.closing == nil {
 			st.connsMu.Lock()
 			if len(st.conns) == 0 {
 				delete(s.docs, name)
@@ -968,7 +978,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	c, state, ok, err := s.admitDocument(r.Context(), docName, wsConn, nil, "", true)
+	c, state, ok, err := s.admitDocument(r.Context(), docName, wsConn, raw, nil, "", true)
 	admitting = false
 	if err != nil || !ok {
 		// Refused: give the slot back before the close, which can take
@@ -997,7 +1007,6 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		closeWithin(wsConn, raw, s.closeLimit, websocket.StatusPolicyViolation, "document connection limit reached")
 		return
 	}
-	c.raw = raw
 	// The connection is in its room from here on, so broadcasts may already
 	// queue to it; its writer drains them. releaseConn stops and joins it.
 	c.startWriter()
@@ -1098,10 +1107,16 @@ type docState struct {
 // lookup; the caller waits again.
 var errDocClosing = errors.New("server: document is closing")
 
-// waitNotClosing waits until no CloseDocument is closing docName.
-func (s *Server) waitNotClosing(ctx context.Context, docName string) error {
+// waitNotClosing waits until no CloseDocument is closing docName. For a
+// server operation (op) it returns ErrServerClosed once Close has begun,
+// waiting or not; a connection waits the close out.
+func (s *Server) waitNotClosing(ctx context.Context, docName string, op bool) error {
 	for {
 		s.docsMu.Lock()
+		if op && s.closed {
+			s.docsMu.Unlock()
+			return ErrServerClosed
+		}
 		st := s.docs[docName]
 		var ch chan struct{}
 		if st != nil {
@@ -1111,8 +1126,13 @@ func (s *Server) waitNotClosing(ctx context.Context, docName string) error {
 		if ch == nil {
 			return nil
 		}
+		var closed <-chan struct{}
+		if op {
+			closed = s.closedCh
+		}
 		select {
 		case <-ch:
+		case <-closed:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -1289,7 +1309,7 @@ func (b *bufferedApply) activate(live func([]byte)) {
 // (addConn takes connsMu) matches releaseConn's eviction and is not
 // inverted anywhere.
 func (s *Server) admitConn(ctx context.Context, docName string, ws *websocket.Conn) (c *conn, state *docState, ok bool, err error) {
-	return s.admitDocument(ctx, docName, ws, nil, "", false)
+	return s.admitDocument(ctx, docName, ws, nil, nil, "", false)
 }
 
 // acceptBounded is websocket.Accept with WriteTimeout on the writes it makes
@@ -1346,20 +1366,20 @@ func (s *Server) reserveConn() bool {
 	}
 }
 
-func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
+func (s *Server) admitDocument(ctx context.Context, docName string, ws *websocket.Conn, raw net.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
 	// A document CloseDocument is closing is waited for, then loaded afresh.
 	for {
-		if err := s.waitNotClosing(ctx, docName); err != nil {
+		if err := s.waitNotClosing(ctx, docName, false); err != nil {
 			return nil, nil, false, err
 		}
-		c, state, ok, err = s.admitDocumentOnce(ctx, docName, ws, session, key, reserved)
+		c, state, ok, err = s.admitDocumentOnce(ctx, docName, ws, raw, session, key, reserved)
 		if !errors.Is(err, errDocClosing) {
 			return c, state, ok, err
 		}
 	}
 }
 
-func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *websocket.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
+func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *websocket.Conn, raw net.Conn, session *hocuspocusSession, key string, reserved bool) (c *conn, state *docState, ok bool, err error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
 	// Global connection cap: refuse before creating or loading a room so a
@@ -1383,6 +1403,9 @@ func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *webs
 		return nil, nil, false, err
 	}
 	c = s.newConn(state, ws)
+	// The transport is set before the connection is published (addConn): a
+	// CloseDocument may close it from another goroutine at once.
+	c.raw = raw
 	if session != nil {
 		c.session = session
 		c.key = key
@@ -1408,6 +1431,11 @@ func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *webs
 // and closes its socket, so every released connection ends with its
 // transport closed.
 func (s *Server) releaseConn(ctx context.Context, state *docState, c *conn) {
+	// Once per connection: CloseDocument releases a Hocuspocus document
+	// from outside its session, which releases the key again later.
+	if !c.released.CompareAndSwap(false, true) {
+		return
+	}
 	state.connsMu.Lock()
 	delete(state.conns, c)
 	remaining := len(state.conns)
@@ -1576,12 +1604,16 @@ type conn struct {
 
 	// A Hocuspocus document shares its session's transport and queue.
 	// route and session are immutable before this conn enters its room.
-	session  *hocuspocusSession
-	key      string // the Hocuspocus document key
-	route    []byte
-	sendMu   sync.Mutex
-	ready    bool // gates broadcasts before admission and after per-key CLOSE
-	accepted bool // OnConnect accepted; only the session read loop uses this
+	session *hocuspocusSession
+	key     string // the Hocuspocus document key
+	route   []byte
+	sendMu  sync.Mutex
+	ready   bool // gates broadcasts before admission and after per-key CLOSE
+	// closedByServer marks a Hocuspocus document CloseDocument closed; its
+	// session drops the key when it next handles it. Guarded by sendMu.
+	closedByServer bool
+	released       atomic.Bool // releaseConn ran
+	accepted       bool        // OnConnect accepted; only the session read loop uses this
 }
 
 var connIDCounter atomic.Uint64

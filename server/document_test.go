@@ -603,3 +603,246 @@ func TestApply_OnChangePanicStillPublishes(t *testing.T) {
 		t.Fatalf("the document stayed held: %v", err)
 	}
 }
+
+// TestCloseDocument_HocuspocusOnDisconnectPanic: OnDisconnect for a
+// Hocuspocus document closed by CloseDocument runs on its session (whose
+// panic net/http recovers), not on the closer, so a panicking hook does not
+// take the process down; the server goes on serving.
+func TestCloseDocument_HocuspocusOnDisconnectPanic(t *testing.T) {
+	url, s := startTestServer(t, server.Options{OnDisconnect: func(string, string) { panic("OnDisconnect") }})
+	hp := hpDial(t, url)
+	hp.auth(t, "doc", "", syncpkg.ScopeReadWrite)
+	hpSync(t, hp, "doc")
+	if err := s.CloseDocument(context.Background(), "doc", true); err != nil {
+		t.Fatal(err)
+	}
+	hp.want(t, "doc", syncpkg.MessageClose)
+	// The session meets the closed key again: it drops it, OnDisconnect
+	// panics there and net/http recovers.
+	hp.send(t, "doc", syncpkg.EncodeSyncStep1([]byte{0}))
+	other := dialClient(t, url, "other", 30)
+	defer other.close()
+	syncClient(t, other)
+	if _, err := s.Apply(context.Background(), "other", pushServer("alive")); err != nil {
+		t.Fatal(err)
+	}
+	awaitContains(t, other, "alive")
+}
+
+// TestOpenDocument_LoadPanic: a panicking OnLoadDocument reaches the caller
+// and leaves the server usable.
+func TestOpenDocument_LoadPanic(t *testing.T) {
+	_, s := startTestServer(t, server.Options{OnLoadDocument: func(name string) ([]byte, error) {
+		if name == "bad" {
+			panic("load")
+		}
+		return nil, nil
+	}})
+	func() {
+		defer func() {
+			if r := recover(); r != "load" {
+				t.Fatalf("recovered %v", r)
+			}
+		}()
+		_, _ = s.OpenDocument(context.Background(), "bad")
+	}()
+	d, err := s.OpenDocument(context.Background(), "good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	_ = s.Stats()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCloseDocument_SecondKeyWhileClosing: while CloseDocument waits for an
+// open Document, the same Hocuspocus session attaches a second key to the
+// document; its admission waits for the close without blocking the close,
+// which releases the first key from outside the session.
+func TestCloseDocument_SecondKeyWhileClosing(t *testing.T) {
+	url, s := startTestServer(t, server.Options{})
+	hp := hpDial(t, url)
+	hp.auth(t, "doc", "", syncpkg.ScopeReadWrite)
+	hpSync(t, hp, "doc")
+	d, err := s.OpenDocument(context.Background(), "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- s.CloseDocument(context.Background(), "doc", true) }()
+	hp.want(t, "doc", syncpkg.MessageClose)
+	// The second key's admission now waits for the close.
+	hp.send(t, "doc\x00two", syncpkg.EncodeAuthToken(""))
+	select {
+	case err := <-closed:
+		t.Fatalf("CloseDocument returned with a Document open: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	d.Close()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("CloseDocument deadlocked with the session's admission")
+	}
+	if f := hp.want(t, "doc\x00two", syncpkg.MessageAuth); f.AuthSub != syncpkg.AuthAuthenticated {
+		t.Fatalf("second key: %+v", f)
+	}
+}
+
+// TestDocument_CloseWaitsForCalls: Close waits for a call in progress, so
+// the write lands on the document while it is still held.
+func TestDocument_CloseWaitsForCalls(t *testing.T) {
+	inHook := make(chan struct{})
+	release := make(chan struct{})
+	store := memstore.New()
+	_, s := startTestServer(t, server.Options{Store: store, OnServerWrite: func(context.Context, server.ServerWrite) error {
+		close(inHook)
+		<-release
+		return nil
+	}})
+	d, err := s.OpenDocument(context.Background(), "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := make(chan error, 1)
+	go func() {
+		_, err := d.Apply(context.Background(), pushServer("in-flight"))
+		applied <- err
+	}()
+	<-inHook
+	closed := make(chan struct{})
+	go func() { d.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned during a call")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-applied; err != nil {
+		t.Fatal(err)
+	}
+	<-closed
+	if got := storeItems(t, store, "doc"); fmt.Sprint(got) != "[in-flight]" {
+		t.Fatalf("stored %v", got)
+	}
+}
+
+// TestServerClose_RefusesWaitersAndHandles: an OpenDocument waiting for a
+// closing document returns ErrServerClosed when Close begins, so does a call
+// on a Document opened before it; Close drains a retained document.
+func TestServerClose_RefusesWaitersAndHandles(t *testing.T) {
+	s := server.New(server.Options{})
+	if _, err := s.Apply(context.Background(), "kept", pushServer("x")); err != nil {
+		t.Fatal(err)
+	}
+	held, err := s.OpenDocument(context.Background(), "held")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = s.CloseDocument(context.Background(), "held", true) }()
+	time.Sleep(50 * time.Millisecond) // CloseDocument now waits for held
+	opened := make(chan error, 1)
+	go func() {
+		_, err := s.OpenDocument(context.Background(), "held")
+		opened <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = s.Close(ctx) // times out on held
+	if err := <-opened; !errors.Is(err, server.ErrServerClosed) {
+		t.Fatalf("waiting OpenDocument: %v", err)
+	}
+	if _, err := held.Apply(context.Background(), pushServer("late")); !errors.Is(err, server.ErrServerClosed) {
+		t.Fatalf("Apply on a Document after Close: %v", err)
+	}
+	held.Close()
+	// The pending CloseDocument finishes the held document's eviction now.
+	deadline := time.Now().Add(2 * time.Second)
+	for s.Stats().Documents != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("after Close: %+v", s.Stats())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestCloseDocument_RacesConnections: forced closes while clients keep
+// connecting, editing and leaving (run under the race detector): no hang,
+// and each close returns.
+func TestCloseDocument_RacesConnections(t *testing.T) {
+	url, s := startTestServer(t, server.Options{Store: memstore.New()})
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for k := 0; k < 3; k++ {
+		wg.Add(1)
+		go func(k int) {
+			defer wg.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				c, _, err := websocket.Dial(ctx, url+"/doc", nil)
+				if err == nil {
+					_ = c.Write(ctx, websocket.MessageBinary, syncpkg.EncodeSyncStep1([]byte{0}))
+					_, _, _ = c.Read(ctx)
+					_ = c.Close(websocket.StatusNormalClosure, "")
+				}
+				cancel()
+			}
+		}(k)
+	}
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := s.CloseDocument(ctx, "doc", true)
+		cancel()
+		if err != nil && !errors.Is(err, server.ErrDocumentNotFound) {
+			t.Fatalf("close %d: %v", i, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(stop)
+	wg.Wait()
+}
+
+// TestCloseDocument_HocuspocusReattach: after CloseDocument closed a
+// Hocuspocus document, the provider attaching the key again gets a fresh
+// admission on the reloaded document, which receives server writes.
+func TestCloseDocument_HocuspocusReattach(t *testing.T) {
+	store := memstore.New()
+	url, s := startTestServer(t, server.Options{Store: store})
+	hp := hpDial(t, url)
+	hp.auth(t, "doc", "", syncpkg.ScopeReadWrite)
+	hpSync(t, hp, "doc")
+	if _, err := s.Apply(context.Background(), "doc", pushServer("before")); err != nil {
+		t.Fatal(err)
+	}
+	hp.want(t, "doc", syncpkg.MessageSync)
+	if err := s.CloseDocument(context.Background(), "doc", true); err != nil {
+		t.Fatal(err)
+	}
+	hp.want(t, "doc", syncpkg.MessageClose)
+	hp.auth(t, "doc", "", syncpkg.ScopeReadWrite)
+	if got := hpSync(t, hp, "doc"); fmt.Sprint(got) != "[before]" {
+		t.Fatalf("reattached sync %v", got)
+	}
+	if st := s.Stats(); st.Documents != 1 || st.Connections != 1 {
+		t.Fatalf("stats %+v", st)
+	}
+	if _, err := s.Apply(context.Background(), "doc", pushServer("after")); err != nil {
+		t.Fatal(err)
+	}
+	if f := hp.want(t, "doc", syncpkg.MessageSync); !containsAll(updateValues(t, f.Payload), "after") {
+		t.Fatalf("reattached key got %+v", f)
+	}
+}
