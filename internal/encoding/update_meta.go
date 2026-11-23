@@ -3,6 +3,7 @@ package encoding
 import (
 	"errors"
 
+	"github.com/Deln0r/ygo/internal/block"
 	"github.com/Deln0r/ygo/internal/lib0"
 )
 
@@ -21,24 +22,46 @@ func ConvertUpdateBytes(update []byte, fromV2, toV2 bool, floor int) ([]byte, er
 		if b.Kind == WireBlockItem && b.Item == nil {
 			return nil, errors.New("encoding: conversion of an update holding content ygo cannot write")
 		}
+		if fromV2 && !toV2 && b.Kind == WireBlockItem {
+			negativeClocksAsLib0(b.Item)
+		}
 	}
 	return writeRawUpdate(raw.stream, raw.ds, toV2, floor, "the converted update")
 }
 
-// decodeRawStructs reads an update's structs in wire order and stops before
-// its delete set, which yjs's state vector and meta of an update never read.
-func decodeRawStructs(buf []byte, v2 bool, floor int) ([]Block, error) {
-	raw := &rawUpdate{structsOnly: true}
-	if v2 {
-		if _, err := decodeUpdateV2Into(buf, len(buf), max(len(buf), floor), raw); err != nil {
-			return nil, err
+// negativeClocksAsLib0 gives the clocks of it's origins and parent ID, as V2
+// read them, the value lib0's writeVarUint writes for them in V1. V2 writes
+// those clocks as signed differences, so a malformed update can make one
+// negative (the decoder keeps it as its two's complement); writeVarUint
+// writes a negative number as the single byte num & 127, which a V1 reader
+// reads as that value.
+func negativeClocksAsLib0(it *block.Item) {
+	fix := func(id *block.ID) *block.ID {
+		if id == nil || id.Clock < 1<<63 {
+			return id
 		}
-		return raw.stream, nil
+		c := *id
+		c.Clock &= 0x7f
+		return &c
 	}
-	if _, _, err := decodeUpdateInto(buf, strictStrings, raw); err != nil {
-		return nil, err
+	it.Origin = fix(it.Origin)
+	it.RightOrigin = fix(it.RightOrigin)
+	if it.Parent.Kind == block.ParentID {
+		it.Parent.ID = *fix(&it.Parent.ID)
 	}
-	return raw.stream, nil
+}
+
+// visitStructs hands visit every struct of an update in wire order, keeping
+// none, and stops before the delete set, which yjs's state vector and meta
+// of an update never read.
+func visitStructs(buf []byte, v2 bool, floor int, visit func(*Block)) error {
+	raw := &rawUpdate{structsOnly: true, visit: visit}
+	if v2 {
+		_, err := decodeUpdateV2Into(buf, len(buf), max(len(buf), floor), raw)
+		return err
+	}
+	_, _, err := decodeUpdateInto(buf, strictStrings, raw)
+	return err
 }
 
 // StateVectorFromUpdateBytes is yjs encodeStateVectorFromUpdate (v2 false)
@@ -49,46 +72,49 @@ func decodeRawStructs(buf []byte, v2 bool, floor int) ([]Block, error) {
 // the count first. As in yjs, the first struct's clock is taken before it is
 // checked for a Skip, and no gap between sections of one client is checked.
 func StateVectorFromUpdateBytes(update []byte, v2 bool, floor int) ([]byte, error) {
-	st, err := decodeRawStructs(update, v2, floor)
-	if err != nil {
-		return nil, err
+	var (
+		body                  []byte
+		pairs                 uint64
+		started, stop         bool
+		currClient, currClock uint64
+	)
+	flush := func() {
+		if currClock != 0 {
+			body = lib0.WriteVarUint(body, currClient)
+			body = lib0.WriteVarUint(body, currClock)
+			pairs++
+		}
 	}
-	if len(st) == 0 {
-		return []byte{0}, nil
-	}
-	var pairs []uint64
-	first := st[0]
-	currClient := blockClient(&first)
-	stop := blockStartClock(first) != 0
-	var currClock uint64
-	if !stop {
-		currClock = blockStartClock(first) + blockLen(first)
-	}
-	for i := range st {
-		b := &st[i]
-		if c := blockClient(b); c != currClient {
-			if currClock != 0 {
-				pairs = append(pairs, currClient, currClock)
+	err := visitStructs(update, v2, floor, func(b *Block) {
+		c, start := blockClient(b), blockStartClock(*b)
+		if !started {
+			started = true
+			currClient = c
+			stop = start != 0
+			if !stop {
+				currClock = start + blockLen(*b)
 			}
+		}
+		if c != currClient {
+			flush()
 			currClient = c
 			currClock = 0
-			stop = blockStartClock(*b) != 0
+			stop = start != 0
 		}
 		if b.Kind == WireBlockSkip {
 			stop = true
 		}
 		if !stop {
-			currClock = blockStartClock(*b) + blockLen(*b)
+			currClock = start + blockLen(*b)
 		}
+	})
+	if err != nil {
+		return nil, err
 	}
-	if currClock != 0 {
-		pairs = append(pairs, currClient, currClock)
+	if started {
+		flush()
 	}
-	out := lib0.WriteVarUint(nil, uint64(len(pairs)/2))
-	for _, v := range pairs {
-		out = lib0.WriteVarUint(out, v)
-	}
-	return out, nil
+	return append(lib0.WriteVarUint(nil, pairs), body...), nil
 }
 
 // UpdateMeta is yjs parseUpdateMeta's result: per client, the clock its
@@ -103,25 +129,29 @@ type UpdateMeta struct {
 // its last struct ends at, Skips included.
 func ParseUpdateMetaBytes(update []byte, v2 bool, floor int) (UpdateMeta, error) {
 	meta := UpdateMeta{From: map[uint64]uint64{}, To: map[uint64]uint64{}}
-	st, err := decodeRawStructs(update, v2, floor)
+	var (
+		started               bool
+		currClient, currClock uint64
+	)
+	err := visitStructs(update, v2, floor, func(b *Block) {
+		c, start := blockClient(b), blockStartClock(*b)
+		if !started {
+			started = true
+			currClient = c
+			meta.From[c] = start
+		}
+		if c != currClient {
+			meta.To[currClient] = currClock
+			meta.From[c] = start
+			currClient = c
+		}
+		currClock = start + blockLen(*b)
+	})
 	if err != nil {
 		return UpdateMeta{}, err
 	}
-	if len(st) == 0 {
-		return meta, nil
+	if started {
+		meta.To[currClient] = currClock
 	}
-	currClient := blockClient(&st[0])
-	currClock := blockStartClock(st[0])
-	meta.From[currClient] = currClock
-	for i := range st {
-		b := &st[i]
-		if c := blockClient(b); c != currClient {
-			meta.To[currClient] = currClock
-			meta.From[c] = blockStartClock(*b)
-			currClient = c
-		}
-		currClock = blockStartClock(*b) + blockLen(*b)
-	}
-	meta.To[currClient] = currClock
 	return meta, nil
 }

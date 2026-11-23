@@ -392,7 +392,14 @@ export function run(s) {
             for (const i of order(idx, st)) {
               from.sent[st.to || 0].add(i);
               let u = st.v2 ? from.log[i].v2 : from.log[i].v1;
-              if (st.conv) u = st.v2 ? Y.convertUpdateFormatV1ToV2(from.log[i].v1) : Y.convertUpdateFormatV2ToV1(from.log[i].v2);
+              if (st.conv) {
+                u = st.v2 ? Y.convertUpdateFormatV1ToV2(from.log[i].v1) : Y.convertUpdateFormatV2ToV1(from.log[i].v2);
+                // As run.go: each conversion's bytes, state vector and meta.
+                const [sv, meta] = sentMeta(u, st.v2);
+                out.sent = (out.sent || "") + toHex(u) + ",";
+                out.sentSV = (out.sentSV || "") + sv + ",";
+                out.sentMeta = (out.sentMeta || "") + meta + ",";
+              }
               apply(to.doc, u, st.v2);
             }
           } catch (e) { out.err = "error"; }

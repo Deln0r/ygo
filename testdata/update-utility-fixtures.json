@@ -66878,6 +66878,216 @@
    }
   },
   {
+   "name": "shared type refs 0 and 6",
+   "v2": false,
+   "input": "010201000701017400070101740600",
+   "convert": {
+    "out": "000001010000010705027474410001010200060001020000"
+   },
+   "sv": {
+    "out": "010102"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "shared type refs 0 and 6",
+   "v2": true,
+   "input": "000001010000010705027474410001010200060001020000",
+   "convert": {
+    "out": "010201000701017400070101740600"
+   },
+   "sv": {
+    "out": "010102"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "shared type ref 7",
+   "v2": false,
+   "input": "01010100070101740700",
+   "convert": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "sv": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "meta": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   }
+  },
+  {
+   "name": "shared type ref 7",
+   "v2": true,
+   "input": "000001010000010703017401010101070001010000",
+   "convert": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "sv": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "meta": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   }
+  },
+  {
+   "name": "shared type ref 256",
+   "v2": false,
+   "input": "0101010007010174800200",
+   "convert": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "sv": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "meta": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   }
+  },
+  {
+   "name": "shared type ref 256",
+   "v2": true,
+   "input": "00000101000001070301740101010280040001010000",
+   "convert": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "sv": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   },
+   "meta": {
+    "err": "typeRefs[decoder.readTypeRef(...)] is not a function"
+   }
+  },
+  {
+   "name": "an empty struct at clock 2^53",
+   "v2": false,
+   "input": "0103010000ffffffffffffff0f0001000000",
+   "convert": {
+    "out": "0000010100000100010000000abfffffffffffff1f010001030000"
+   },
+   "sv": {
+    "out": "01018080808080808010"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      9007199254740992
+     ]
+    ]
+   },
+   "applied_sv": "01018080808080808010"
+  },
+  {
+   "name": "an empty struct at clock 2^53",
+   "v2": true,
+   "input": "0000010100000100010000000abfffffffffffff1f010001030000",
+   "convert": {
+    "out": "0103010000ffffffffffffff0f0001000000"
+   },
+   "sv": {
+    "out": "01018080808080808010"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      9007199254740992
+     ]
+    ]
+   },
+   "applied_sv": "01018080808080808010"
+  },
+  {
+   "name": "a section of an empty struct starting at 2^53",
+   "v2": false,
+   "input": "0201010000808080808080801001018080808080808010000000",
+   "convert": {
+    "out": "0000010100000100010000000980808080808080200001020000"
+   },
+   "sv": {
+    "out": "01018080808080808010"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      9007199254740992
+     ]
+    ]
+   },
+   "applied_sv": "00"
+  },
+  {
+   "name": "a section of an empty struct starting at 2^53",
+   "v2": true,
+   "input": "000002410000000100010000000980808080808080200002010001808080808080801000",
+   "convert": {
+    "out": "01020100008080808080808010000000"
+   },
+   "sv": {
+    "out": "01018080808080808010"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      9007199254740992
+     ]
+    ]
+   },
+   "applied_sv": "00"
+  },
+  {
    "name": "a zero-length delete range",
    "v2": false,
    "input": "01010100000401010203000001",
@@ -66915,6 +67125,97 @@
    "meta": {
     "from": [],
     "to": []
+   }
+  },
+  {
+   "name": "a V2 feature flag of 1",
+   "v2": true,
+   "input": "010001010000010001000000010101010000",
+   "convert": {
+    "out": "01010100000100"
+   },
+   "sv": {
+    "out": "010101"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an overlong V2 feature flag",
+   "v2": true,
+   "input": "80000001010000010001000000010101010000",
+   "convert": {
+    "out": "01010100000100"
+   },
+   "sv": {
+    "out": "010101"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "negative V2 origin clocks",
+   "v2": true,
+   "input": "000006410002014300084248f6ffffffff7f000184060361626341010000000301000100010000",
+   "convert": {
+    "out": "0301010084017f016101020084017b0162010300840300016300"
+   },
+   "sv": {
+    "out": "03010102010301"
+   },
+   "meta": {
+    "from": [
+     [
+      1,
+      0
+     ],
+     [
+      2,
+      0
+     ],
+     [
+      3,
+      0
+     ]
+    ],
+    "to": [
+     [
+      1,
+      1
+     ],
+     [
+      2,
+      1
+     ],
+     [
+      3,
+      1
+     ]
+    ]
    }
   }
  ]

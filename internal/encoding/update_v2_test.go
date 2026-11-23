@@ -261,13 +261,13 @@ func TestUpdateV2_EncodeDiff_Incremental(t *testing.T) {
 	}
 }
 
-// TestUpdateV2_DecodeUpdateV2_BadFlag verifies we reject V2 bytes
-// whose leading feature flag isn't 0x00.
-func TestUpdateV2_DecodeUpdateV2_BadFlag(t *testing.T) {
+// TestUpdateV2_DecodeUpdateV2_FlagWithoutColumns: a feature flag (read and
+// ignored, as yjs does) with no columns after it does not decode.
+func TestUpdateV2_DecodeUpdateV2_FlagWithoutColumns(t *testing.T) {
 	bad := []byte{0xff, 0x00}
 	_, err := DecodeUpdateV2(bad)
 	if err == nil {
-		t.Fatal("expected error on bad feature flag")
+		t.Fatal("expected an error for a flag without columns")
 	}
 }
 

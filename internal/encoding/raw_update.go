@@ -23,6 +23,10 @@ type rawUpdate struct {
 	// structsOnly stops the decoders after the structs: yjs's state vector
 	// and meta of an update read no delete set.
 	structsOnly bool
+	// visit, when set, is handed each struct as it is read, and no struct
+	// is kept (neither stream nor Update.Blocks): the state vector and meta
+	// of an update hold only their answer, as yjs's lazy reader does.
+	visit func(*Block)
 }
 
 // rawDeleteSet is yjs readDeleteSet's result: the clients in the order they

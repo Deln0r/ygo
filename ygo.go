@@ -774,22 +774,28 @@ func mergeUpdatesV2(updates [][]byte, floor int) ([]byte, error) {
 }
 
 // EncodeStateVectorFromUpdate is yjs encodeStateVectorFromUpdate, byte for
-// byte: the state vector a V1 update advances a document to, from the
-// update's structs alone (its delete set is not read). For each run of one
-// client in wire order it counts from clock 0 until a Skip, and writes
-// (client, clock) when the clock is not 0, clients in the order met; a
-// client that starts above 0 is left out, so the result is a safe remote
-// state vector for DiffUpdate. As in yjs, a client whose structs come in two
-// separated runs is written twice (a merged update can be so), and a Skip as
-// the very first struct still counts. Use it to index or diff stored updates
-// without loading a document.
+// byte, from a V1 update's structs alone, read one at a time and not kept
+// (its delete set is not read). For each run of one client in wire order it
+// counts from clock 0 until a Skip, and writes (client, clock) when the
+// clock is not 0, clients in the order met; a client whose run starts above
+// 0 is left out. As in yjs, a client whose structs come in two separated
+// runs is written twice (a merged update can be so), and a Skip as the very
+// first struct still counts its length: the result is not always the state
+// applying the update gives a document, so do not send it as a peer's state
+// vector (to DiffUpdate) without knowing the update starts each client at 0
+// with no Skip. Content is decoded as ApplyUpdate decodes it, so legacy
+// ContentJSON is refused (yjs reads it), and clients and clocks above 2^53
+// are kept exact (yjs rounds them). Use it to index stored updates without
+// loading a document.
 func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
 	return encoding.StateVectorFromUpdateBytes(update, false, 0)
 }
 
 // EncodeStateVectorFromUpdateV2 is EncodeStateVectorFromUpdate for a V2
 // update (yjs encodeStateVectorFromUpdateV2); the state vector is written in
-// the same V1 encoding. The update is read within V2StructFloor's budget.
+// the same V1 encoding. The update is read within V2StructFloor's budget,
+// and a string column split inside a surrogate pair is refused (yjs reads
+// it).
 func EncodeStateVectorFromUpdateV2(update []byte) ([]byte, error) {
 	return encoding.StateVectorFromUpdateBytes(update, true, encoding.V2StructFloor)
 }
@@ -801,7 +807,9 @@ type UpdateMeta = encoding.UpdateMeta
 // ParseUpdateMeta is yjs parseUpdateMeta: for each run of one client in a
 // V1 update's structs (wire order, Skips included), From holds the clock it
 // starts at and To the clock it ends at; a later run of a client overwrites
-// both. The delete set is not read.
+// both. The structs are read one at a time and not kept, the delete set is
+// not read, and content is decoded as EncodeStateVectorFromUpdate decodes
+// it.
 func ParseUpdateMeta(update []byte) (UpdateMeta, error) {
 	return encoding.ParseUpdateMetaBytes(update, false, 0)
 }

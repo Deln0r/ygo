@@ -333,7 +333,7 @@ var ErrUpdateTooDense = errors.New("encoding: V2 update expands past max(its len
 // (a snapshot restored through V2), whose counts are exact: no bound on
 // the number of clients or structs.
 func DecodeOwnUpdateV2(buf []byte) (*Update, error) {
-	return decodeUpdateV2(buf, math.MaxInt, math.MaxInt)
+	return decodeUpdateV2With(buf, math.MaxInt, math.MaxInt, nil, true)
 }
 
 // decodeUpdateV2 decodes buf with at most maxClients client sections and
@@ -348,6 +348,12 @@ func decodeUpdateV2(buf []byte, maxClients, structBudget int) (*Update, error) {
 // decodeUpdateV2Into is decodeUpdateV2 recording the update as yjs's lazy
 // reader sees it, given raw (decodeUpdateInto).
 func decodeUpdateV2Into(buf []byte, maxClients, structBudget int, raw *rawUpdate) (*Update, error) {
+	return decodeUpdateV2With(buf, maxClients, structBudget, raw, false)
+}
+
+// decodeUpdateV2With is decodeUpdateV2Into; own marks bytes ygo encoded
+// from a document (DecoderV2.ownBytes).
+func decodeUpdateV2With(buf []byte, maxClients, structBudget int, raw *rawUpdate, own bool) (*Update, error) {
 	total := maxClients
 
 	dec, err := NewDecoderV2(buf)
@@ -355,6 +361,7 @@ func decodeUpdateV2Into(buf []byte, maxClients, structBudget int, raw *rawUpdate
 		return nil, fmt.Errorf("DecodeUpdateV2 header: %w", err)
 	}
 	dec.keyBudget = structBudget
+	dec.ownBytes = own
 
 	clientCount, err := dec.ReadVarUint()
 	if err != nil {
@@ -382,11 +389,15 @@ func decodeUpdateV2Into(buf []byte, maxClients, structBudget int, raw *rawUpdate
 		if err != nil {
 			return nil, fmt.Errorf("DecodeUpdateV2 clock start: %w", err)
 		}
-		if clock > MaxClock {
-			return nil, fmt.Errorf("DecodeUpdateV2 clock start: %w", checkClockRange(clock, 0))
+		if err := checkClockRange(clock, 0); err != nil {
+			return nil, fmt.Errorf("DecodeUpdateV2 clock start: %w", err)
 		}
 
-		blocks := make([]Block, 0, min(blockCount, uint64(len(buf))))
+		visit := raw != nil && raw.visit != nil
+		var blocks []Block
+		if !visit {
+			blocks = make([]Block, 0, min(blockCount, uint64(len(buf))))
+		}
 		for j := uint64(0); j < blockCount; j++ {
 			b, err := decodeBlockV2(dec, block.ID{Client: client, Clock: clock})
 			if err != nil {
@@ -395,12 +406,18 @@ func decodeUpdateV2Into(buf []byte, maxClients, structBudget int, raw *rawUpdate
 			if err := checkClockRange(clock, b.length()); err != nil {
 				return nil, fmt.Errorf("DecodeUpdateV2 block %d: %w", j, err)
 			}
-			blocks = append(blocks, b)
+			if visit {
+				raw.visit(&b)
+			} else {
+				blocks = append(blocks, b)
+			}
 			clock += b.length()
 		}
-		u.Blocks[client] = blocks
-		if raw != nil {
-			raw.stream = append(raw.stream, blocks...)
+		if !visit {
+			u.Blocks[client] = blocks
+			if raw != nil {
+				raw.stream = append(raw.stream, blocks...)
+			}
 		}
 	}
 
@@ -582,6 +599,9 @@ func DecodeContentV2(dec *DecoderV2, refNum uint8) (block.Content, error) {
 		typeRefU, err := dec.ReadTypeRef()
 		if err != nil {
 			return block.Content{}, fmt.Errorf("DecodeContentV2 type ref: %w", err)
+		}
+		if err := checkTypeRef(typeRefU, dec.ownBytes); err != nil {
+			return block.Content{}, fmt.Errorf("DecodeContentV2: %w", err)
 		}
 		typeRef := block.TypeRef(typeRefU)
 		br := &block.Branch{TypeRef: typeRef}

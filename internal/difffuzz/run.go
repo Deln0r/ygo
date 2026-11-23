@@ -25,9 +25,11 @@ type StepTrace struct {
 	Skip   bool   `json:"skip,omitempty"`
 	Err    string `json:"err,omitempty"`
 	Result *bool  `json:"result,omitempty"`
-	Sent   string `json:"sent,omitempty"`
+	// Sent is the update a sync, merge or diff sends, or each converted
+	// update of a deliver step, each followed by a comma.
+	Sent string `json:"sent,omitempty"`
 	// SentSV and SentMeta are EncodeStateVectorFromUpdate(V2) and
-	// ParseUpdateMeta(V2) of the sent bytes.
+	// ParseUpdateMeta(V2) of the sent bytes (of each, as Sent).
 	SentSV   string      `json:"sentSV,omitempty"`
 	SentMeta string      `json:"sentMeta,omitempty"`
 	Events   []Event     `json:"events,omitempty"`
@@ -252,6 +254,12 @@ func (r *runner) step(st Step) (out StepTrace) {
 					out.Err = "error"
 					break
 				}
+				// Each conversion's bytes, state vector and meta, so a
+				// difference the receiver would normalise still shows.
+				sv, meta := sentMeta(u, st.V2)
+				out.Sent += hex.EncodeToString(u) + ","
+				out.SentSV += sv + ","
+				out.SentMeta += meta + ","
 			}
 			if err := apply(to.doc, u, st.V2); err != nil {
 				out.Err = "error"

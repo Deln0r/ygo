@@ -9,7 +9,9 @@
 //     sections, adjacent sections with a gap or going backwards, runs not
 //     starting at 0, Skips first and later, zero-length structs, delete-only
 //     updates, updates without a delete set, trailing bytes, repeated,
-//     overlapping and zero-length delete ranges, items with origins.
+//     overlapping and zero-length delete ranges, items with origins,
+//     unknown shared type refs, nonzero and overlong V2 feature flags, a
+//     negative V2 origin clock, empty structs at clock 2^53.
 // A yjs error is recorded as {"err": message}. The Go test
 // (update_utility_fixture_test.go) requires the same bytes from ygo.
 //
@@ -74,6 +76,7 @@ const skip = (len) => ({ kind: "skip", len });
 const str = (text) => ({ kind: "str", text });
 const strAfter = (text, client, clock) => ({ kind: "str", text, origin: [client, clock] });
 const anyKey = (key, value) => ({ kind: "any", key, value });
+const type = (ref) => ({ kind: "type", ref });
 
 function writeV1(sections, ds, tail = []) {
   const e = encoding.createEncoder();
@@ -105,6 +108,12 @@ function writeV1(sections, ds, tail = []) {
           encoding.writeVarString(e, st.key);
           encoding.writeVarUint(e, 1);
           encoding.writeAny(e, st.value);
+          break;
+        case "type":
+          encoding.writeUint8(e, 7);
+          encoding.writeVarUint(e, 1);
+          encoding.writeVarString(e, "t");
+          encoding.writeVarUint(e, st.ref);
           break;
       }
     }
@@ -154,6 +163,12 @@ function writeV2(sections, ds, tail = []) {
           enc.writeLen(1);
           enc.writeAny(st.value);
           break;
+        case "type":
+          enc.writeInfo(7);
+          enc.writeParentInfo(true);
+          enc.writeString("t");
+          enc.writeTypeRef(st.ref);
+          break;
       }
     }
   }
@@ -192,6 +207,11 @@ const cases = [
   ["delete ranges repeated and overlapping", [sec(1, 0, gc(9))], [{ client: 1, ranges: [[5, 2], [1, 3]] }, { client: 1, ranges: [[2, 2]] }]],
   ["items with and without origins", [sec(4, 0, str("ab"), strAfter("c", 4, 1), anyKey("k", 1), anyKey("k2", "v"))], []],
   ["two clients with items", [sec(9, 0, str("x"), gc(1)), sec(4, 0, strAfter("y", 9, 0))], [{ client: 9, ranges: [[1, 1]] }]],
+  ["shared type refs 0 and 6", [sec(1, 0, type(0), type(6))], []],
+  ["shared type ref 7", [sec(1, 0, type(7))], []],
+  ["shared type ref 256", [sec(1, 0, type(256))], []],
+  ["an empty struct at clock 2^53", [sec(1, 0, gc(2 ** 53 - 1), gc(1), gc(0))], []],
+  ["a section of an empty struct starting at 2^53", [sec(1, 0, gc(2 ** 53)), sec(1, 2 ** 53, gc(0))], []],
 ];
 const scenarios = [];
 for (const [name, sections, ds, tail] of cases) {
@@ -207,6 +227,25 @@ for (const [name, sections, ds, tail] of cases) {
 }
 // Nothing but a 0 byte: no structs and no delete set.
 scenarios.push({ name: "a single 0 byte", v2: false, input: "00", ...v1Results(new Uint8Array([0])) });
+// V2 only: the feature flag, which yjs reads as a varuint and ignores, as 1
+// and as an overlong 0; an origin clock that the signed clock column makes
+// negative (V1 cannot write one).
+{
+  const base = writeV2([sec(1, 0, gc(1))], []);
+  const flag1 = new Uint8Array([1, ...base.slice(1)]);
+  scenarios.push({ name: "a V2 feature flag of 1", v2: true, input: toHex(flag1), ...v2Results(flag1) });
+  const overlong = new Uint8Array([0x80, 0x00, ...base.slice(1)]);
+  scenarios.push({ name: "an overlong V2 feature flag", v2: true, input: toHex(overlong), ...v2Results(overlong) });
+  const neg = writeV2([sec(1, 0, strAfter("a", 1, -1)), sec(2, 0, strAfter("b", 1, -5)), sec(3, 0, strAfter("c", 3, -(2 ** 40)))], []);
+  scenarios.push({ name: "negative V2 origin clocks", v2: true, input: toHex(neg), ...v2Results(neg) });
+}
+// What a document holds after applying each of these, as yjs applies them.
+for (const sc of scenarios) {
+  if (!sc.name.includes("2^53")) continue;
+  const doc = new Y.Doc();
+  (sc.v2 ? Y.applyUpdateV2 : Y.applyUpdate)(doc, fromHex(sc.input));
+  sc.applied_sv = toHex(Y.encodeStateVector(doc));
+}
 
 writeFileSync(outPath, JSON.stringify({ generator: "gen-update-utilities.mjs (yjs 13.6.33)", derived, scenarios }, null, 1) + "\n");
 console.log(`wrote ${scenarios.length} scenarios and ${derived.length} derived cases to ${outPath}`);

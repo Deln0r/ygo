@@ -26,6 +26,9 @@ type updateUtilityFixtures struct {
 	Scenarios []struct {
 		Name  string `json:"name"`
 		Input string `json:"input"`
+		// AppliedSV is the state vector of a document yjs applied the
+		// input to (only for some scenarios).
+		AppliedSV string `json:"applied_sv"`
 		utilityResults
 	} `json:"scenarios"`
 }
@@ -93,6 +96,19 @@ func TestUpdateUtilities_Fixtures(t *testing.T) {
 	}
 	for _, sc := range fx.Scenarios {
 		checkUtilities(t, sc.Name, mustHex(t, sc.Input), sc.utilityResults, false)
+		if sc.AppliedSV == "" {
+			continue
+		}
+		d := ygo.NewDoc()
+		apply := ygo.ApplyUpdate
+		if sc.V2 {
+			apply = ygo.ApplyUpdateV2
+		}
+		if err := apply(d, mustHex(t, sc.Input)); err != nil {
+			t.Errorf("%s: apply: %v", sc.Name, err)
+		} else if got := ygo.EncodeStateVector(d); !bytes.Equal(got, mustHex(t, sc.AppliedSV)) {
+			t.Errorf("%s: applied state vector %x, want %s", sc.Name, got, sc.AppliedSV)
+		}
 	}
 }
 
@@ -117,10 +133,22 @@ func checkUtilities(t *testing.T, name string, input []byte, want utilityResults
 	case !bytes.Equal(got, mustHex(t, want.Convert.Out)):
 		t.Errorf("%s: conversion\n got  %x\n want %s", label, got, want.Convert.Out)
 	}
-	if gotSV, err := sv(input); err != nil || !bytes.Equal(gotSV, mustHex(t, want.SV.Out)) {
+	gotSV, err := sv(input)
+	switch {
+	case want.SV.Err != "":
+		if err == nil {
+			t.Errorf("%s: state vector %x; yjs throws %q", label, gotSV, want.SV.Err)
+		}
+	case err != nil || !bytes.Equal(gotSV, mustHex(t, want.SV.Out)):
 		t.Errorf("%s: state vector %x, %v; want %s", label, gotSV, err, want.SV.Out)
 	}
 	m, err := meta(input)
+	if want.Meta.Err != "" {
+		if err == nil {
+			t.Errorf("%s: meta %v; yjs throws %q", label, m, want.Meta.Err)
+		}
+		return
+	}
 	if err != nil {
 		t.Errorf("%s: meta: %v", label, err)
 		return

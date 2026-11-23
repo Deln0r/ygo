@@ -40,10 +40,21 @@ func TestV2_EmptyEncoder_ProducesFeatureFlagAndEmptyColumns(t *testing.T) {
 	_ = dec
 }
 
-func TestV2_FeatureFlag_NonZeroRejected(t *testing.T) {
-	bad := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	if _, err := NewDecoderV2(bad); err == nil {
-		t.Error("non-zero feature flag should error")
+// TestV2_FeatureFlag_ReadAndIgnored: yjs's UpdateDecoderV2 reads the
+// feature flag as a varuint and ignores it, so a nonzero or overlong flag
+// decodes; a flag cut short does not.
+func TestV2_FeatureFlag_ReadAndIgnored(t *testing.T) {
+	empty := NewEncoderV2().Bytes()
+	if empty[0] != 0 {
+		t.Fatalf("the encoder's flag is %#x", empty[0])
+	}
+	for _, flag := range [][]byte{{0x01}, {0x80, 0x00}, {0xff, 0x7f}} {
+		if _, err := NewDecoderV2(append(append([]byte(nil), flag...), empty[1:]...)); err != nil {
+			t.Errorf("flag %x: %v", flag, err)
+		}
+	}
+	if _, err := NewDecoderV2([]byte{0x80}); err == nil {
+		t.Error("a flag cut short should error")
 	}
 }
 
@@ -198,7 +209,7 @@ func TestV2_TypeRef_Column(t *testing.T) {
 	wire := enc.Bytes()
 
 	dec, _ := NewDecoderV2(wire)
-	for i, want := range []uint8{0, 1, 2, 3} {
+	for i, want := range []uint64{0, 1, 2, 3} {
 		got, err := dec.ReadTypeRef()
 		if err != nil {
 			t.Fatalf("read %d: %v", i, err)

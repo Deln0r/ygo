@@ -320,11 +320,12 @@ const MaxClock = uint64(1)<<53 - 1
 // would place a clock beyond what the reference implementation can
 // represent. The last clock is MaxClock, so a run may end at MaxClock+1
 // (2^53, exact in a JavaScript number): yjs reads such a run, holds 2^53 in
-// its state vector and writes the run back unchanged. A run past it, yjs
-// reads with its end rounded. Overflow-safe: the sum is checked without
-// computing it.
+// its state vector and writes the run back unchanged; a run of no clocks may
+// start there too (an empty struct or section after such a run). A run past
+// it, yjs reads with its end rounded. Overflow-safe: the sum is checked
+// without computing it.
 func checkClockRange(start, length uint64) error {
-	if start > MaxClock || length > MaxClock+1 || start > MaxClock+1-length {
+	if start > MaxClock+1 || length > MaxClock+1 || start > MaxClock+1-length {
 		return fmt.Errorf("%w: clock range %d+%d exceeds the %d-clock space the wire format can represent", lib0.ErrTruncated, start, length, MaxClock)
 	}
 	return nil
@@ -386,7 +387,11 @@ func decodeUpdateInto(buf []byte, strs stringMode, raw *rawUpdate) (*Update, []b
 		if err := checkDecodeCount(blockCount, len(buf)); err != nil {
 			return nil, buf, err
 		}
-		blocks := make([]Block, 0, blockCount)
+		visit := raw != nil && raw.visit != nil
+		var blocks []Block
+		if !visit {
+			blocks = make([]Block, 0, blockCount)
+		}
 		for j := uint64(0); j < blockCount; j++ {
 			b, tail, err := decodeBlock(buf, block.ID{Client: client, Clock: clock}, strs, &orders)
 			if err != nil {
@@ -397,13 +402,19 @@ func decodeUpdateInto(buf []byte, strs stringMode, raw *rawUpdate) (*Update, []b
 			if err := checkClockRange(clock, b.length()); err != nil {
 				return nil, buf, err
 			}
-			blocks = append(blocks, b)
+			if visit {
+				raw.visit(&b)
+			} else {
+				blocks = append(blocks, b)
+			}
 			clock += b.length()
 			buf = tail
 		}
-		u.Blocks[client] = blocks
-		if raw != nil {
-			raw.stream = append(raw.stream, blocks...)
+		if !visit {
+			u.Blocks[client] = blocks
+			if raw != nil {
+				raw.stream = append(raw.stream, blocks...)
+			}
 		}
 	}
 
@@ -431,15 +442,6 @@ func (b Block) length() uint64 {
 		return b.Item.Len
 	}
 	return b.Len
-}
-
-// startClock is the block's first clock. For an Item the ID lives on the
-// parsed Item; GC / Skip records carry it on the Block directly.
-func (b Block) startClock() uint64 {
-	if b.Kind == WireBlockItem {
-		return b.Item.ID.Clock
-	}
-	return b.ID.Clock
 }
 
 // decodeBlock parses one block record at the given starting ID.

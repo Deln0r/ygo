@@ -2,7 +2,9 @@ package encoding
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/Deln0r/ygo/internal/anyval"
@@ -217,6 +219,9 @@ func decodeContent(buf []byte, refNum uint8, strs stringMode, t *orderTable) (bl
 			return block.Content{}, buf, err
 		}
 		buf = buf[n:]
+		if err := checkTypeRef(typeRefU, strs == storedStrings); err != nil {
+			return block.Content{}, buf, err
+		}
 		typeRef := block.TypeRef(typeRefU)
 		br := &block.Branch{TypeRef: typeRef}
 		switch typeRef {
@@ -276,4 +281,20 @@ func (a *anyOrders) orders(t *orderTable) *block.Orders {
 		return t.single(a.first)
 	}
 	return block.OrdersFor(a.list)
+}
+
+// ErrUnknownTypeRef is returned for a shared type ref past the seven yjs
+// reads (array, map, text, XML element, fragment, hook and text): yjs's
+// readContentType throws there.
+var ErrUnknownTypeRef = errors.New("encoding: unknown shared type ref")
+
+// checkTypeRef refuses a type ref yjs cannot read. Bytes ygo itself stored
+// (lenient) keep the refs 7 to 255 a release before 1.53.0 accepted, so a
+// document holding one still loads; a ref past 255 was never stored (it was
+// read as its low byte).
+func checkTypeRef(ref uint64, lenient bool) error {
+	if ref <= uint64(block.TypeRefXmlText) || (lenient && ref <= math.MaxUint8) {
+		return nil
+	}
+	return fmt.Errorf("%w: %d", ErrUnknownTypeRef, ref)
 }

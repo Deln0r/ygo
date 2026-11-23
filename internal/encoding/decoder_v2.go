@@ -1,7 +1,6 @@
 package encoding
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/Deln0r/ygo/internal/block"
@@ -25,6 +24,10 @@ import (
 type DecoderV2 struct {
 	rest    []byte
 	restPos int
+
+	// ownBytes marks bytes ygo itself encoded from a document, which may
+	// hold a shared type ref a release before 1.53.0 accepted (7 to 255).
+	ownBytes bool
 
 	keyClock   *lib0.IntDiffOptRleDecoder
 	client     *lib0.UintOptRleDecoder
@@ -52,11 +55,6 @@ type DecoderV2 struct {
 	orders orderTable
 }
 
-// ErrV2BadFeatureFlag is returned when the leading byte isn't
-// the expected 0x00. Indicates wire-format drift (a future V3?)
-// or that the bytes aren't actually V2 (could be V1 or junk).
-var ErrV2BadFeatureFlag = errors.New("encoding: V2 update has non-zero feature flag")
-
 // NewDecoderV2 wraps buf as a V2 decoder. Reads the feature flag
 // + 9 column lengths upfront so subsequent Read* calls are O(1)
 // per value.
@@ -64,10 +62,13 @@ func NewDecoderV2(buf []byte) (*DecoderV2, error) {
 	if len(buf) < 1 {
 		return nil, fmt.Errorf("V2 update: empty buffer")
 	}
-	if buf[0] != 0x00 {
-		return nil, fmt.Errorf("%w: got %#x", ErrV2BadFeatureFlag, buf[0])
+	// The feature flag: yjs's UpdateDecoderV2 reads a varuint and ignores
+	// it (yjs writes 0).
+	_, n, err := lib0.ReadVarUint(buf)
+	if err != nil {
+		return nil, fmt.Errorf("V2 decode feature flag: %w", err)
 	}
-	buf = buf[1:]
+	buf = buf[n:]
 
 	keyClockBytes, n, err := lib0.ReadVarUint8Array(buf)
 	if err != nil {
@@ -194,11 +195,10 @@ func (d *DecoderV2) ReadParentInfo() (bool, error) {
 	return v == 1, err
 }
 
-// ReadTypeRef returns the next TypeRef byte from the type-ref
-// RLE column.
-func (d *DecoderV2) ReadTypeRef() (uint8, error) {
-	v, err := d.typeRef.Read()
-	return uint8(v), err
+// ReadTypeRef returns the next type ref from the type-ref RLE column, as
+// read (DecodeContentV2 checks it).
+func (d *DecoderV2) ReadTypeRef() (uint64, error) {
+	return d.typeRef.Read()
 }
 
 // ReadLen returns the next length value from the length column.

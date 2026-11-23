@@ -25,20 +25,30 @@ listed in the core's entries.
 - clients are written in the order the update holds them;
 - a gap between two sections of one client no longer stops the count;
 - a Skip as the very first struct counts its length, as in yjs;
-- the update's delete set is no longer read, so an update without one, or with a damaged one, still gives its state vector.
+- the update's delete set is no longer read, so an update without one, or with a damaged one, still gives its state vector;
+- its doc comment no longer calls the result a safe state vector for `DiffUpdate`: a leading Skip counts, as in yjs, though applying the update gives a document nothing for it.
+
+Decoding (`ApplyUpdate`, `ApplyUpdateV2` and every update utility) now refuses a shared type ref past 6, as yjs does, and reads the V2 feature flag and an empty struct at clock 2^53 as yjs reads them (Fixed, below).
 
 ### Added
 
 - **V1 <-> V2 conversion**: `ConvertUpdateFormatV1ToV2` and `ConvertUpdateFormatV2ToV1`, yjs's `convertUpdateFormatV1ToV2` / `V2ToV1`. The update is read struct for struct, without building a document, and written in the other format: each client's sections as they come, Skips and empty structs kept, the delete set as read. Store updates as V2 (much smaller for deleted content) and serve V1 to y-websocket and Hocuspocus clients, or the other way round.
 - **`EncodeStateVectorFromUpdateV2`**, yjs's `encodeStateVectorFromUpdateV2`.
 - **`ParseUpdateMeta` / `ParseUpdateMetaV2`**, yjs's `parseUpdateMeta(V2)`: where each client's structs in an update start (`From`) and end (`To`).
-- The differences that come from ygo's content codecs apply to the conversions as to the merges (docs/tech-debt.md): a whole-number float stays a float (yjs writes an integer), an embed or format value that is undefined or a BigInt converts from V2 to V1 as null or a number (yjs throws), legacy `ContentJSON` and a V2 string column split inside a surrogate pair are refused (yjs reads them). A V2 update converts to a V1 update of a few bytes per struct (42 bytes of deleted characters become about 6 MB); a V1 update whose V2 form holds more structs than `V2StructFloor` allows for its length is refused, as `ApplyUpdateV2` would refuse it.
+- The differences that come from ygo's content codecs apply to the conversions as to the merges (docs/tech-debt.md): a whole-number float stays a float (yjs writes an integer), an embed or format value that is undefined or a BigInt converts from V2 to V1 as null or a number (yjs throws), legacy `ContentJSON` and a V2 string column split inside a surrogate pair are refused, by the state vector and meta too (yjs reads them). Clients and clocks above 2^53 are kept exact, where yjs rounds them. A V2 update converts to a V1 update of a few bytes per struct (42 bytes of deleted characters become about 6 MB); a V1 update whose V2 form holds more structs than `V2StructFloor` allows for its length is refused, as `ApplyUpdateV2` would refuse it.
+
+### Fixed
+
+- **A shared type ref past 6 is refused**, as yjs refuses it (its `readContentType` throws). ygo read the refs 7 to 255 as a shared type of no kind yjs knows, and a ref past 255 as its low byte: 256 became an array. Bytes ygo itself stored (`DecodeStoredUpdate`) or encoded from a document (snapshots) keep the refs 7 to 255, so a document that holds one still loads.
+- **The V2 feature flag is read as yjs reads it**: a varuint, ignored. ygo refused anything but a single 0 byte.
+- **An empty struct or client section may start at clock 2^53**, where a run may already end, as yjs reads it. ygo refused it.
 
 ### Tests
 
-- 36 updates written by hand in V1 and V2 (V2 through yjs's encoder, not a conversion): clients ascending, a client in two sections and in two runs from 0, sections with a gap and going backwards, a run not starting at 0, Skips first, later and opening a later client's run, zero-length structs, delete-only, no delete set, a single 0 byte, trailing bytes, repeated, overlapping and zero-length delete ranges, items with and without origins; yjs's conversion both ways (or its error), state vector and meta of each, byte for byte. The same three for the first 16 inputs and the merge of every merge fixture scenario (2,232 more cases).
-- The differential fuzzer delivers a quarter of its events converted from the other format, and compares the state vector and meta of every update a sync, merge or diff sends. 2,000 seeds pass.
-- 9 mutation controls each fail a test.
+- 49 updates written by hand in V1 and V2 (V2 through yjs's encoder, not a conversion): clients ascending, a client in two sections and in two runs from 0, sections with a gap and going backwards, a run not starting at 0, Skips first, later and opening a later client's run, zero-length structs, delete-only, no delete set, a single 0 byte, trailing bytes, repeated, overlapping and zero-length delete ranges, items with and without origins, shared type refs 0, 6, 7 and 256, a V2 feature flag of 1 and an overlong one, negative V2 origin clocks, empty structs at clock 2^53 (also applied, the document's state vector against yjs's); yjs's conversion both ways (or its error), state vector and meta (or their errors) of each, byte for byte. The same three for the first 16 inputs and the merge of every merge fixture scenario (2,232 more cases).
+- The state vector and meta of 36 bytes of V2 holding a million empty arrays hold under 100 MB while they read it (keeping the structs held about 500 MB). Bytes ygo stored with a type ref 7 to 255 still decode.
+- The differential fuzzer delivers a quarter of its events converted from the other format and compares each conversion's bytes, state vector and meta with yjs's before it is applied, and the state vector and meta of every update a sync, merge or diff sends. 2,000 seeds pass.
+- 19 mutation controls each fail a test.
 
 ## [1.52.0] - 2026-11-23
 
