@@ -211,11 +211,12 @@ func integrateContent(txn *doc.TransactionMut, branch *block.Branch, left, right
 // error; yjs instead appends newlines for the missing length, a Quill
 // convention this port does not follow.
 func (t *Text) Format(txn *doc.TransactionMut, idx, length uint64, attrs Attrs) error {
-	// Empty attrs change nothing, but yjs still walks the range and splits
-	// the items at its ends; in a root typed after formatted text arrived
-	// those splits move its search markers (a marker stays on the left
-	// half and moves again when the halves merge), so there the walk runs.
-	if length == 0 || (len(attrs) == 0 && !t.branch.LateText()) {
+	// Empty attrs format nothing, but yjs still walks the range and splits
+	// the items at its ends, so the walk runs for them too: a split inside
+	// a surrogate pair replaces both halves with U+FFFD (the halves merge
+	// back at commit with that content), and in a root typed after
+	// formatted text arrived the splits move its search markers.
+	if length == 0 {
 		return nil
 	}
 	total := t.Length()

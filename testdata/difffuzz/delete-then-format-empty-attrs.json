@@ -1,0 +1,4 @@
+{
+ "note": "Б19 (found by seed 16): after deleting the low half of a surrogate pair, format(2, 1, {}) starts inside the next pair, which yjs's split turns into U+FFFD; the other peers then receive the changed content through the final sync.",
+ "scenario": {"seed":16,"peers":[{"client":7,"gc":true,"undo":false},{"client":3,"gc":true,"undo":false},{"client":2147483647,"gc":false,"undo":false},{"client":9007199254740991,"gc":true,"undo":false}],"steps":[{"k":"txn","ops":[{"root":"t","want":"text","o":"ins","pos":45,"s":"🙂🎉"}]},{"k":"txn","ops":[{"root":"t","want":"text","o":"del","pos":1,"len":1},{"root":"t","want":"text","o":"fmt","pos":8,"len":5,"attrs":[]}]},{"k":"final"}]}
+}

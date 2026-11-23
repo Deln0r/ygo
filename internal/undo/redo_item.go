@@ -147,8 +147,11 @@ func (um *UndoManager) redoMapItem(txn *doc.TransactionMut, item *block.Item, pa
 
 	keyCopy := *item.ParentSub
 	redone := &block.Item{
-		ID:        nextID,
-		Len:       1,
+		ID: nextID,
+		// The item's length, not 1: deleted entries of one key merge where
+		// nothing collects them, and yjs restores the merged item whole
+		// (the key reads its last value).
+		Len:       item.Len,
 		Origin:    origin,
 		Left:      left,
 		Content:   item.Content.Copy(),

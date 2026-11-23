@@ -134,7 +134,8 @@ func (e *XmlElement) GetAttribute(name string) (string, bool) {
 	if item.Content.Kind != block.KindAny || len(item.Content.Anys) == 0 {
 		return "", false
 	}
-	s, ok := item.Content.Anys[0].(string)
+	// The last value, as yjs typeMapGet reads it (see extractValue).
+	s, ok := item.Content.Anys[len(item.Content.Anys)-1].(string)
 	if !ok {
 		return "", false
 	}
@@ -165,7 +166,7 @@ func (e *XmlElement) Attributes() map[string]string {
 		if v.Content.Kind != block.KindAny || len(v.Content.Anys) == 0 {
 			continue
 		}
-		s, ok := v.Content.Anys[0].(string)
+		s, ok := v.Content.Anys[len(v.Content.Anys)-1].(string)
 		if !ok {
 			continue
 		}

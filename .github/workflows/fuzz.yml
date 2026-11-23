@@ -25,6 +25,8 @@ on:
       - "internal/block/**"
       - "internal/types/**"
       - "internal/undo/**"
+      - "internal/difffuzz/**"
+      - "testdata/gen/difffuzz-*.mjs"
       - ".github/workflows/fuzz.yml"
   pull_request:
     branches: [main]
@@ -107,4 +109,37 @@ jobs:
         with:
           name: fuzz-crashers-${{ matrix.func }}
           path: "${{ matrix.pkg }}/testdata/fuzz/**"
+          if-no-files-found: ignore
+
+  differential:
+    # The differential fuzzer against yjs (internal/difffuzz): new seeds every
+    # night, a short run on a change. Seeds start at a base from the run
+    # number, so each night explores seeds no run has tried; a diverging
+    # scenario is shrunk and uploaded.
+    name: differential vs yjs
+    runs-on: ubuntu-latest
+    env:
+      YGO_DIFFFUZZ_REQUIRE: "1"
+      YGO_DIFFFUZZ_SEEDS: ${{ github.event_name == 'schedule' && '30000' || '2000' }}
+      YGO_DIFFFUZZ_OUT: ${{ runner.temp }}/difffuzz
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          # The Node the fixtures job uses: the oracle's yjs runs on its V8.
+          node-version: "26"
+      - name: install yjs and lib0
+        working-directory: testdata/gen
+        run: npm install
+      - name: seeds from ${{ github.run_number }}00000
+        run: YGO_DIFFFUZZ_FROM="${{ github.run_number }}00000" go test -count=1 -timeout 3000s -run '^TestDifferential_Seeds$' .
+      - name: upload diverging scenarios
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: difffuzz-scenarios
+          path: ${{ runner.temp }}/difffuzz/**
           if-no-files-found: ignore

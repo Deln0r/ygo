@@ -18,6 +18,35 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.51.0] - 2026-11-23
+
+**Upgrade impact**: `Text.Format` with no attributes now splits the text at the range's ends, as yjs does: a surrogate pair cut there becomes U+FFFD on that peer, as in yjs, where ygo kept the character and its state bytes differed from yjs's. An undo that brings back a map key or an XML attribute whose deleted values had merged brings back the merged item whole: the key reads its last value, and the client's clock moves on by the item's length, as in yjs.
+
+### Fixed
+
+Both found by the differential fuzzer below.
+
+- **`Text.Format` with empty attributes skipped yjs's splits.** yjs walks the range for empty attributes too and splits the items at both ends; a split inside a surrogate pair replaces both halves with U+FFFD, and the halves merge back at commit with that content, without an update event. ygo returned at once, so after `format(3, 2, {})` over four astral characters it kept them, and its state, and every later update and diff from that peer, differed from yjs's. ygo returned early only outside a root first read as text after formatted text arrived, which already walked.
+- **A map key whose deleted values had merged read, and was restored with, the first value.** Without garbage collection (or while an UndoManager keeps them), deleted writes of one key merge at commit into one item holding every value. An undo that brings that item back restores it whole, and yjs reads a key as the last value of its item (`getContent()[length - 1]`). ygo read the first and restored the item with length 1, so after deleting a key, receiving another peer's newer write of it, deleting that too and undoing, the key held the old value and the next local clock was one behind yjs's.
+  - `Map.Get`, `Map.Range` and the old values of `MapEvent`, and `XmlElement.GetAttribute` and `Attributes`, read the last value of a key's item.
+  - `UndoManager` restores a key's item with its own length.
+
+### Added
+
+- **A differential fuzzer against yjs** (`internal/difffuzz`). A seed gives a scenario of two to five peers with different client IDs (up to 2^53-1), garbage collection on or off, and UndoManagers with explicit capture boundaries. The peers edit text (inserts with and without attributes, formats, embeds, deltas, cuts inside surrogate pairs), arrays, maps, nested types and XML, undo and redo, and exchange updates in V1 and V2: in order, reversed, shuffled, twice, in part or without the earliest (so updates wait in the pending queue), as state diffs, merged and diffed. ygo replays the scenario through its public API and yjs through a Node worker (`testdata/gen/difffuzz-oracle.mjs`), and the runs are compared at every step:
+  - each update event, V1 and V2, byte for byte;
+  - the bytes a sync, merge or diff sends;
+  - in a share of scenarios, the observer events of the array and map (deep) and the text, with their paths and changes;
+  - each touched peer's V1 and V2 state, state vector, pending queue, content and undo stacks;
+  - at the end, that the peers converged wherever yjs's did (yjs's peers can end apart where two of them cut one surrogate pair differently, and ygo's then end apart the same way).
+  - A divergence is shrunk with yjs in the loop and kept in `testdata/difffuzz/`, whose scenarios replay without Node to yjs's traces (`testdata/difffuzz-fixtures.json`, `TestDifferential_Corpus`). CI runs 300 seeds on every push (fixtures job) and 30,000 new seeds every night (`fuzz` workflow, `differential vs yjs`). With the two fixes above, seeds 1 to 30,000 run the same in both.
+
+### Tests
+
+- 4 corpus scenarios: format with empty attributes over a surrogate pair (two shapes), and an undo of merged deleted values of a map key and of an XML attribute.
+- The harness's own tests: a seed gives one scenario and survives JSON; generated steps never fail in ygo; a flipped event byte, a missing and an extra event, changed sent bytes, a changed view, state or pending flag, and a changed, missing or extra observer event are each found at the step they were planted in; a planted divergence shrinks to the one transaction that made it; the worker client refuses a reply for another id, of another schema or without a trace, one that does not come in time, a worker writing to stderr and one exiting with a status.
+- 12 mutation controls each fail a test.
+
 ## [1.50.0] - 2026-11-23
 
 **Upgrade impact**: `MergeUpdates` and `MergeUpdatesV2` return yjs's bytes, content written with ygo's encoders (docs/tech-debt.md lists where those differ). A merge of updates written one edit at a time keeps each edit as its own struct, as yjs's merge does, where the old merge squashed them through a document: for the first 20,000 B4 edits the V1 merge is 154,538 bytes (26,339 before), the V2 merge 20,745 (21,265 before). Applying it gives the same document. `DiffUpdate` copies the update's structs and its whole delete set, so deleted content the update carries stays in the diff, where it was collected before. `MergeUpdatesV2` counts a struct that two inputs repeat twice against its budget, so two identical inputs dense enough to pass max(their bytes, 1,048,576) structs together are refused with `ErrUpdateTooDense`, and both merges return it for inputs that keep a GC and an item tied at one clock for more sorting than 16 comparisons a byte (see Fixed). A subdocument reference whose options are not as yjs writes them is read as yjs reads it, by `ApplyUpdate` too: only `gc: false`, `autoLoad: true` and `meta` are kept, and a string `opts.guid` replaces the GUID.

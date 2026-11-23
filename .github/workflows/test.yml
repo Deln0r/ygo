@@ -537,6 +537,9 @@ jobs:
       - name: regenerate search marker fixtures
         working-directory: testdata/gen
         run: node gen-search-markers.mjs
+      - name: regenerate differential fuzzer corpus fixtures
+        working-directory: testdata/gen
+        run: node gen-difffuzz.mjs
       - name: regenerate reverse (Go encodes → JS decodes) fixtures
         run: go run ./cmd/gen-go-fixtures
       - name: verify no diff
@@ -566,3 +569,20 @@ jobs:
       - name: validate reverse fixtures (JS applies Go-encoded bytes)
         working-directory: testdata/gen
         run: node validate-go-fixtures.mjs
+      - name: differential fuzzer against yjs (300 seeds)
+        # Seeded scenarios replayed in ygo and in yjs (internal/difffuzz,
+        # testdata/gen/difffuzz-oracle.mjs), compared step by step. REQUIRE
+        # makes a missing node or oracle a failure here, not a skip; the
+        # other steps filter tests by name and would not reach this one.
+        env:
+          YGO_DIFFFUZZ_REQUIRE: "1"
+          YGO_DIFFFUZZ_SEEDS: "300"
+          YGO_DIFFFUZZ_OUT: ${{ runner.temp }}/difffuzz
+        run: go test -count=1 -run '^TestDifferential_(Seeds|Corpus)$' .
+      - name: upload diverging scenarios
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: difffuzz-scenarios
+          path: ${{ runner.temp }}/difffuzz/**
+          if-no-files-found: ignore

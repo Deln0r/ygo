@@ -1,0 +1,117 @@
+{
+ "note": "Б20 (found by seed 18466, fixed in 1.51.0): a peer without garbage collection deletes a map key, receives another peer's newer write of the same key (whose origin is the deleted item), deletes it too in the same undo step, and undoes. The two deleted items merged at commit into one item holding both values; yjs restores that item whole (clock advances by 2) and the key reads its last value (null). ygo restored it with length 1 and read the first value.",
+ "scenario": {
+  "seed": 18466,
+  "peers": [
+   {
+    "client": 1,
+    "gc": true,
+    "undo": true
+   },
+   {
+    "client": 101,
+    "gc": true,
+    "undo": true
+   },
+   {
+    "client": 2,
+    "gc": false,
+    "undo": true
+   },
+   {
+    "client": 100,
+    "gc": false,
+    "undo": true
+   }
+  ],
+  "observe": true,
+  "steps": [
+   {
+    "k": "txn",
+    "ops": [
+     {
+      "root": "m",
+      "want": "map",
+      "o": "set",
+      "key": "k2",
+      "v": [
+       "o",
+       [
+        [
+         "a",
+         [
+          "f",
+          -1742.25
+         ]
+        ],
+        [
+         "c",
+         [
+          "i",
+          30
+         ]
+        ]
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "k": "deliver",
+    "to": 3,
+    "order": "part",
+    "n": 5,
+    "r": 2648678195
+   },
+   {
+    "k": "txn",
+    "p": 3,
+    "ops": [
+     {
+      "root": "m",
+      "want": "map",
+      "o": "mdel",
+      "key": "k2"
+     }
+    ]
+   },
+   {
+    "k": "txn",
+    "ops": [
+     {
+      "root": "m",
+      "want": "map",
+      "o": "set",
+      "key": "k2",
+      "v": [
+       "n"
+      ]
+     }
+    ]
+   },
+   {
+    "k": "merge",
+    "to": 3
+   },
+   {
+    "k": "txn",
+    "p": 3,
+    "ops": [
+     {
+      "root": "m",
+      "want": "map",
+      "o": "mdel",
+      "key": "k2"
+     }
+    ]
+   },
+   {
+    "k": "undo",
+    "p": 3
+   },
+   {
+    "k": "final"
+   }
+  ]
+ }
+}

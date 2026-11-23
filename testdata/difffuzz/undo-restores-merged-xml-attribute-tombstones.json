@@ -1,0 +1,13 @@
+{
+ "note": "Б20 for XML attributes (written by hand after seed 18466): a peer without garbage collection removes an element's attribute, receives the other peer's newer value of it, removes that too in the same undo step, and undoes. The two removed values merged at commit; yjs restores the merged item whole and getAttribute reads its last value (\"b\"). ygo read the first (\"a\").",
+ "scenario": {"seed":0,"peers":[{"client":1,"gc":true,"undo":false},{"client":100,"gc":false,"undo":true}],"steps":[
+  {"k":"txn","p":0,"ops":[{"root":"x","want":"xml","o":"insel","pos":0,"s":"p"}]},
+  {"k":"txn","p":0,"ops":[{"root":"x","path":["#0"],"want":"xmlel","o":"setattr","key":"class","s":"a"}]},
+  {"k":"sync","from":0,"to":1},
+  {"k":"txn","p":1,"ops":[{"root":"x","path":["#0"],"want":"xmlel","o":"rmattr","key":"class"}]},
+  {"k":"txn","p":0,"ops":[{"root":"x","path":["#0"],"want":"xmlel","o":"setattr","key":"class","s":"b"}]},
+  {"k":"sync","from":0,"to":1},
+  {"k":"txn","p":1,"ops":[{"root":"x","path":["#0"],"want":"xmlel","o":"rmattr","key":"class"}]},
+  {"k":"undo","p":1},
+  {"k":"final"}]}
+}

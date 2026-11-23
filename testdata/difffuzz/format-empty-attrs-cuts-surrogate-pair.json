@@ -1,0 +1,4 @@
+{
+ "note": "Б19 (found by seed 12, fixed in 1.51.0): format(3, 2, {}) over four astral characters. yjs walks the range for empty attributes too and splits the items at its ends; both ends fall inside a surrogate pair, so the halves become U+FFFD (the split halves merge back at commit with that content, and no update event is emitted). ygo returned early for empty attributes and kept the characters.",
+ "scenario": {"seed":12,"peers":[{"client":7,"gc":true,"undo":false},{"client":3,"gc":true,"undo":false},{"client":4294967301,"gc":true,"undo":false}],"observe":true,"steps":[{"k":"txn","p":1,"ops":[{"root":"t","want":"text","o":"ins","pos":13,"s":"🎉🙂😀🎉"}]},{"k":"txn","p":1,"ops":[{"root":"t","want":"text","o":"fmt","pos":43,"len":2,"attrs":[]}]},{"k":"final"}]}
+}

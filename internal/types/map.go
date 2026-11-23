@@ -301,8 +301,12 @@ func (m *Map) setNested(txn *doc.TransactionMut, key string, inner *block.Branch
 func extractValue(c block.Content) any {
 	switch c.Kind {
 	case block.KindAny:
+		// The last value, as yjs reads a key (getContent()[length - 1]): a
+		// key's item holds one value, but deleted items merge at commit
+		// where nothing collects them (GC off, or kept by an UndoManager),
+		// and an undo restores such a merged item whole.
 		if len(c.Anys) > 0 {
-			return c.Anys[0]
+			return c.Anys[len(c.Anys)-1]
 		}
 	case block.KindString:
 		return c.Str
