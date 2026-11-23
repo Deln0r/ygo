@@ -42,7 +42,7 @@ listed in the core's entries.
 - `CloseDocument` refusals, and a forced close of a y-websocket connection (1001) and of one Hocuspocus document of a socket whose other document keeps working, then a fresh load; an open `Document` holds its document across a disconnect; `Close` waits for an open `Document` (up to its context) and for a write in progress, and refuses the API after it; a panicking `OnChange` still lets the write reach another instance.
 - 80 server writes from four goroutines race 15 clients connecting, editing and leaving (under the race detector, 10 runs): each `Apply` returns only its own update, and the server and the Store end with every item. Forced closes race clients connecting and leaving without a hang.
 - A Hocuspocus session attaching a second key to a document while `CloseDocument` waits for an open `Document` does not deadlock the close (its wait ends when the close shuts its socket); a provider reconnecting after a close gets a fresh admission on the reloaded document; a panicking `OnDisconnect` during a forced close does not stop the server; a panicking `OnLoadDocument` in `OpenDocument` leaves the server usable; a `Document`'s `Close` waits for a call in progress; `Close` wakes an open waiting for a closing document with `ErrServerClosed`, refuses calls on Documents opened before it and drops retained documents.
-- CONTROLS_PLACEHOLDER mutation controls each fail a test.
+- 20 mutation controls each fail a test.
 
 ## [1.51.0] - 2026-11-23
 
