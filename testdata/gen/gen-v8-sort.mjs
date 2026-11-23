@@ -46,5 +46,8 @@ for (const n of sizes) {
     }
   }
 }
-writeFileSync(outPath, JSON.stringify({ node: process.versions.node, v8: process.versions.v8, cases }) + "\n");
+// The engine as major.minor: a patch release of Node 26 (CI takes the
+// latest) keeps V8 14.6's sort, and a change to it shows in the cases.
+const v8 = process.versions.v8.split(".").slice(0, 2).join(".");
+writeFileSync(outPath, JSON.stringify({ v8, cases }) + "\n");
 console.log(`wrote ${cases.length} cases (V8 ${process.versions.v8}) to ${outPath}`);
