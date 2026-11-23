@@ -34,6 +34,7 @@ runs them all and fails if any committed fixture would change.
 | `gen-observers.mjs` | `observer-fixtures.json` | which observers fire, in what order |
 | `gen-update-events.mjs` | `update-event-fixtures.json` | per-transaction `update` / `updateV2` events and diffs against mid-block state vectors |
 | `gen-merge-updates.mjs` | `merge-update-fixtures.json` | `mergeUpdates` / `mergeUpdatesV2` / `diffUpdate` / `diffUpdateV2` outputs, byte for byte |
+| `gen-update-utilities.mjs` | `update-utility-fixtures.json` | `convertUpdateFormatV1ToV2` / `V2ToV1`, `encodeStateVectorFromUpdate(V2)` and `parseUpdateMeta(V2)` of every input and merge of the merge fixtures and of updates written by hand (run after `gen-merge-updates.mjs`) |
 | `gen-difffuzz.mjs` | `difffuzz-fixtures.json` | yjs's trace of each differential fuzzer reproducer in `testdata/difffuzz/` (the interpreter is `difffuzz-lib.mjs`, shared with the worker `difffuzz-oracle.mjs` the Go tests drive) |
 | `gen-v8-sort.mjs` | `v8-sort-fixtures.json` | the order V8's `Array.prototype.sort` leaves with yjs's inconsistent struct comparator (Node 26) |
 

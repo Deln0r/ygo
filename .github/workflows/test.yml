@@ -531,6 +531,9 @@ jobs:
       - name: regenerate merge and diff fixtures
         working-directory: testdata/gen
         run: node gen-merge-updates.mjs
+      - name: regenerate update utility fixtures (after the merge fixtures)
+        working-directory: testdata/gen
+        run: node gen-update-utilities.mjs
       - name: regenerate V8 sort fixtures
         working-directory: testdata/gen
         run: node gen-v8-sort.mjs

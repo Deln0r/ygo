@@ -405,6 +405,9 @@ func decodeUpdateV2Into(buf []byte, maxClients, structBudget int, raw *rawUpdate
 	}
 
 	if raw != nil {
+		if raw.structsOnly {
+			return u, nil
+		}
 		ds, err := readRawDeleteSetV2(dec)
 		if err != nil {
 			return nil, fmt.Errorf("DecodeUpdateV2 delete set: %w", err)

@@ -68,7 +68,10 @@ type Step struct {
 	Order string `json:"order,omitempty"`
 	N     int    `json:"n,omitempty"`
 	R     uint32 `json:"r,omitempty"`
-	Ops   []Op   `json:"ops,omitempty"`
+	// Conv delivers each event converted from the other format
+	// (ConvertUpdateFormatV1ToV2 for a V2 delivery, V2ToV1 for V1).
+	Conv bool `json:"conv,omitempty"`
+	Ops  []Op `json:"ops,omitempty"`
 }
 
 // Target kinds an op wants at the end of its path.

@@ -78,6 +78,9 @@ func compareStep(g, j StepTrace) *Divergence {
 	if g.Sent != j.Sent {
 		return diff("sent", "", g.Sent, j.Sent)
 	}
+	if g.SentSV != j.SentSV || g.SentMeta != j.SentMeta {
+		return diff("sentMeta", "", g.SentSV+" "+g.SentMeta, j.SentSV+" "+j.SentMeta)
+	}
 	if show(g.Depths) != show(j.Depths) {
 		return diff("depths", "", show(g.Depths), show(j.Depths))
 	}

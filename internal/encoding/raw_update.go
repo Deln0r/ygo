@@ -20,6 +20,9 @@ import (
 type rawUpdate struct {
 	stream []Block
 	ds     *rawDeleteSet
+	// structsOnly stops the decoders after the structs: yjs's state vector
+	// and meta of an update read no delete set.
+	structsOnly bool
 }
 
 // rawDeleteSet is yjs readDeleteSet's result: the clients in the order they

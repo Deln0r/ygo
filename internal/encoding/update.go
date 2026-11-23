@@ -408,6 +408,9 @@ func decodeUpdateInto(buf []byte, strs stringMode, raw *rawUpdate) (*Update, []b
 	}
 
 	if raw != nil {
+		if raw.structsOnly {
+			return u, buf, nil
+		}
 		ds, tail, err := decodeRawDeleteSet(buf)
 		if err != nil {
 			return nil, buf, err

@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Deln0r/ygo"
@@ -21,12 +22,16 @@ type Trace struct {
 
 // StepTrace records one step.
 type StepTrace struct {
-	Skip   bool        `json:"skip,omitempty"`
-	Err    string      `json:"err,omitempty"`
-	Result *bool       `json:"result,omitempty"`
-	Sent   string      `json:"sent,omitempty"`
-	Events []Event     `json:"events,omitempty"`
-	Peers  []PeerState `json:"peers,omitempty"`
+	Skip   bool   `json:"skip,omitempty"`
+	Err    string `json:"err,omitempty"`
+	Result *bool  `json:"result,omitempty"`
+	Sent   string `json:"sent,omitempty"`
+	// SentSV and SentMeta are EncodeStateVectorFromUpdate(V2) and
+	// ParseUpdateMeta(V2) of the sent bytes.
+	SentSV   string      `json:"sentSV,omitempty"`
+	SentMeta string      `json:"sentMeta,omitempty"`
+	Events   []Event     `json:"events,omitempty"`
+	Peers    []PeerState `json:"peers,omitempty"`
 	// Obs are the observer events of the step (Scenario.Observe), in the
 	// order the callbacks ran; Batch numbers the callback each came in.
 	Obs []ObsEvent `json:"obs,omitempty"`
@@ -235,7 +240,20 @@ func (r *runner) step(st Step) (out StepTrace) {
 		}
 		for _, i := range deliveryOrder(idx, st) {
 			from.sent[st.To][i] = true
-			if err := apply(to.doc, pick(from.log[i], st.V2), st.V2); err != nil {
+			u := pick(from.log[i], st.V2)
+			if st.Conv {
+				var err error
+				if st.V2 {
+					u, err = ygo.ConvertUpdateFormatV1ToV2(from.log[i].v1)
+				} else {
+					u, err = ygo.ConvertUpdateFormatV2ToV1(from.log[i].v2)
+				}
+				if err != nil {
+					out.Err = "error"
+					break
+				}
+			}
+			if err := apply(to.doc, u, st.V2); err != nil {
 				out.Err = "error"
 				break
 			}
@@ -253,6 +271,7 @@ func (r *runner) step(st Step) (out StepTrace) {
 		}
 		if err == nil {
 			out.Sent = hex.EncodeToString(u)
+			out.SentSV, out.SentMeta = sentMeta(u, st.V2)
 			err = apply(to.doc, u, st.V2)
 		}
 		if err != nil {
@@ -288,6 +307,7 @@ func (r *runner) step(st Step) (out StepTrace) {
 		}
 		if err == nil {
 			out.Sent = hex.EncodeToString(u)
+			out.SentSV, out.SentMeta = sentMeta(u, st.V2)
 			err = apply(to.doc, u, st.V2)
 		}
 		if err != nil {
@@ -954,4 +974,31 @@ func textChange(delta []ygo.DeltaOp) string {
 		out = append(out, op)
 	}
 	return string(anyval.AppendStringify(nil, out))
+}
+
+// sentMeta is the state vector and meta of sent update bytes, as hex and
+// sorted "client:from-to" pairs.
+func sentMeta(u []byte, v2 bool) (string, string) {
+	sv, meta := ygo.EncodeStateVectorFromUpdate, ygo.ParseUpdateMeta
+	if v2 {
+		sv, meta = ygo.EncodeStateVectorFromUpdateV2, ygo.ParseUpdateMetaV2
+	}
+	svb, err := sv(u)
+	if err != nil {
+		return "error", "error"
+	}
+	m, err := meta(u)
+	if err != nil {
+		return hex.EncodeToString(svb), "error"
+	}
+	clients := make([]uint64, 0, len(m.From))
+	for c := range m.From {
+		clients = append(clients, c)
+	}
+	sort.Slice(clients, func(i, j int) bool { return clients[i] < clients[j] })
+	var b strings.Builder
+	for _, c := range clients {
+		fmt.Fprintf(&b, "%d:%d-%d;", c, m.From[c], m.To[c])
+	}
+	return hex.EncodeToString(svb), b.String()
 }

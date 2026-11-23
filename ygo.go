@@ -773,12 +773,65 @@ func mergeUpdatesV2(updates [][]byte, floor int) ([]byte, error) {
 	return out, nil
 }
 
-// EncodeStateVectorFromUpdate computes the state vector a V1 update
-// advances to, directly from the update bytes without reconstructing a
-// document. Mirrors yjs encodeStateVectorFromUpdate: index or diff stored
-// updates server-side without loading the full document into memory.
+// EncodeStateVectorFromUpdate is yjs encodeStateVectorFromUpdate, byte for
+// byte: the state vector a V1 update advances a document to, from the
+// update's structs alone (its delete set is not read). For each run of one
+// client in wire order it counts from clock 0 until a Skip, and writes
+// (client, clock) when the clock is not 0, clients in the order met; a
+// client that starts above 0 is left out, so the result is a safe remote
+// state vector for DiffUpdate. As in yjs, a client whose structs come in two
+// separated runs is written twice (a merged update can be so), and a Skip as
+// the very first struct still counts. Use it to index or diff stored updates
+// without loading a document.
 func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
-	return encoding.EncodeStateVectorFromUpdate(update)
+	return encoding.StateVectorFromUpdateBytes(update, false, 0)
+}
+
+// EncodeStateVectorFromUpdateV2 is EncodeStateVectorFromUpdate for a V2
+// update (yjs encodeStateVectorFromUpdateV2); the state vector is written in
+// the same V1 encoding. The update is read within V2StructFloor's budget.
+func EncodeStateVectorFromUpdateV2(update []byte) ([]byte, error) {
+	return encoding.StateVectorFromUpdateBytes(update, true, encoding.V2StructFloor)
+}
+
+// UpdateMeta is ParseUpdateMeta's result: per client, the clock where an
+// update's structs of that client start (From) and where they end (To).
+type UpdateMeta = encoding.UpdateMeta
+
+// ParseUpdateMeta is yjs parseUpdateMeta: for each run of one client in a
+// V1 update's structs (wire order, Skips included), From holds the clock it
+// starts at and To the clock it ends at; a later run of a client overwrites
+// both. The delete set is not read.
+func ParseUpdateMeta(update []byte) (UpdateMeta, error) {
+	return encoding.ParseUpdateMetaBytes(update, false, 0)
+}
+
+// ParseUpdateMetaV2 is ParseUpdateMeta for a V2 update (yjs
+// parseUpdateMetaV2), read within V2StructFloor's budget.
+func ParseUpdateMetaV2(update []byte) (UpdateMeta, error) {
+	return encoding.ParseUpdateMetaBytes(update, true, encoding.V2StructFloor)
+}
+
+// ConvertUpdateFormatV1ToV2 is yjs convertUpdateFormatV1ToV2: a V1 update
+// written as V2, struct for struct (each client's sections as they come,
+// Skips and empty structs kept) with the delete set as read. Bytes after the
+// delete set are ignored. Content is re-encoded with ygo's codecs (whole-
+// number floats stay floats, where yjs writes integers); legacy ContentJSON
+// is refused. A V2 result holding more structs than V2StructFloor allows for
+// its length is refused, as ApplyUpdateV2 would refuse it, and a zero-length
+// delete range cannot be written in V2 (yjs throws there too).
+func ConvertUpdateFormatV1ToV2(update []byte) ([]byte, error) {
+	return encoding.ConvertUpdateBytes(update, false, true, encoding.V2StructFloor)
+}
+
+// ConvertUpdateFormatV2ToV1 is yjs convertUpdateFormatV2ToV1, the other
+// way. The V2 update is read within V2StructFloor's budget, and its V1 form
+// can be far larger: V2 run-length encodes what V1 writes a struct at a time
+// (42 bytes of deleted characters become about 6 MB). An embed or format
+// value that is undefined or a BigInt is written as null or a number, as
+// ygo's V1 writer writes it (yjs throws).
+func ConvertUpdateFormatV2ToV1(update []byte) ([]byte, error) {
+	return encoding.ConvertUpdateBytes(update, true, false, encoding.V2StructFloor)
 }
 
 // DiffUpdate returns the part of a V1 update that a peer identified by

@@ -18,6 +18,28 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.53.0] - 2026-11-24
+
+**Upgrade impact**: `EncodeStateVectorFromUpdate` now gives yjs's bytes for every update. For updates yjs's encoder writes the result is unchanged. It differs where the old version merged, sorted or stopped where yjs does not:
+- a client whose structs come in two runs, as a merged update can hold them, is now written once per run that counts from 0;
+- clients are written in the order the update holds them;
+- a gap between two sections of one client no longer stops the count;
+- a Skip as the very first struct counts its length, as in yjs;
+- the update's delete set is no longer read, so an update without one, or with a damaged one, still gives its state vector.
+
+### Added
+
+- **V1 <-> V2 conversion**: `ConvertUpdateFormatV1ToV2` and `ConvertUpdateFormatV2ToV1`, yjs's `convertUpdateFormatV1ToV2` / `V2ToV1`. The update is read struct for struct, without building a document, and written in the other format: each client's sections as they come, Skips and empty structs kept, the delete set as read. Store updates as V2 (much smaller for deleted content) and serve V1 to y-websocket and Hocuspocus clients, or the other way round.
+- **`EncodeStateVectorFromUpdateV2`**, yjs's `encodeStateVectorFromUpdateV2`.
+- **`ParseUpdateMeta` / `ParseUpdateMetaV2`**, yjs's `parseUpdateMeta(V2)`: where each client's structs in an update start (`From`) and end (`To`).
+- The differences that come from ygo's content codecs apply to the conversions as to the merges (docs/tech-debt.md): a whole-number float stays a float (yjs writes an integer), an embed or format value that is undefined or a BigInt converts from V2 to V1 as null or a number (yjs throws), legacy `ContentJSON` and a V2 string column split inside a surrogate pair are refused (yjs reads them). A V2 update converts to a V1 update of a few bytes per struct (42 bytes of deleted characters become about 6 MB); a V1 update whose V2 form holds more structs than `V2StructFloor` allows for its length is refused, as `ApplyUpdateV2` would refuse it.
+
+### Tests
+
+- 36 updates written by hand in V1 and V2 (V2 through yjs's encoder, not a conversion): clients ascending, a client in two sections and in two runs from 0, sections with a gap and going backwards, a run not starting at 0, Skips first, later and opening a later client's run, zero-length structs, delete-only, no delete set, a single 0 byte, trailing bytes, repeated, overlapping and zero-length delete ranges, items with and without origins; yjs's conversion both ways (or its error), state vector and meta of each, byte for byte. The same three for the first 16 inputs and the merge of every merge fixture scenario (2,232 more cases).
+- The differential fuzzer delivers a quarter of its events converted from the other format, and compares the state vector and meta of every update a sync, merge or diff sends. 2,000 seeds pass.
+- 9 mutation controls each fail a test.
+
 ## [1.52.0] - 2026-11-23
 
 **Upgrade impact**: on the client path a stored update is now published on the `Backplane` before `OnChange` is called (it was after), so an `OnChange` that panics no longer keeps the update from other instances. `Server.Close` now waits, within its context, for open `Document`s and server writes in progress. `cmd/yserve` and `cmd/ygo-server` are unchanged.

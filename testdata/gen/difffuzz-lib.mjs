@@ -116,6 +116,24 @@ function xmlView(n) {
   return { $xml: children };
 }
 
+// sentMeta mirrors run.go sentMeta: the state vector and meta of sent bytes.
+function sentMeta(u, v2) {
+  let sv;
+  try {
+    sv = toHex(v2 ? Y.encodeStateVectorFromUpdateV2(u) : Y.encodeStateVectorFromUpdate(u));
+  } catch (e) {
+    return ["error", "error"];
+  }
+  let m;
+  try {
+    m = v2 ? Y.parseUpdateMetaV2(u) : Y.parseUpdateMeta(u);
+  } catch (e) {
+    return [sv, "error"];
+  }
+  const clients = Array.from(m.from.keys()).sort((a, b) => a - b);
+  return [sv, clients.map((c) => `${c}:${m.from.get(c)}-${m.to.get(c)};`).join("")];
+}
+
 function resolveTarget(p, op) {
   let cur = { t: p.t, a: p.a, m: p.m, x: p.x }[op.root];
   if (cur === undefined) return null;
@@ -373,7 +391,9 @@ export function run(s) {
           try {
             for (const i of order(idx, st)) {
               from.sent[st.to || 0].add(i);
-              apply(to.doc, st.v2 ? from.log[i].v2 : from.log[i].v1, st.v2);
+              let u = st.v2 ? from.log[i].v2 : from.log[i].v1;
+              if (st.conv) u = st.v2 ? Y.convertUpdateFormatV1ToV2(from.log[i].v1) : Y.convertUpdateFormatV2ToV1(from.log[i].v2);
+              apply(to.doc, u, st.v2);
             }
           } catch (e) { out.err = "error"; }
           touched = [st.to || 0];
@@ -385,6 +405,7 @@ export function run(s) {
             const sv = Y.encodeStateVector(to.doc);
             const u = st.v2 ? Y.encodeStateAsUpdateV2(from.doc, sv) : Y.encodeStateAsUpdate(from.doc, sv);
             out.sent = toHex(u);
+            [out.sentSV, out.sentMeta] = sentMeta(u, st.v2);
             apply(to.doc, u, st.v2);
           } catch (e) { out.err = "error"; }
           touched = [st.to || 0];
@@ -402,6 +423,7 @@ export function run(s) {
               u = st.v2 ? Y.diffUpdateV2(u, sv) : Y.diffUpdate(u, sv);
             }
             out.sent = toHex(u);
+            [out.sentSV, out.sentMeta] = sentMeta(u, st.v2);
             apply(to.doc, u, st.v2);
           } catch (e) { out.err = "error"; }
           touched = [st.to || 0];

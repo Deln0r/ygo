@@ -104,7 +104,7 @@ func (g *gen) step(peers []Peer) Step {
 	case x < 70:
 		a, b := pair()
 		orders := []string{OrderIn, OrderIn, OrderRev, OrderShuf, OrderShuf, OrderDup, OrderPart, OrderPart, OrderLate, OrderLate}
-		return Step{K: StepDeliver, From: a, To: b, V2: g.pick(2) == 0, Order: orders[g.pick(len(orders))], N: g.pick(8), R: g.r.Uint32()}
+		return Step{K: StepDeliver, From: a, To: b, V2: g.pick(2) == 0, Order: orders[g.pick(len(orders))], N: g.pick(8), R: g.r.Uint32(), Conv: g.pick(4) == 0}
 	case x < 76:
 		a, b := pair()
 		return Step{K: StepSync, From: a, To: b, V2: g.pick(2) == 0}
