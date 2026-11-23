@@ -274,7 +274,7 @@ export function run(s) {
           const o = { batch: cur.batch, peer: i, root, path: JSON.stringify(e.path), kind: "", change: "" };
           if (e.target instanceof Y.Map) {
             o.kind = "map";
-            const keys = Array.from(e.changes.keys.entries()).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+            const keys = Array.from(e.changes.keys.entries()).sort((a, b) => byCodePoint(a[0], b[0]));
             o.change = JSON.stringify(keys.map(([key, c]) => canon(c.action === "add" ? { key, action: c.action } : { key, action: c.action, old: eventValue(c.oldValue) })));
           } else if (e.target instanceof Y.Text) {
             o.kind = "text";
