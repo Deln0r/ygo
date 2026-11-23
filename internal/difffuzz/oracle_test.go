@@ -59,7 +59,14 @@ func TestOracle_RefusesBadReplies(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = o.Run(Generate(1), 2*time.Second)
+			// A worker that answers gets time to start under a loaded CI
+			// (race detector and coverage on every package at once); the
+			// one that never answers is the case the deadline is for.
+			timeout := 30 * time.Second
+			if c.name == "no reply" {
+				timeout = 2 * time.Second
+			}
+			_, err = o.Run(Generate(1), timeout)
 			switch {
 			case c.want == "" && err != nil:
 				t.Fatalf("Run: %v", err)

@@ -125,7 +125,6 @@ jobs:
     env:
       YGO_DIFFFUZZ_REQUIRE: "1"
       YGO_DIFFFUZZ_SEEDS: ${{ github.event_name == 'schedule' && '30000' || '2000' }}
-      YGO_DIFFFUZZ_OUT: ${{ runner.temp }}/difffuzz
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -139,6 +138,9 @@ jobs:
         working-directory: testdata/gen
         run: npm install
       - name: seeds from ${{ github.run_number }}00000
+        env:
+          # The runner context is not there at job level.
+          YGO_DIFFFUZZ_OUT: ${{ runner.temp }}/difffuzz
         run: YGO_DIFFFUZZ_FROM="${{ github.run_number }}00000" go test -count=1 -timeout 3000s -run '^TestDifferential_Seeds$' .
       - name: upload diverging scenarios
         if: failure()
