@@ -344,6 +344,14 @@ func DecodeStoredUpdate(buf []byte) (*Update, []byte, error) {
 }
 
 func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
+	return decodeUpdateInto(buf, strs, nil)
+}
+
+// decodeUpdateInto is decodeUpdate that, given raw, also records every
+// struct in wire order (raw.stream) and reads the delete set as written
+// (raw.ds) instead of into u.DeleteSet: the update as yjs's lazy reader
+// and readDeleteSet see it, which merging and diffing bytes need.
+func decodeUpdateInto(buf []byte, strs stringMode, raw *rawUpdate) (*Update, []byte, error) {
 	clientCount, n, err := lib0.ReadVarUint(buf)
 	if err != nil {
 		return nil, buf, err
@@ -394,8 +402,19 @@ func decodeUpdate(buf []byte, strs stringMode) (*Update, []byte, error) {
 			buf = tail
 		}
 		u.Blocks[client] = blocks
+		if raw != nil {
+			raw.stream = append(raw.stream, blocks...)
+		}
 	}
 
+	if raw != nil {
+		ds, tail, err := decodeRawDeleteSet(buf)
+		if err != nil {
+			return nil, buf, err
+		}
+		raw.ds = ds
+		return u, tail, nil
+	}
 	ds, tail, err := DecodeIdSet(buf)
 	if err != nil {
 		return nil, buf, err

@@ -18,6 +18,27 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.50.0] - 2026-11-23
+
+**Upgrade impact**: `MergeUpdates` and `MergeUpdatesV2` return yjs's bytes. A merge of updates written one edit at a time keeps each edit as its own struct, as yjs's merge does, where the old merge squashed them through a document: for the first 20,000 B4 edits the V1 merge is 154,538 bytes (26,339 before), the V2 merge 20,745 (21,265 before). Applying it gives the same document. `DiffUpdate` copies the update's structs and its whole delete set, so deleted content the update carries stays in the diff, where it was collected before. `MergeUpdatesV2` counts a struct that two inputs repeat twice against its budget, so two identical inputs dense enough to pass max(their bytes, 1,048,576) structs together are refused with `ErrUpdateTooDense`.
+
+### Fixed
+
+- **`MergeUpdates` and `DiffUpdate` integrated the updates where yjs merges their bytes.** yjs's `mergeUpdates` reads every input's structs without integrating them, all inputs at once, and writes them as they were written, cutting only what overlaps; its `diffUpdate` copies an update's structs from a state vector on. ygo applied the updates to a scratch document and wrote its state, so consecutive runs came out squashed, GC runs merged, and where three or more updates met at one clock the result was the merge of two at a time.
+  - The merge now runs yjs's loop over any number of inputs (`mergeStreams`). The inputs' structs are read in wire order, with a client's second section, Skips dropped and empty structs kept. Their delete sets are read as written, then merged as `mergeDeleteSets` merges them.
+  - At one clock yjs orders a GC before an item or the other way round depending on which its sort compares first, so which of the two survives depends on V8's `Array.prototype.sort`. ygo ports that sort from V8 14.6 (Node 26, current Chrome), binary insertion below 8 elements and TimSort above, and uses it while such a tie exists; otherwise the inputs are kept in a heap, so a merge of n inputs costs O(log n) a struct, not yjs's sort of every input at every step. Merging the first 20,000 B4 edits, update by update, takes 24-50 ms where yjs takes 3.5-4.2 s; v1.49.0 took 38 ms.
+  - `DiffUpdate` is yjs's `diffUpdate`: a client's first struct past the state vector is cut there (an item cut there keeps its key, as yjs writes it), the rest of that client is copied, Skips included, across adjacent sections, and the delete set is written as read, zero-length ranges and repeated clients included. A nil state vector is still the empty one.
+
+### Added
+
+- **`DiffUpdateV2`**, yjs's `diffUpdateV2`. The update is decoded within its budget, as `DecodeUpdateV2` decodes it, and an output holding more structs than its length pays for is checked to decode.
+
+### Tests
+
+- 122 `merge-update-fixtures.json` scenarios from yjs, each input merged and diffed as V1 and V2 and compared byte for byte with `mergeUpdates`, `mergeUpdatesV2`, `diffUpdate` and `diffUpdateV2`: per-edit updates, two clients interleaved, updates that cover the same clocks in every order, a GC and an item at one clock met by 2 to 100 updates (the sizes around V8's 8-element and 64-element thresholds included), from the first sort and later, raw GC runs, a client in two sections, holes and Skips, rich text, Any values, 70 updates at once, diffs inside a struct, inside a surrogate pair and at a section boundary, a V2 undefined format value, and delete sets with zero-length ranges, clients out of order and a client repeated.
+- `TestV8Sort_Fixtures`: the V8 port against Node 26 on 336 arrays of 1 to 300 elements with yjs's inconsistent comparator. `TestMergeStreams_SameAsSortingEveryStep`: on 3,000 seeded inputs the heap gives the same output as sorting every input at every step, as yjs does. The fixtures job runs on Node 26, whose V8 the port follows: Node 22's V8 12 sorts three to seven elements differently.
+- 18 mutation controls each fail a test.
+
 ## [1.49.0] - 2026-11-22
 
 **Upgrade impact**: a commit now merges deleted and collected runs only where yjs merges them, so a document whose history collected a type after an UndoManager kept and released its subtree can encode a few more GC structs than before, as yjs encodes it. Content is unchanged. A transaction per edit is about three times faster.

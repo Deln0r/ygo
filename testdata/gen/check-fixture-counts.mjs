@@ -47,6 +47,7 @@ const feature = [
   "testdata/event-delta-fixtures.json",
   "testdata/update-event-fixtures.json",
   "testdata/search-marker-fixtures.json",
+  "testdata/merge-update-fixtures.json",
 ].reduce((n, f) => n + count(f), 0);
 const total = v1Forward + v2Forward + reverse + feature;
 

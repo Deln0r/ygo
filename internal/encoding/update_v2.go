@@ -342,6 +342,12 @@ func DecodeOwnUpdateV2(buf []byte) (*Update, error) {
 // the input length bounds the number of clients of a valid update; the
 // structs are what run-length columns compress.
 func decodeUpdateV2(buf []byte, maxClients, structBudget int) (*Update, error) {
+	return decodeUpdateV2Into(buf, maxClients, structBudget, nil)
+}
+
+// decodeUpdateV2Into is decodeUpdateV2 recording the update as yjs's lazy
+// reader sees it, given raw (decodeUpdateInto).
+func decodeUpdateV2Into(buf []byte, maxClients, structBudget int, raw *rawUpdate) (*Update, error) {
 	total := maxClients
 
 	dec, err := NewDecoderV2(buf)
@@ -393,8 +399,19 @@ func decodeUpdateV2(buf []byte, maxClients, structBudget int) (*Update, error) {
 			clock += b.length()
 		}
 		u.Blocks[client] = blocks
+		if raw != nil {
+			raw.stream = append(raw.stream, blocks...)
+		}
 	}
 
+	if raw != nil {
+		ds, err := readRawDeleteSetV2(dec)
+		if err != nil {
+			return nil, fmt.Errorf("DecodeUpdateV2 delete set: %w", err)
+		}
+		raw.ds = ds
+		return u, nil
+	}
 	ds, err := readDeleteSetV2(dec)
 	if err != nil {
 		return nil, fmt.Errorf("DecodeUpdateV2 delete set: %w", err)

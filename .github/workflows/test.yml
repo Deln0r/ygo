@@ -447,7 +447,12 @@ jobs:
           go-version: stable
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          # The fixtures pin Node 26's V8 (14.6): yjs's merge of updates
+          # tied at a GC and an item is ordered by V8's sort, and V8 14
+          # sorts arrays shorter than 8 by binary insertion alone where
+          # V8 12 (Node 22) ran them through TimSort's run detection
+          # (testdata/v8-sort-fixtures.json).
+          node-version: "26"
       - name: install yjs and lib0
         working-directory: testdata/gen
         run: npm install
@@ -523,6 +528,12 @@ jobs:
       - name: regenerate event delta fixtures
         working-directory: testdata/gen
         run: node gen-event-delta.mjs
+      - name: regenerate merge and diff fixtures
+        working-directory: testdata/gen
+        run: node gen-merge-updates.mjs
+      - name: regenerate V8 sort fixtures
+        working-directory: testdata/gen
+        run: node gen-v8-sort.mjs
       - name: regenerate search marker fixtures
         working-directory: testdata/gen
         run: node gen-search-markers.mjs

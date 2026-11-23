@@ -703,20 +703,16 @@ func MissingSV(d *Doc) []byte {
 // A single update comes back as it is, once it decodes, as yjs
 // mergeUpdates returns it.
 //
-// Unlike yjs mergeUpdates, which merges the updates' bytes without
-// integrating them, MergeUpdates integrates them into a scratch document
-// and writes its state: what integrates comes out as the document holds
-// it (one run of a client's consecutive characters, say, where yjs keeps
-// the runs the updates had), and what waits comes out as yjs's merge of
-// the updates two at a time, which can differ from its merge of three or
-// more at once where they cover the same clocks (docs/tech-debt.md).
+// The merge is yjs mergeUpdates's, byte for byte: the updates' structs are
+// merged without integrating them, so each input's runs stay as they were
+// written (a run of one-character updates stays a run of one-character
+// items, where a document would squash them), what overlaps is cut where
+// yjs cuts it, and the delete sets are merged.
 //
-// Used by persistence layers for compaction (Flush) and by transports
-// that want to batch-coalesce updates before sending.
+// For a server or transport that coalesces update bytes without holding
+// a document. ygo's own stores compact with persist.MergeUpdates, which
+// integrates the updates instead.
 func MergeUpdates(updates [][]byte) ([]byte, error) {
-	// Use the persist package's helper directly — the function is
-	// stateless and re-exporting it would create a dependency cycle
-	// between root ygo and persist. Inline the small wrapper here.
 	if len(updates) == 0 {
 		return nil, nil
 	}
@@ -726,23 +722,11 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 		}
 		return append([]byte(nil), updates[0]...), nil
 	}
-	// GC off: a merge carries deleted content, as yjs mergeUpdates does;
-	// whoever applies the result collects it, or keeps it with GC off.
-	d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
-	wtxn := d.WriteTxn()
-	for _, raw := range updates {
-		upd, _, err := encoding.DecodeUpdate(raw)
-		if err != nil {
-			wtxn.Commit()
-			return nil, err
-		}
-		if err := upd.Apply(wtxn); err != nil {
-			wtxn.Commit()
-			return nil, err
-		}
+	out, err := encoding.MergeUpdateBytes(updates, false, 0)
+	if err != nil {
+		return nil, fmt.Errorf("ygo: MergeUpdates: %w", err)
 	}
-	wtxn.Commit()
-	return encoding.EncodeStateAsUpdateWithPending(d), nil
+	return out, nil
 }
 
 // MergeUpdatesV2 is the V2 counterpart of MergeUpdates, with the same
@@ -751,9 +735,11 @@ func MergeUpdates(updates [][]byte) ([]byte, error) {
 // history arrives, and a single update comes back as it is. Returns nil
 // for an empty input.
 //
-// The two formats carry a Skip's length differently - V2 puts it in the
-// rest stream rather than the len column - so the emitters are separate
-// code paths with separate tests.
+// Each input is decoded within its own budget, as DecodeUpdateV2 decodes
+// it, and the inputs together may hold at most max(their bytes,
+// 1,048,576) structs (a struct two inputs repeat counts twice), else
+// ErrUpdateTooDense; a merged update that holds more structs than its
+// length pays for is checked to decode before it is returned.
 func MergeUpdatesV2(updates [][]byte) ([]byte, error) {
 	return mergeUpdatesV2(updates, encoding.V2StructFloor)
 }
@@ -770,43 +756,9 @@ func mergeUpdatesV2(updates [][]byte, floor int) ([]byte, error) {
 		}
 		return append([]byte(nil), updates[0]...), nil
 	}
-	// GC off: a merge carries deleted content, as yjs mergeUpdates does;
-	// whoever applies the result collects it, or keeps it with GC off.
-	// Each input is decoded within its own budget (DecodeUpdateV2), one at
-	// a time; what the merge holds is bounded as one update of all the
-	// inputs' bytes would be: max(their length, V2StructFloor) structs.
-	// Structs an input repeats are not held twice.
-	total := 0
-	for _, raw := range updates {
-		total += len(raw)
-	}
-	held := max(total, floor)
-	d := doc.NewDocWithOptions(doc.Options{DisableGC: true})
-	wtxn := d.WriteTxn()
-	for _, raw := range updates {
-		upd, err := encoding.DecodeUpdateV2Floor(raw, floor)
-		if err != nil {
-			wtxn.Commit()
-			return nil, err
-		}
-		if err := upd.Apply(wtxn); err != nil {
-			wtxn.Commit()
-			return nil, err
-		}
-		if encoding.TxnHeldStructs(wtxn) > held {
-			wtxn.Commit()
-			return nil, fmt.Errorf("ygo: MergeUpdatesV2: the inputs hold more than %d structs: %w", held, ErrUpdateTooDense)
-		}
-	}
-	wtxn.Commit()
-	out := encoding.EncodeStateAsUpdateV2WithPending(d)
-	// The merge must be an update ApplyUpdateV2 takes: merged runs of
-	// byteless structs compress, so the output can hold more structs than
-	// max(its own length, V2StructFloor) though every input did not.
-	if encoding.StateStructBound(d) > max(len(out), floor) {
-		if _, err := encoding.DecodeUpdateV2Floor(out, floor); err != nil {
-			return nil, fmt.Errorf("ygo: MergeUpdatesV2: the merged update: %w", err)
-		}
+	out, err := encoding.MergeUpdateBytes(updates, true, floor)
+	if err != nil {
+		return nil, fmt.Errorf("ygo: MergeUpdatesV2: %w", err)
 	}
 	return out, nil
 }
@@ -821,22 +773,42 @@ func EncodeStateVectorFromUpdate(update []byte) ([]byte, error) {
 
 // DiffUpdate returns the part of a V1 update that a peer identified by
 // remoteSV (a wire-encoded state vector, e.g. from EncodeStateVector or
-// EncodeStateVectorFromUpdate) is missing. Mirrors yjs diffUpdate: trim a
-// stored update before sending it to a peer that already has part of it.
+// EncodeStateVectorFromUpdate) is missing: yjs diffUpdate, byte for byte.
+// Trim a stored update before sending it to a peer that already has part of
+// it.
 //
-// It reconstructs the update's state and diffs against remoteSV, cutting
-// the first block of each client at the remote clock like EncodeDiff, and
-// carries the blocks whose dependencies are absent from the input, as yjs
-// diffUpdate does. The update is integrated first, into a document with
-// garbage collection on, so blocks commit-time squash can merge come out
-// merged, and deleted content comes out as ContentDeleted, where yjs
-// diffUpdate keeps the input's blocks as they are.
+// The update's structs are copied from remoteSV on without integrating
+// them, each client's first one cut at the remote clock, and its delete set
+// whole; deleted content stays as the update carried it. A nil remoteSV is
+// the empty state vector.
 func DiffUpdate(update, remoteSV []byte) ([]byte, error) {
-	d := NewDoc()
-	if err := ApplyUpdate(d, update); err != nil {
+	sv, err := diffStateVector(remoteSV)
+	if err != nil {
 		return nil, err
 	}
-	return EncodeDiff(d, remoteSV)
+	return encoding.DiffUpdateBytes(update, sv, false, 0)
+}
+
+// DiffUpdateV2 is DiffUpdate for a V2 update (yjs diffUpdateV2). The update
+// is decoded within its budget, as DecodeUpdateV2 decodes it, and an output
+// holding more structs than its length pays for is checked to decode.
+func DiffUpdateV2(update, remoteSV []byte) ([]byte, error) {
+	sv, err := diffStateVector(remoteSV)
+	if err != nil {
+		return nil, err
+	}
+	return encoding.DiffUpdateBytes(update, sv, true, encoding.V2StructFloor)
+}
+
+func diffStateVector(remoteSV []byte) (store.StateVector, error) {
+	if len(remoteSV) == 0 {
+		return store.StateVector{}, nil
+	}
+	sv, _, err := encoding.DecodeStateVector(remoteSV)
+	if err != nil {
+		return nil, fmt.Errorf("ygo: DiffUpdate state vector: %w", err)
+	}
+	return sv, nil
 }
 
 // JSONValue returns v as JSON.stringify sees it, for encoding/json: an

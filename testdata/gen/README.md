@@ -33,6 +33,8 @@ runs them all and fails if any committed fixture would change.
 | `gen-rich-text.mjs` | `rich-text-fixtures.json` | rich-text behaviour (deltas, events) |
 | `gen-observers.mjs` | `observer-fixtures.json` | which observers fire, in what order |
 | `gen-update-events.mjs` | `update-event-fixtures.json` | per-transaction `update` / `updateV2` events and diffs against mid-block state vectors |
+| `gen-merge-updates.mjs` | `merge-update-fixtures.json` | `mergeUpdates` / `mergeUpdatesV2` / `diffUpdate` / `diffUpdateV2` outputs, byte for byte |
+| `gen-v8-sort.mjs` | `v8-sort-fixtures.json` | the order V8's `Array.prototype.sort` leaves with yjs's inconsistent struct comparator (Node 26) |
 
 Two more scripts check rather than generate: `validate-go-fixtures.mjs` applies
 the Go-encoded fixtures (written by `go run ./cmd/gen-go-fixtures`) in yjs, and

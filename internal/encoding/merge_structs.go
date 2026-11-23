@@ -51,32 +51,27 @@ func mergeStructs(a, b []Block) []Block {
 // last (0 for a, 1 for b), which decides the order the two readers meet the
 // next client in (mergeQueue).
 func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
-	ca, cb := &structCursor{list: a}, &structCursor{list: b}
-	decs := []*structCursor{ca, cb}
-	out = make([]Block, 0, len(a)+len(b)+1)
+	return mergeStreams([][]Block{a, b})
+}
+
+// mergeStreams is the struct loop of yjs mergeUpdatesV2 for any number of
+// readers (streams[i] is reader i's structs, Skips dropped). It returns the
+// structs to write, Skips included, and which reader ran out last.
+func mergeStreams(streams [][]Block) (out []Block, lastDone int) {
+	n := 0
+	for _, st := range streams {
+		n += len(st)
+	}
+	out = make([]Block, 0, n+1)
+	rs := newMergeReaders(streams)
 	var cw Block // yjs currWrite
 	have := false
 	end := func() uint64 { return blockStartClock(cw) + blockLen(cw) }
 	for {
-		n := 0
-		for _, d := range decs {
-			if d.curr() != nil {
-				decs[n] = d
-				n++
-			} else if d == cb {
-				lastDone = 1
-			} else {
-				lastDone = 0
-			}
-		}
-		decs = decs[:n]
-		if n == 0 {
+		cd, ok := rs.front()
+		if !ok {
 			break
 		}
-		if n == 2 && compareStructs(decs[1].curr(), decs[0].curr()) < 0 {
-			decs[0], decs[1] = decs[1], decs[0]
-		}
-		cd := decs[0]
 		firstClient := blockClient(cd.curr())
 		if have {
 			curr := cd.curr()
@@ -84,7 +79,7 @@ func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
 			// Skip what is already written (yjs compares the clock alone with
 			// a client at least the written one's).
 			for curr != nil && blockStartClock(*curr)+blockLen(*curr) <= end() && blockClient(curr) >= blockClient(&cw) {
-				curr = cd.next()
+				curr = rs.next(cd)
 				iterated = true
 			}
 			if curr == nil || blockClient(curr) != firstClient || (iterated && blockStartClock(*curr) > end()) {
@@ -94,7 +89,7 @@ func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
 			case firstClient != blockClient(&cw):
 				out = append(out, cw)
 				cw = *curr
-				cd.next()
+				rs.next(cd)
 			case end() < blockStartClock(*curr):
 				if cw.Kind == WireBlockSkip {
 					cw.Len = blockStartClock(*curr) + blockLen(*curr) - cw.ID.Clock
@@ -114,22 +109,22 @@ func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
 						// Content that cannot be cut where the written struct
 						// ends (single-element kinds never straddle; a malformed
 						// length can): what is written covers it.
-						cd.next()
+						rs.next(cd)
 						continue
 					}
 				}
 				if !mergeWith(&cw, c) {
 					out = append(out, cw)
 					cw = c
-					cd.next()
+					rs.next(cd)
 				}
 			}
 		} else {
 			cw = *cd.curr()
 			have = true
-			cd.next()
+			rs.next(cd)
 		}
-		for next := cd.curr(); next != nil && blockClient(next) == firstClient && blockStartClock(*next) == end() && next.Kind != WireBlockSkip; next = cd.next() {
+		for next := cd.curr(); next != nil && blockClient(next) == firstClient && blockStartClock(*next) == end() && next.Kind != WireBlockSkip; next = rs.next(cd) {
 			out = append(out, cw)
 			cw = *next
 		}
@@ -137,7 +132,7 @@ func mergeStructsLast(a, b []Block) (out []Block, lastDone int) {
 	if have {
 		out = append(out, cw)
 	}
-	return out, lastDone
+	return out, rs.lastDone
 }
 
 // mergeQueue is mergeStructs of the queue (q) and a leftover (r), client by
