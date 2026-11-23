@@ -28,8 +28,10 @@ type mergeReaders struct {
 	order    []*mergeReader // the order while a tie needs V8's sort; nil otherwise
 	low      int64          // next position for a reader put first
 	ties     map[structKey]*[2]int
-	tied     int // keys holding both a GC and an item
-	calm     int // sorts in a row of the array without a tie
+	tied     int  // keys holding both a GC and an item
+	small    bool // few readers: ties found by looking, not counted
+	pair     bool // two readers: V8's sort of two is one comparison
+	calm     int  // sorts in a row of the array without a tie
 	work     int64
 	budget   int64 // the most work allowed; negative: no bound
 	err      error
@@ -51,7 +53,7 @@ type structKey struct{ client, clock uint64 }
 func (r *mergeReader) curr() *Block { return r.cur.curr() }
 
 func newMergeReaders(streams [][]Block, budget int64) *mergeReaders {
-	rs := &mergeReaders{lastDone: -1, budget: budget}
+	rs := &mergeReaders{lastDone: -1, budget: budget, small: len(streams) <= smallMerge, pair: len(streams) <= 2}
 	for i, st := range streams {
 		r := &mergeReader{idx: i, cur: structCursor{list: st}, pos: int64(i), kind: -1}
 		rs.all = append(rs.all, r)
@@ -62,7 +64,14 @@ func newMergeReaders(streams [][]Block, budget int64) *mergeReaders {
 			rs.lastDone = i
 		}
 	}
-	if rs.tied > 0 {
+	if rs.pair {
+		// Always the array: V8 sorts two by one comparison of the second
+		// with the first, which a tie answers -1, so they swap.
+		rs.order = append([]*mergeReader(nil), rs.heap...)
+		rs.heap = rs.heap[:0]
+		return rs
+	}
+	if rs.tie() {
 		// The first sort meets a tie: the array yjs sorts is the readers in
 		// their order, which a heap ordered by (key, position) cannot stand
 		// for while the comparator is not consistent.
@@ -77,8 +86,41 @@ func newMergeReaders(streams [][]Block, budget int64) *mergeReaders {
 	return rs
 }
 
+// smallMerge is the most readers whose ties are found by comparing their
+// current structs at each sort (the queue's merge has two) rather than
+// counted per (client, clock) as they move, which costs a map entry a
+// struct.
+const smallMerge = 8
+
+// tie reports whether two readers' current structs are a GC and an item at
+// one clock of one client.
+func (rs *mergeReaders) tie() bool {
+	if !rs.small {
+		return rs.tied > 0
+	}
+	for i, a := range rs.all {
+		ab := a.curr()
+		if ab == nil || ab.Kind == WireBlockSkip {
+			continue
+		}
+		for _, b := range rs.all[i+1:] {
+			bb := b.curr()
+			if bb == nil || bb.Kind == WireBlockSkip || (ab.Kind == WireBlockItem) == (bb.Kind == WireBlockItem) {
+				continue
+			}
+			if blockClient(ab) == blockClient(bb) && blockStartClock(*ab) == blockStartClock(*bb) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // track records r's current struct in the tie count.
 func (rs *mergeReaders) track(r *mergeReader) {
+	if rs.small {
+		return
+	}
 	if r.kind >= 0 {
 		if c := rs.ties[r.key]; c != nil {
 			before := c[0] > 0 && c[1] > 0
@@ -146,8 +188,20 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 		}
 		rs.frontR = nil
 	}
+	if rs.pair {
+		o := rs.order
+		if len(o) == 0 {
+			return nil, false
+		}
+		if len(o) == 2 && compareStructs(o[1].curr(), o[0].curr()) < 0 {
+			o[0], o[1] = o[1], o[0]
+		}
+		rs.frontR = o[0]
+		return o[0], true
+	}
+	tied := rs.tie()
 	if rs.order != nil {
-		if rs.tied > 0 {
+		if tied {
 			rs.calm = 0
 		} else {
 			rs.calm++
@@ -155,7 +209,7 @@ func (rs *mergeReaders) front() (*mergeReader, bool) {
 	}
 	// Without a tie the sort is the stable sort of the array as it stands,
 	// so keeping the array is exact too.
-	if rs.tied > 0 || (rs.order != nil && rs.calm <= bits.Len(uint(len(rs.order)))) {
+	if tied || (rs.order != nil && rs.calm <= bits.Len(uint(len(rs.order)))) {
 		if rs.order == nil {
 			// The array yjs sorts: the reader that moved first (lowest
 			// position), the others in the order the last sort left, which
