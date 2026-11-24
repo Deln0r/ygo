@@ -28,7 +28,7 @@ listed in the core's entries.
 - the update's delete set is no longer read, so an update without one, or with a damaged one, still gives its state vector;
 - its doc comment no longer calls the result a safe state vector for `DiffUpdate`: a leading Skip counts, as in yjs, though applying the update gives a document nothing for it.
 
-Decoding (`ApplyUpdate`, `ApplyUpdateV2` and every update utility) now refuses a shared type ref past 6, as yjs does, and reads the V2 feature flag and an empty struct at clock 2^53 as yjs reads them (Fixed, below).
+Decoding an update from outside (`ApplyUpdate`, `ApplyUpdateV2` and every update utility) now refuses a shared type ref past 6, as yjs does; bytes ygo itself stored read as before. The V2 feature flag and an empty struct at clock 2^53 are read as yjs reads them (Fixed, below).
 
 ### Added
 
