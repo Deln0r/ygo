@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -204,6 +205,17 @@ type Options struct {
 	// wraps it) before anything changes. It cannot refuse a write already
 	// committed. It runs on the caller's goroutine, without server locks.
 	OnServerWrite func(ctx context.Context, w ServerWrite) error
+
+	// OnHTTPRequest decides who may use HTTPSyncHandler: it runs for every
+	// request, before its body is read or its document loaded, with the
+	// document's name and whether the request writes (POST). A nil error
+	// lets the request through; an *HTTPError chooses the response's
+	// status, any other error is 403. The WebSocket hooks (OnConnect,
+	// OnAuthenticate) do not cover HTTP requests, so without this hook
+	// HTTPSyncHandler refuses every request (403); an open server passes a
+	// function that returns nil. ReadOnly also applies: a request it marks
+	// read-only may not POST.
+	OnHTTPRequest func(r *http.Request, docName string, write bool) error
 
 	// VersionInterval enables periodic auto-versioning: every
 	// interval, each document that received updates since the last
@@ -1100,6 +1112,15 @@ type docState struct {
 	// while it closes. Guarded by docsMu.
 	closing   chan struct{}
 	closeWake chan struct{}
+
+	// instance is random per loaded copy and revision counts the updates
+	// applied to it after they are (a connection's, the server's own, the
+	// Backplane's), counting those that change only the pending buffer:
+	// together they are HTTPSyncHandler's ETag, which a reload or another
+	// instance never repeats. Bumped after the apply, a revision read before
+	// a snapshot is never newer than the snapshot.
+	instance uint64
+	revision atomic.Uint64
 }
 
 // errDocClosing is returned by getOrCreateDocLocked when CloseDocument
@@ -1233,6 +1254,7 @@ func (s *Server) getOrCreateDocLocked(ctx context.Context, docName string) (*doc
 		doc:       d,
 		awareness: aw,
 		conns:     map[*conn]struct{}{},
+		instance:  rand.Uint64(),
 	}
 	state.backplaneUnsub = backplaneUnsub
 
@@ -1842,6 +1864,11 @@ func (s *Server) writeTimeout() time.Duration {
 // originator's included, is waited for, and a peer that has fallen behind
 // is closed by its own writer.
 func (c *conn) broadcast(envelope []byte) {
+	if isDocumentUpdate(envelope) {
+		// An applied update may change only the pending buffer, which no
+		// commit reports.
+		c.state.revision.Add(1)
+	}
 	for _, peer := range c.state.snapshotConns() {
 		peer.enqueue(envelope)
 	}
@@ -1852,6 +1879,13 @@ func (c *conn) broadcast(envelope []byte) {
 		return
 	}
 	c.onAppliedUpdate(envelope)
+}
+
+// isDocumentUpdate reports whether envelope is a sync SyncStep2 or
+// SyncUpdate message, which carries a document update.
+func isDocumentUpdate(envelope []byte) bool {
+	return len(envelope) >= 2 && envelope[0] == byte(syncpkg.MessageSync) &&
+		(envelope[1] == byte(syncpkg.SyncStep2) || envelope[1] == byte(syncpkg.SyncUpdate))
 }
 
 // broadcastAwarenessRemovals fans out tombstone envelopes for the
@@ -1931,6 +1965,7 @@ func (s *Server) applyBackplaneDoc(state *docState, update []byte) {
 		log.Printf("server: backplane apply for %q: %v", state.name, err)
 		return
 	}
+	state.revision.Add(1)
 	envelope := syncpkg.EncodeSyncUpdate(update)
 	for _, peer := range state.snapshotConns() {
 		peer.enqueue(envelope)

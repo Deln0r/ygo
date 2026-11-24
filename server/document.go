@@ -130,6 +130,77 @@ func (s *Server) pinOnce(ctx context.Context, docName string) (*docState, error)
 	return st, nil
 }
 
+// pinRead pins docName for one HTTP read. A resident document keeps its
+// idle clock and its place among the idle ones (a parked document stays
+// parked); one that is not resident is loaded, and fresh reports that.
+func (s *Server) pinRead(ctx context.Context, docName string) (st *docState, fresh bool, err error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		if err := s.waitNotClosing(ctx, docName, true, nil); err != nil {
+			return nil, false, err
+		}
+		st, fresh, err = s.pinReadOnce(ctx, docName)
+		if errors.Is(err, errDocClosing) {
+			continue
+		}
+		return st, fresh, err
+	}
+}
+
+func (s *Server) pinReadOnce(ctx context.Context, docName string) (*docState, bool, error) {
+	s.docsMu.Lock()
+	defer s.docsMu.Unlock()
+	if s.closed {
+		return nil, false, ErrServerClosed
+	}
+	_, resident := s.docs[docName]
+	st, err := s.getOrCreateDocLocked(ctx, docName)
+	if err != nil {
+		return nil, false, err
+	}
+	st.pins++
+	s.ops.Add(1)
+	return st, !resident, nil
+}
+
+// unpinRead drops pinRead's hold. A document the read loaded that holds
+// nothing (no structs, nothing pending) and that nothing else holds is
+// dropped without parking or a flush, so reads of made-up names do not
+// fill MaxDocs or the idle documents; any other settles as after a
+// connection's visit.
+func (s *Server) unpinRead(st *docState, fresh bool) {
+	s.docsMu.Lock()
+	st.pins--
+	drop := false
+	if fresh && st.pins == 0 && s.docs[st.name] == st && st.closing == nil && !st.retain && st.idleSince.IsZero() {
+		st.connsMu.RLock()
+		n := len(st.conns)
+		st.connsMu.RUnlock()
+		if n == 0 && docHoldsNothing(st.doc) {
+			delete(s.docs, st.name)
+			drop = true
+		}
+	}
+	s.docsMu.Unlock()
+	if drop {
+		if st.backplaneUnsub != nil {
+			st.backplaneUnsub()
+		}
+	} else {
+		s.settle(context.Background(), st)
+	}
+	s.ops.Done()
+}
+
+// docHoldsNothing reports whether d has no structs and nothing pending.
+func docHoldsNothing(d *doc.Doc) bool {
+	t := d.ReadTxn()
+	defer t.Close()
+	return len(t.Store().GetStateVector()) == 0 && !encoding.HasPending(t)
+}
+
 // unpin drops a hold pin took; the last one settles a document without
 // connections as its last disconnect would.
 func (s *Server) unpin(st *docState) {
@@ -248,7 +319,7 @@ func (d *Document) Apply(ctx context.Context, fn func(txn *doc.TransactionMut) e
 	}()
 	var storeErr error
 	if captured != nil {
-		storeErr = s.sendServerUpdate(st, captured)
+		storeErr = s.sendUpdate(st, captured, true)
 	}
 	if panicked {
 		panic(fnPanic)
@@ -288,24 +359,39 @@ func (d *Document) ApplyUpdate(ctx context.Context, update []byte) error {
 			return fmt.Errorf("%w: %w", ErrWriteRefused, err)
 		}
 	}
-	if err := encoding.ApplyUpdateWithOrigin(st.doc, update, &ServerOrigin{DocName: st.name}); err != nil {
+	return d.applyUpdate(update, &ServerOrigin{DocName: st.name})
+}
+
+// applyUpdate applies a checked V1 update with origin and sends it, as
+// given, as a client's update is sent (sendUpdate), also when it adds
+// nothing, as a WebSocket client's update is.
+func (d *Document) applyUpdate(update []byte, origin any) error {
+	s, st := d.s, d.st
+	nothing, err := encoding.UpdateAddsNothing(st.doc, update)
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidUpdate, err)
 	}
-	if err := s.sendServerUpdate(st, append([]byte(nil), update...)); err != nil {
+	if err := encoding.ApplyUpdateWithOrigin(st.doc, update, origin); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidUpdate, err)
+	}
+	if err := s.sendUpdate(st, append([]byte(nil), update...), !nothing); err != nil {
 		return fmt.Errorf("%w: %w", ErrNotStored, err)
 	}
 	return nil
 }
 
-// sendServerUpdate sends an update a server write applied: retained on a
-// server without a Store (see Document.Close), queued to the document's
-// connections, then stored, published and reported (afterUpdate).
-func (s *Server) sendServerUpdate(st *docState, update []byte) error {
-	if s.opts.Store == nil {
+// sendUpdate sends an update applied outside a connection: retained on a
+// server without a Store when it added something (see Document.Close),
+// queued to the document's connections, then stored, published and
+// reported (afterUpdate).
+func (s *Server) sendUpdate(st *docState, update []byte, added bool) error {
+	if added && s.opts.Store == nil {
 		s.docsMu.Lock()
 		st.retain = true
 		s.docsMu.Unlock()
 	}
+	// It may have changed only the pending buffer, which no commit reports.
+	st.revision.Add(1)
 	envelope := syncpkg.EncodeSyncUpdate(update)
 	for _, peer := range st.snapshotConns() {
 		peer.enqueue(envelope)

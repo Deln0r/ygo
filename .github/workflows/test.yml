@@ -302,6 +302,12 @@ jobs:
       - name: run the providers
         working-directory: testdata/e2e
         run: node hocuspocus-server.mjs "$RUNNER_TEMP/hpserver" "$RUNNER_TEMP/yserve"
+      # yjs documents synced over HTTP (HTTPSyncHandler) with fetch, next to a
+      # y-websocket client: the bytes against yjs's own encoder, live
+      # delivery both ways, 304 on an unchanged document.
+      - name: sync over HTTP with yjs
+        working-directory: testdata/e2e
+        run: node http-sync.mjs "$RUNNER_TEMP/hpserver"
 
   hocuspocus:
     name: Go client against Hocuspocus servers

@@ -18,6 +18,33 @@ nested modules too, with the same import paths, tagged with the core's
 version number when they change (`persist/sqlite/v1.47.0`); their changes are
 listed in the core's entries.
 
+## [1.54.0] - 2026-11-24
+
+**Upgrade impact**: on a server without a Store, a server write (`Apply`, `ApplyUpdate`) that adds nothing to the document no longer keeps it resident; one that adds something still does.
+
+### Added
+
+- **Sync over HTTP: `Server.HTTPSyncHandler`**, serving the server's own documents, the ones its WebSocket clients edit.
+  - `GET <doc>?sv=<base64>` returns the document's update for a client at that state vector, pending updates included, the bytes a sync step 2 carries; `v=2` returns V2.
+  - `POST <doc>` applies one V1 update as a client's update is applied: queued to every connection, stored, published, reported to `OnChange`, in a transaction whose origin is a `*HTTPOrigin`. With `sv`, the response is the document's update for that state vector after the write.
+  - Responses carry the server's state vector (`Ygo-State-Vector`) and an `ETag` naming the document's revision; `If-None-Match` with the current one is 304.
+  - `Options.OnHTTPRequest` decides who may read and write (required; an `*HTTPError` chooses the status), `ReadOnly` refuses writes, a browser `Origin` must be the host or match `OriginPatterns`, POST needs `application/octet-stream`, bodies are limited by `ReadLimit`, each request holds one of `MaxConns`, and reads of made-up names do not keep documents resident.
+- **`client.HTTPSync`**: a Go client for it. `Sync` pulls, then pushes only when the document changed locally since the last push or holds structs the server lacks; it polls with the last `ETag`.
+
+### Fixed
+
+- `CloseDocument`'s doc comment said a Hocuspocus document gets the protocol's CLOSE and its socket stays; the socket is closed, as `docs/yserve.md` says.
+
+### Tests
+
+- GET against what a y-websocket client's sync step 2 carries at the same state vector, for every form of `sv`; V2; refused parameters.
+- POST reaching y-websocket and Hocuspocus clients and another instance's client, stored once, `OnChange` once; push and pull in one request.
+- ETags across an insert, a delete-only change, an update that only waits, a reload, and a parked document polled with 304.
+- Refusals before any load (no hook, `OnHTTPRequest`, `HTTPError` status, `ReadOnly`, `Origin`), media type, body size, trailing bytes, names, `MaxDocs` and `MaxConns`; made-up names not kept resident; a parked document left parked without a flush; a Store error; concurrent HTTP and WebSocket writers.
+- `client.HTTPSync`: two documents converge, an idle sync is one 304 and no POST, an empty document's first sync is one GET, a delete is pushed, what was pulled is not pushed back, a new document starts afresh, a refused push (a delete) is retried.
+- CI: yjs documents synced over HTTP with `fetch` (`testdata/e2e/http-sync.mjs`) next to a y-websocket client: pulls equal yjs's `encodeStateAsUpdate(V2)` byte for byte, live delivery both ways, 304 polling, a delete-only push.
+- 22 mutation controls each fail a test.
+
 ## [1.53.0] - 2026-11-24
 
 **Upgrade impact**: `EncodeStateVectorFromUpdate` now gives yjs's bytes for every update. For updates yjs's encoder writes the result is unchanged. It differs where the old version merged, sorted or stopped where yjs does not:

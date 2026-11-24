@@ -478,6 +478,16 @@
 - **What:** `CloseDocument(ctx, name, true)` waits for every connection of the document to be released, and a connection is released on the goroutine its hooks run on, after they return. So the call returns only when ctx ends, and never with a context that never ends, when it comes from: a hook of a Hocuspocus session that holds the document on any of its keys; a y-websocket `OnConnect` for its own document. A y-websocket `OnDisconnect` runs after the release and is not affected.
 - **When to address:** with the session loop above for Hocuspocus; for y-websocket, by running `OnConnect` before admission. Until then, call `CloseDocument` from a hook on its own goroutine.
 
+### HTTP sync: what it does not do (1.54.0)
+
+- **Where:** `server/http_sync.go`.
+- **What:**
+  - POST takes V1 updates only. A V2 body would be converted to V1 before it is applied and sent (connections are sent the bytes as given), and the conversion changes values yjs's V1 cannot carry and grows without a cap; there is no strict V2 validator either.
+  - An ETag belongs to one loaded copy of a document. Without `DocIdleTimeout` a document no client holds is loaded for each request, so polls of it never get 304. A tag from the document's content would survive reloads, but kept per revision it could name a newer state than the body it came with.
+  - No CORS headers; browsers on other origins need the adopter's middleware.
+  - Document names are checked (empty, invalid UTF-8, control characters, over 1,024 bytes) for HTTP requests only; WebSocket requests take whatever `DocNameFn` returns.
+- **When to address:** V2 POST with a strict V2 validator and a bound on the V1 size; content tags if pollers of documents no client holds ask for 304s.
+
 ### Persistence: every SyncUpdate is stored as a separate row
 
 - **Where:** `server/server.go` `(*conn).maybePersist` calls `Store.StoreUpdate` per envelope.

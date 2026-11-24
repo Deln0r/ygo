@@ -269,6 +269,92 @@ err = srv.CloseDocument(ctx, "doc-42", true)
 - A Store error after the write was applied and sent comes back wrapped in
   `ErrNotStored`.
 
+### Sync over HTTP
+
+Since 1.54.0 `HTTPSyncHandler` serves the server's documents to clients that
+pull and push updates with plain requests: cron jobs, serverless functions,
+clients behind proxies that drop WebSockets, scripts. It serves the same
+documents as the WebSocket handlers, so an HTTP write reaches the WebSocket
+clients of the document at once, and their edits are in the next pull.
+
+```go
+srv := server.New(server.Options{
+    Store: store,
+    // Required: the WebSocket hooks do not cover HTTP requests.
+    OnHTTPRequest: func(r *http.Request, docName string, write bool) error {
+        if !validToken(r.Header.Get("Authorization"), docName, write) {
+            return &server.HTTPError{Status: http.StatusUnauthorized, Message: "bad token"}
+        }
+        return nil
+    },
+    DocIdleTimeout: time.Minute, // keeps polled documents resident (ETags)
+})
+mux.Handle("/collab/", srv.Handler())
+mux.Handle("/sync/", srv.HTTPSyncHandler()) // /sync/<doc>
+```
+
+- `GET /sync/<doc>?sv=<base64 state vector>` returns the document's update
+  for a client at that state vector (the whole document without `sv`), with
+  its pending updates, the bytes a sync step 2 carries; `v=2` returns V2. The
+  `Ygo-State-Vector` header is the server's state vector (base64) at that
+  moment.
+- `POST /sync/<doc>` with `Content-Type: application/octet-stream` and one V1
+  update as the body applies it as a client's update: every connection gets
+  it, the Store stores it, the Backplane publishes it, `OnChange` sees it; the
+  transaction's origin is a `*server.HTTPOrigin`. With `?sv=`, the response
+  is 200 with the document's update for that state vector after the write
+  (push and pull in one request), else 204.
+- Every response carries an `ETag` naming the document's revision. A GET
+  with `If-None-Match` set to the last one returns 304 with no body when the
+  document has not changed since. A tag belongs to one loaded copy of the
+  document: without `DocIdleTimeout`, a document no client holds is loaded
+  for each request and every poll is a 200.
+- `sv` is base64, standard or URL-safe, padded or not.
+
+From JavaScript, with yjs and `fetch`:
+
+```js
+const b64 = (u8) => btoa(String.fromCharCode(...u8))
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+
+const sv = b64(Y.encodeStateVector(doc))
+const res = await fetch(`/sync/doc-42?sv=${encodeURIComponent(sv)}`)
+Y.applyUpdate(doc, new Uint8Array(await res.arrayBuffer()))
+const serverSV = unb64(res.headers.get('Ygo-State-Vector'))
+await fetch('/sync/doc-42', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/octet-stream' },
+  body: Y.encodeStateAsUpdate(doc, serverSV),
+})
+```
+
+From Go, `client.HTTPSync` does both and remembers what it last sent and
+received:
+
+```go
+s := &client.HTTPSync{URL: "https://example.com/sync/doc-42", Header: authHeader}
+defer s.Close()
+changed, err := s.Sync(ctx, d) // pull, then push only what the server lacks
+```
+
+- `OnHTTPRequest` runs for every request before its body is read or its
+  document loaded; without it every request is 403. `ReadOnly` applies:
+  a read-only request may GET but not POST.
+- A browser's `Origin` must be the request's host or match `OriginPatterns`,
+  as for WebSocket upgrades, and POST needs `application/octet-stream`,
+  which a cross-site form cannot send. CORS headers are not set: wrap the
+  handler in your CORS middleware to serve other origins (expose
+  `Ygo-State-Vector` and `ETag` to their scripts).
+- A POST body is limited by `ReadLimit` (413), each request holds one of
+  `MaxConns` while it runs, and `MaxDocs` applies (503 with `Retry-After`).
+  A GET of a document that is not resident and holds nothing does not keep
+  it resident, so made-up names do not fill `MaxDocs`.
+- Names are taken as for WebSocket requests (`DocNameFn`); HTTP refuses an
+  empty name, invalid UTF-8, control characters and names over 1,024 bytes.
+- POST takes V1 only; convert V2 first (`ygo.ConvertUpdateFormatV2ToV1`).
+- A Store error after the update was applied and sent is a 500 that says so.
+  Updates are idempotent, so a retry is safe, but `OnChange` sees it again.
+
 ## Operational notes
 
 - **Single-writer storage.** SQLite serializes writes at the file

@@ -1,4 +1,5 @@
-// hpserver exposes the hooks used by the stock-provider interoperability test.
+// hpserver exposes the hooks used by the stock-provider interoperability test,
+// and HTTP sync at /sync/ for http-sync.mjs.
 package main
 
 import (
@@ -27,6 +28,8 @@ func main() {
 			return token == "ro", nil
 		}
 	}
+	// HTTP sync (http-sync.mjs) is open: the fixture checks the protocol.
+	opts.OnHTTPRequest = func(*http.Request, string, bool) error { return nil }
 	var s *server.Server
 	opts.OnStateless = func(name, payload string) { s.SendStateless(name, "reply:"+payload) }
 	s = server.New(opts)
@@ -34,6 +37,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/collab", s.HocuspocusHandler())
 	mux.Handle("/collab/", s.Handler())
+	mux.Handle("/sync/", s.HTTPSyncHandler())
 	mux.Handle("/", s.Handler())
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
