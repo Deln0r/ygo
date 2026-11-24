@@ -335,9 +335,12 @@ func (s *Server) ApplyUpdate(ctx context.Context, docName string, update []byte)
 
 // CloseDocument takes a resident document out of the server. Without force
 // it refuses a document with connections (ErrDocumentHasConnections). With
-// force, its y-websocket connections are closed with 1001 and its
-// Hocuspocus documents get the protocol's Close (the sockets and their other
-// documents stay). It then waits for those connections and any open
+// force, its y-websocket connections and the Hocuspocus sockets holding it
+// are closed with 1001; such a socket's other documents reconnect, as
+// providers do after any drop (docs/tech-debt.md says why one document of a
+// socket is not closed alone). Do not call it from a hook for a document the
+// hook's own connection holds: it would wait until ctx ends. It then waits
+// for those connections and any open
 // Document to go, evicts the document as after its last disconnect
 // (Backplane unsubscribe, final flush; a retained document is dropped) and
 // returns. Connections and OpenDocument calls for the name wait meanwhile
