@@ -257,7 +257,15 @@ err = srv.CloseDocument(ctx, "doc-42", true)
 - A forced `CloseDocument` closes a whole Hocuspocus socket, because only the
   socket's own read loop may release its documents (a frame it is handling
   could otherwise land on the closed copy); the provider reconnects and
-  re-attaches the socket's other documents.
+  re-attaches the socket's other documents. Closing one document with a CLOSE
+  message, as Hocuspocus's `closeConnections` does, is not offered: provider
+  2.15 throws on it, and providers 3.4 and 4.8 stop syncing that document until
+  the application detaches and re-attaches it.
+- Do not call `CloseDocument` from a hook for a document the hook's own
+  connection holds (any document of a Hocuspocus socket, or a y-websocket
+  connection's own document in `OnConnect`): it waits for that connection to
+  be released, which happens after the hook returns, so it returns only when
+  its context ends. Call it on its own goroutine.
 - A Store error after the write was applied and sent comes back wrapped in
   `ErrNotStored`.
 
