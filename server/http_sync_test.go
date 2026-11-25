@@ -1,12 +1,14 @@
 package server_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -364,7 +366,7 @@ func TestHTTPSync_ETagParked(t *testing.T) {
 func TestHTTPSync_Access(t *testing.T) {
 	var loads atomic.Int64
 	_, syncURL, _ := startHTTPServer(t, server.Options{
-		OriginPatterns: []string{"app.example.com"},
+		OriginPatterns: []string{"app.example.com", "https://app2.example.com"},
 		OnLoadDocument: func(string) ([]byte, error) { loads.Add(1); return nil, nil },
 		OnHTTPRequest: func(r *http.Request, name string, write bool) error {
 			switch {
@@ -393,7 +395,7 @@ func TestHTTPSync_Access(t *testing.T) {
 	if r := httpDo(t, "GET", syncURL+"viewer", nil, auth); r.status != 200 {
 		t.Fatalf("read-only GET: %d", r.status)
 	}
-	for origin, status := range map[string]int{"https://evil.example": 403, "https://app.example.com": 200} {
+	for origin, status := range map[string]int{"https://evil.example": 403, "https://app.example.com": 200, "https://app2.example.com": 200, "http://app2.example.com": 403} {
 		h := map[string]string{"Authorization": "Bearer t", "Origin": origin}
 		if r := httpDo(t, "GET", syncURL+"doc", nil, h); r.status != status {
 			t.Fatalf("Origin %s: %d, want %d", origin, r.status, status)
@@ -581,5 +583,51 @@ func TestHTTPSync_Concurrent(t *testing.T) {
 	d.Close()
 	if got := stateItems(t, state); len(got) != 40 {
 		t.Fatalf("%d items", len(got))
+	}
+}
+
+// TestHTTPSync_SlotBeforeBody: a POST past MaxConns is refused before its
+// body is read: the response comes while most of the announced body has not
+// been sent, and the connection is closed.
+func TestHTTPSync_SlotBeforeBody(t *testing.T) {
+	wsURL, syncURL, _ := startHTTPServer(t, server.Options{OnHTTPRequest: openHTTP, MaxConns: 1})
+	c := dialClient(t, wsURL, "doc", 91)
+	defer c.close()
+	syncClient(t, c)
+	u, _ := url.Parse(syncURL)
+	conn, err := net.Dial("tcp", u.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	fmt.Fprintf(conn, "POST /sync/doc HTTP/1.1\r\nHost: %s\r\nContent-Type: application/octet-stream\r\nContent-Length: 1000000\r\n\r\n\x01\x01", u.Host)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("no response before the body: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 || !resp.Close {
+		t.Fatalf("%d, close %v", resp.StatusCode, resp.Close)
+	}
+}
+
+// TestHTTPSync_PanickingOnChangeLetsGo: a POST whose OnChange panics lets
+// the document go, so CloseDocument and Close finish.
+func TestHTTPSync_PanickingOnChangeLetsGo(t *testing.T) {
+	_, syncURL, s := startHTTPServer(t, server.Options{Store: memstore.New(), OnHTTPRequest: openHTTP,
+		OnChange: func(string, []byte) { panic("adopter bug") }})
+	req, _ := http.NewRequest("POST", syncURL+"doc", bytes.NewReader(hpUpdate(t, "x")))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.CloseDocument(ctx, "doc", true); err != nil && !errors.Is(err, server.ErrDocumentNotFound) {
+		t.Fatalf("CloseDocument: %v", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }

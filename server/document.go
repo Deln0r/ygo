@@ -126,69 +126,87 @@ func (s *Server) pinOnce(ctx context.Context, docName string) (*docState, error)
 	}
 	st.pins++
 	st.idleSince = time.Time{}
+	st.readOnlyLoad = false
 	s.ops.Add(1)
 	return st, nil
 }
 
 // pinRead pins docName for one HTTP read. A resident document keeps its
 // idle clock and its place among the idle ones (a parked document stays
-// parked); one that is not resident is loaded, and fresh reports that.
-func (s *Server) pinRead(ctx context.Context, docName string) (st *docState, fresh bool, err error) {
+// parked); one that is not resident is loaded, marked as loaded by a read.
+func (s *Server) pinRead(ctx context.Context, docName string) (*docState, error) {
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		if err := s.waitNotClosing(ctx, docName, true, nil); err != nil {
-			return nil, false, err
+			return nil, err
 		}
-		st, fresh, err = s.pinReadOnce(ctx, docName)
+		st, err := s.pinReadOnce(ctx, docName)
 		if errors.Is(err, errDocClosing) {
 			continue
 		}
-		return st, fresh, err
+		return st, err
 	}
 }
 
-func (s *Server) pinReadOnce(ctx context.Context, docName string) (*docState, bool, error) {
+func (s *Server) pinReadOnce(ctx context.Context, docName string) (*docState, error) {
 	s.docsMu.Lock()
 	defer s.docsMu.Unlock()
 	if s.closed {
-		return nil, false, ErrServerClosed
+		return nil, ErrServerClosed
 	}
 	_, resident := s.docs[docName]
 	st, err := s.getOrCreateDocLocked(ctx, docName)
 	if err != nil {
-		return nil, false, err
+		return nil, err
+	}
+	if !resident {
+		st.readOnlyLoad = true
 	}
 	st.pins++
 	s.ops.Add(1)
-	return st, !resident, nil
+	return st, nil
 }
 
-// unpinRead drops pinRead's hold. A document the read loaded that holds
-// nothing (no structs, nothing pending) and that nothing else holds is
-// dropped without parking or a flush, so reads of made-up names do not
-// fill MaxDocs or the idle documents; any other settles as after a
-// connection's visit.
-func (s *Server) unpinRead(st *docState, fresh bool) {
+// unpinRead drops pinRead's hold. A document that only reads loaded (no
+// connection or write has held it) and that holds nothing (no structs,
+// nothing pending) is dropped, once no read holds it, without parking or a
+// flush, so reads of made-up names do not fill MaxDocs or the idle
+// documents; any other settles as after a connection's visit. A parked
+// document stays parked, and the last read of it lets MaxIdleDocs apply
+// again (a pinned document does not count against it).
+func (s *Server) unpinRead(st *docState) {
+	// Read before docsMu, which is not held across a document's lock; a
+	// connection or write that adds content meanwhile clears readOnlyLoad,
+	// and a Backplane update dropped with the copy is held elsewhere.
+	empty := docHoldsNothing(st.doc)
 	s.docsMu.Lock()
 	st.pins--
 	drop := false
-	if fresh && st.pins == 0 && s.docs[st.name] == st && st.closing == nil && !st.retain && st.idleSince.IsZero() {
+	var victim *docState
+	if st.pins == 0 && s.docs[st.name] == st && st.closing == nil {
 		st.connsMu.RLock()
 		n := len(st.conns)
 		st.connsMu.RUnlock()
-		if n == 0 && docHoldsNothing(st.doc) {
+		switch {
+		case n > 0:
+		case st.readOnlyLoad && !st.retain && st.idleSince.IsZero() && empty:
 			delete(s.docs, st.name)
 			drop = true
+		case !st.idleSince.IsZero() && s.opts.MaxIdleDocs > 0:
+			victim = s.evictOldestIdleLocked(s.opts.MaxIdleDocs)
 		}
 	}
 	s.docsMu.Unlock()
-	if drop {
+	switch {
+	case drop:
 		if st.backplaneUnsub != nil {
 			st.backplaneUnsub()
 		}
-	} else {
+	case victim != nil:
+		s.finishEviction(context.Background(), victim)
+	default:
 		s.settle(context.Background(), st)
 	}
 	s.ops.Done()

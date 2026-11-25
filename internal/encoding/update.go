@@ -2,6 +2,7 @@ package encoding
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/Deln0r/ygo/internal/block"
@@ -753,6 +754,37 @@ func GetPending(t *doc.Transaction) *Pending {
 	}
 	p, _ := s.(*Pending)
 	return p
+}
+
+// PendingFingerprint identifies what the pending buffer holds: the IDs and
+// lengths of its queued blocks, client by client, and its queued delete
+// ranges. It is empty when nothing is pending; two buffers holding the same
+// blocks and ranges give the same bytes.
+func PendingFingerprint(t *doc.Transaction) []byte {
+	p := GetPending(t)
+	if p.IsEmpty() {
+		return nil
+	}
+	clients := make([]uint64, 0, len(p.Blocks))
+	for c := range p.Blocks {
+		clients = append(clients, c)
+	}
+	slices.Sort(clients)
+	buf := lib0.WriteVarUint(nil, uint64(len(clients)))
+	for _, c := range clients {
+		bs := p.Blocks[c]
+		buf = lib0.WriteVarUint(buf, c)
+		buf = lib0.WriteVarUint(buf, uint64(len(bs)))
+		for _, b := range bs {
+			buf = append(buf, byte(b.Kind))
+			buf = lib0.WriteVarUint(buf, blockStartClock(b))
+			buf = lib0.WriteVarUint(buf, blockLen(b))
+		}
+	}
+	if p.DeleteSet != nil {
+		buf = p.DeleteSet.Encode(buf)
+	}
+	return buf
 }
 
 // HasPending reports whether the doc has any queued items awaiting

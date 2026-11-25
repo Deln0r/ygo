@@ -1121,6 +1121,11 @@ type docState struct {
 	// a snapshot is never newer than the snapshot.
 	instance uint64
 	revision atomic.Uint64
+	// readOnlyLoad is set when an HTTP read loaded the document and cleared
+	// when a connection or a write pin takes it: such a document that holds
+	// nothing is dropped when the last read lets it go (unpinRead). Guarded
+	// by docsMu.
+	readOnlyLoad bool
 }
 
 // errDocClosing is returned by getOrCreateDocLocked when CloseDocument
@@ -1451,6 +1456,7 @@ func (s *Server) admitDocumentOnce(ctx context.Context, docName string, ws *webs
 	// across the whole admission), so the idle sweep can never observe a
 	// stale idleSince alongside a live connection.
 	state.idleSince = time.Time{}
+	state.readOnlyLoad = false
 	return c, state, true, nil
 }
 

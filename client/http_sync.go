@@ -23,9 +23,11 @@ import (
 //
 // It watches the document for local changes from the first Sync on (Close
 // stops that), so it pushes only when there is something to push: a local
-// change since the last push, or structs the server's state vector does not
-// cover. It keeps the ETag of the last response it applied and sends it, so
-// a pull of an unchanged document costs a 304. A Sync with another document
+// change since the last push, a pending buffer other than the one last
+// pushed (updates that wait for something, which no change event reports),
+// or structs the server's state vector does not cover. It keeps the ETag of
+// the last response it applied and sends it, so a pull of an unchanged
+// document costs a 304. A Sync with another document, or after URL changed,
 // starts afresh. An HTTPSync is safe for concurrent use; Syncs run one at a
 // time.
 type HTTPSync struct {
@@ -41,9 +43,13 @@ type HTTPSync struct {
 
 	mu       sync.Mutex
 	doc      *doc.Doc
+	syncURL  string
 	unsub    func()
 	etag     string
 	serverSV store.StateVector
+	// pushedPending is the fingerprint of the pending buffer the last push
+	// carried (encoding.PendingFingerprint).
+	pushedPending []byte
 	// current is the origin of the attached document's sync transactions.
 	current atomic.Pointer[HTTPSyncOrigin]
 	dirty   atomic.Bool
@@ -72,6 +78,11 @@ func (h *HTTPSync) Sync(ctx context.Context, d *doc.Doc) (changed bool, err erro
 	origin := h.attach(d)
 	before := h.applied.Load()
 	defer func() { changed = h.applied.Load() != before }()
+	// Checked before the pull, which may integrate what is pending under
+	// this HTTPSync's origin.
+	if !bytes.Equal(pendingFingerprint(d), h.pushedPending) {
+		h.dirty.Store(true)
+	}
 
 	if err := h.pull(ctx, d, origin); err != nil {
 		return false, err
@@ -93,20 +104,20 @@ func (h *HTTPSync) Close() {
 	if h.unsub != nil {
 		h.unsub()
 	}
-	h.doc, h.unsub, h.etag, h.serverSV = nil, nil, "", nil
+	h.doc, h.unsub, h.etag, h.serverSV, h.pushedPending = nil, nil, "", nil, nil
 }
 
 // attach starts watching d, afresh when it is not the document of the last
 // Sync, and returns the origin HTTPSync applies the server's updates in.
 func (h *HTTPSync) attach(d *doc.Doc) *HTTPSyncOrigin {
-	if h.doc == d && h.unsub != nil {
+	if h.doc == d && h.syncURL == h.URL && h.unsub != nil {
 		return h.current.Load()
 	}
 	if h.unsub != nil {
 		h.unsub()
 	}
 	origin := &HTTPSyncOrigin{URL: h.URL}
-	h.doc, h.etag, h.serverSV = d, "", nil
+	h.doc, h.syncURL, h.etag, h.serverSV, h.pushedPending = d, h.URL, "", nil, nil
 	// What the document already holds is pushed; an empty one has nothing.
 	h.dirty.Store(len(stateVectorOf(d)) > 0)
 	h.current.Store(origin)
@@ -156,6 +167,7 @@ func (h *HTTPSync) push(ctx context.Context, d *doc.Doc, origin *HTTPSyncOrigin)
 	t := d.ReadTxn()
 	diff := encoding.EncodeDiffWithPending(d, t, h.serverSV)
 	local := t.Store().GetStateVector()
+	pending := encoding.PendingFingerprint(t)
 	t.Close()
 	u, err := h.url(local, false)
 	if err != nil {
@@ -179,7 +191,11 @@ func (h *HTTPSync) push(ctx context.Context, d *doc.Doc, origin *HTTPSyncOrigin)
 	if err != nil {
 		return err
 	}
-	return h.applyResponse(resp, d, body, false, origin)
+	if err := h.applyResponse(resp, d, body, false, origin); err != nil {
+		return err
+	}
+	h.pushedPending = pending
+	return nil
 }
 
 // applyResponse applies a response's update, then takes its ETag and state
@@ -235,6 +251,12 @@ func (h *HTTPSync) client() *http.Client {
 func statusError(resp *http.Response) error {
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	return &errHTTPStatus{status: resp.StatusCode, body: string(bytes.TrimSpace(msg))}
+}
+
+func pendingFingerprint(d *doc.Doc) []byte {
+	t := d.ReadTxn()
+	defer t.Close()
+	return encoding.PendingFingerprint(t)
 }
 
 func stateVectorOf(d *doc.Doc) store.StateVector {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Deln0r/ygo/client"
 	"github.com/Deln0r/ygo/internal/doc"
+	"github.com/Deln0r/ygo/internal/encoding"
 	"github.com/Deln0r/ygo/internal/types"
 	"github.com/Deln0r/ygo/server"
 )
@@ -188,5 +189,79 @@ func TestHTTPSync_ErrorKeepsLocalChanges(t *testing.T) {
 	mustSync(t, &client.HTTPSync{URL: u}, b)
 	if got := items(b).ToSlice(); fmt.Sprint(got) != "[two]" {
 		t.Fatalf("the delete was lost: %v", got)
+	}
+}
+
+// TestHTTPSync_PendingDeletePushed: a deletion that waits locally for an
+// item the document has not seen (applied from elsewhere, which no change
+// event reports) is pushed, and still holds once the item arrives through
+// the server.
+func TestHTTPSync_PendingDeletePushed(t *testing.T) {
+	u, _ := startHTTPSyncServer(t, nil)
+	// w inserts an item and deletes it; a gets only the deletion.
+	w := doc.NewDocWithOptions(doc.Options{ClientID: 7})
+	push(w, "gone")
+	insert := encoding.EncodeStateAsUpdate(w)
+	sv := encoding.EncodeStateVector(map[uint64]uint64{7: 1}, nil)
+	arr := items(w)
+	txn := w.WriteTxn()
+	arr.Delete(txn, 0, 1)
+	txn.Commit()
+	svDecoded, _, _ := encoding.DecodeStateVector(sv)
+	wt := w.ReadTxn()
+	deletion := encoding.EncodeDiff(w, wt, svDecoded)
+	wt.Close()
+
+	a := doc.NewDoc()
+	if err := encoding.ApplyUpdate(a, deletion); err != nil {
+		t.Fatal(err)
+	}
+	sa := &client.HTTPSync{URL: u}
+	defer sa.Close()
+	mustSync(t, sa, a)
+	// The item reaches the server from someone else; a pulls it.
+	mustSync(t, &client.HTTPSync{URL: u}, docWith(t, insert))
+	mustSync(t, sa, a)
+	mustSync(t, sa, a)
+	b := doc.NewDoc()
+	mustSync(t, &client.HTTPSync{URL: u}, b)
+	if got := items(b).ToSlice(); len(got) != 0 {
+		t.Fatalf("the deletion did not reach the server: %v", got)
+	}
+}
+
+func docWith(t *testing.T, update []byte) *doc.Doc {
+	t.Helper()
+	d := doc.NewDoc()
+	if err := encoding.ApplyUpdate(d, update); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// TestHTTPSync_NewURLStartsAfresh: after URL changes, what was pushed to the
+// old endpoint is pushed to the new one, a deletion included.
+func TestHTTPSync_NewURLStartsAfresh(t *testing.T) {
+	ua, _ := startHTTPSyncServer(t, nil)
+	ub, _ := startHTTPSyncServer(t, nil)
+	a := doc.NewDocWithOptions(doc.Options{ClientID: 9})
+	push(a, "kept")
+	push(a, "deleted")
+	before := encoding.EncodeStateAsUpdate(a)
+	arr := items(a)
+	txn := a.WriteTxn()
+	arr.Delete(txn, 1, 1)
+	txn.Commit()
+	s := &client.HTTPSync{URL: ua}
+	defer s.Close()
+	mustSync(t, s, a)
+	// B holds the structs before the deletion.
+	mustSync(t, &client.HTTPSync{URL: ub}, docWith(t, before))
+	s.URL = ub
+	mustSync(t, s, a)
+	b := doc.NewDoc()
+	mustSync(t, &client.HTTPSync{URL: ub}, b)
+	if got := fmt.Sprint(items(b).ToSlice()); got != "[kept]" {
+		t.Fatalf("B holds %s", got)
 	}
 }

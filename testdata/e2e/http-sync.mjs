@@ -144,3 +144,5 @@ if (failures) {
   process.exit(1)
 }
 console.log('all checks passed')
+// fetch keeps idle connections, which would keep the process alive.
+process.exit(0)

@@ -346,7 +346,9 @@ changed, err := s.Sync(ctx, d) // pull, then push only what the server lacks
   handler in your CORS middleware to serve other origins (expose
   `Ygo-State-Vector` and `ETag` to their scripts).
 - A POST body is limited by `ReadLimit` (413), each request holds one of
-  `MaxConns` while it runs, and `MaxDocs` applies (503 with `Retry-After`).
+  `MaxConns` from before its body is read until it ends (a POST refused
+  before then closes the connection), and `MaxDocs` applies (503 with
+  `Retry-After`).
   A GET of a document that is not resident and holds nothing does not keep
   it resident, so made-up names do not fill `MaxDocs`.
 - Names are taken as for WebSocket requests (`DocNameFn`); HTTP refuses an

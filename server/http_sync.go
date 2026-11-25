@@ -9,7 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"path/filepath"
+	"path"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -97,17 +97,25 @@ func (s *Server) serveHTTPSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// A POST refused before its body is read closes the connection, so the
+	// server does not read the body to keep the connection alive.
+	refuse := func(msg string, status int) {
+		if write {
+			w.Header().Set("Connection", "close")
+		}
+		http.Error(w, msg, status)
+	}
 	name := s.opts.DocNameFn(r)
 	if err := validHTTPDocName(name); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		refuse(err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := checkOrigin(r, s.opts.OriginPatterns); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		refuse(err.Error(), http.StatusForbidden)
 		return
 	}
 	if s.opts.OnHTTPRequest == nil {
-		http.Error(w, "HTTP sync is not enabled (Options.OnHTTPRequest)", http.StatusForbidden)
+		refuse("HTTP sync is not enabled (Options.OnHTTPRequest)", http.StatusForbidden)
 		return
 	}
 	if err := s.opts.OnHTTPRequest(r, name, write); err != nil {
@@ -119,11 +127,11 @@ func (s *Server) serveHTTPSync(w http.ResponseWriter, r *http.Request) {
 		if msg == "" {
 			msg = http.StatusText(status)
 		}
-		http.Error(w, msg, status)
+		refuse(msg, status)
 		return
 	}
 	if write && s.opts.ReadOnly != nil && s.opts.ReadOnly(name, r) {
-		http.Error(w, "read-only", http.StatusForbidden)
+		refuse("read-only", http.StatusForbidden)
 		return
 	}
 	q := r.URL.Query()
@@ -133,36 +141,40 @@ func (s *Server) serveHTTPSync(w http.ResponseWriter, r *http.Request) {
 	case "2":
 		v2 = true
 	default:
-		http.Error(w, "v must be 1 or 2", http.StatusBadRequest)
+		refuse("v must be 1 or 2", http.StatusBadRequest)
 		return
 	}
 	if write && v2 {
-		http.Error(w, "POST takes a V1 update", http.StatusBadRequest)
+		refuse("POST takes a V1 update", http.StatusBadRequest)
 		return
 	}
 	sv, hasSV, err := parseSVParam(q)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		refuse(err.Error(), http.StatusBadRequest)
 		return
 	}
-	var body []byte
 	if write {
 		if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/octet-stream" {
-			http.Error(w, "Content-Type must be application/octet-stream", http.StatusUnsupportedMediaType)
+			refuse("Content-Type must be application/octet-stream", http.StatusUnsupportedMediaType)
 			return
 		}
+	}
+	// The slot is held from before the body is read, so MaxConns bounds the
+	// bodies being read too.
+	if !s.reserveConn() {
+		w.Header().Set("Retry-After", "1")
+		refuse("server connection limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.totalConns.Add(-1)
+	var body []byte
+	if write {
 		var status int
 		if body, status, err = s.readHTTPUpdate(w, r); err != nil {
 			http.Error(w, err.Error(), status)
 			return
 		}
 	}
-	if !s.reserveConn() {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "server connection limit reached", http.StatusServiceUnavailable)
-		return
-	}
-	defer s.totalConns.Add(-1)
 	if write {
 		s.httpPost(w, r, name, body, sv, hasSV)
 		return
@@ -198,14 +210,14 @@ func (s *Server) readHTTPUpdate(w http.ResponseWriter, r *http.Request) ([]byte,
 }
 
 func (s *Server) httpGet(w http.ResponseWriter, r *http.Request, name string, sv store.StateVector, v2 bool) {
-	st, fresh, err := s.pinRead(r.Context(), name)
+	st, err := s.pinRead(r.Context(), name)
 	if err != nil {
 		writeOpenError(w, err)
 		return
 	}
 	tag := st.etag()
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, tag) {
-		s.unpinRead(st, fresh)
+		s.unpinRead(st)
 		w.Header().Set("ETag", tag)
 		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(http.StatusNotModified)
@@ -213,34 +225,40 @@ func (s *Server) httpGet(w http.ResponseWriter, r *http.Request, name string, sv
 	}
 	body, svb := st.snapshot(sv, v2)
 	// The hold ends before the response goes out.
-	s.unpinRead(st, fresh)
+	s.unpinRead(st)
 	writeSnapshot(w, http.StatusOK, tag, body, svb)
 }
 
 func (s *Server) httpPost(w http.ResponseWriter, r *http.Request, name string, update []byte, sv store.StateVector, hasSV bool) {
-	d, err := s.OpenDocument(r.Context(), name)
-	if err != nil {
-		writeOpenError(w, err)
-		return
-	}
-	if err := d.begin(); err != nil {
-		d.Close()
-		writeOpenError(w, err)
-		return
-	}
-	applyErr := d.applyUpdate(update, &HTTPOrigin{DocName: name, Request: r})
 	var tag string
 	var body, svb []byte
-	if applyErr == nil || errors.Is(applyErr, ErrNotStored) {
-		tag = d.st.etag()
-		if hasSV {
-			body, svb = d.st.snapshot(sv, false)
-		} else {
-			svb = d.st.stateVector()
+	// The document is let go (deferred, so a panicking OnChange does not
+	// keep it) before the response is written.
+	applyErr, openErr := func() (applyErr, openErr error) {
+		d, err := s.OpenDocument(r.Context(), name)
+		if err != nil {
+			return nil, err
 		}
+		defer d.Close()
+		if err := d.begin(); err != nil {
+			return nil, err
+		}
+		defer d.end()
+		applyErr = d.applyUpdate(update, &HTTPOrigin{DocName: name, Request: r})
+		if applyErr == nil || errors.Is(applyErr, ErrNotStored) {
+			tag = d.st.etag()
+			if hasSV {
+				body, svb = d.st.snapshot(sv, false)
+			} else {
+				svb = d.st.stateVector()
+			}
+		}
+		return applyErr, nil
+	}()
+	if openErr != nil {
+		writeOpenError(w, openErr)
+		return
 	}
-	d.end()
-	d.Close()
 	switch {
 	case errors.Is(applyErr, ErrNotStored):
 		w.Header().Set("ETag", tag)
@@ -376,7 +394,9 @@ func validHTTPDocName(name string) error {
 
 // checkOrigin applies the WebSocket upgrade's origin rule (coder/websocket
 // authenticateOrigin) to HTTP requests: a request without Origin passes, a
-// browser's must be the request's host or match one of patterns.
+// browser's must be the request's host or match one of patterns, matched
+// against the Origin's host, or its scheme and host when the pattern has
+// "://".
 func checkOrigin(r *http.Request, patterns []string) error {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -390,7 +410,11 @@ func checkOrigin(r *http.Request, patterns []string) error {
 		return nil
 	}
 	for _, p := range patterns {
-		if ok, err := filepath.Match(strings.ToLower(p), strings.ToLower(u.Host)); err == nil && ok {
+		target := u.Host
+		if strings.Contains(p, "://") {
+			target = u.Scheme + "://" + u.Host
+		}
+		if ok, err := path.Match(strings.ToLower(p), strings.ToLower(target)); err == nil && ok {
 			return nil
 		}
 	}
