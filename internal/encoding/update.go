@@ -759,9 +759,9 @@ func GetPending(t *doc.Transaction) *Pending {
 // PendingFingerprint identifies what the pending buffer holds: the IDs and
 // lengths of its queued blocks, client by client, and its queued delete
 // ranges. It is empty when nothing is pending; two buffers holding the same
-// blocks and ranges give the same bytes.
-func PendingFingerprint(t *doc.Transaction) []byte {
-	p := GetPending(t)
+// blocks and ranges give the same bytes. t is a transaction of either kind.
+func PendingFingerprint(t interface{ PendingState() any }) []byte {
+	p, _ := t.PendingState().(*Pending)
 	if p.IsEmpty() {
 		return nil
 	}

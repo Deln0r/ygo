@@ -42,6 +42,13 @@ func (r *statusRecorder) WriteHeader(code int) {
 // of document "doc".
 func startHTTPSyncServer(t *testing.T, auth func(r *http.Request, name string, write bool) error) (string, *httpCounts) {
 	t.Helper()
+	return startHTTPSyncServerHook(t, auth, nil)
+}
+
+// startHTTPSyncServerHook is startHTTPSyncServer calling before ahead of
+// each request.
+func startHTTPSyncServerHook(t *testing.T, auth func(r *http.Request, name string, write bool) error, before func(r *http.Request)) (string, *httpCounts) {
+	t.Helper()
 	if auth == nil {
 		auth = func(*http.Request, string, bool) error { return nil }
 	}
@@ -50,6 +57,9 @@ func startHTTPSyncServer(t *testing.T, auth func(r *http.Request, name string, w
 	mux := http.NewServeMux()
 	h := s.HTTPSyncHandler()
 	mux.Handle("/sync/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if before != nil {
+			before(r)
+		}
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		h.ServeHTTP(rec, r)
 		counts.mu.Lock()
@@ -194,8 +204,8 @@ func TestHTTPSync_ErrorKeepsLocalChanges(t *testing.T) {
 
 // TestHTTPSync_PendingDeletePushed: a deletion that waits locally for an
 // item the document has not seen (applied from elsewhere, which no change
-// event reports) is pushed, and still holds once the item arrives through
-// the server.
+// event reports) is pushed, also when the pull is a 304 that applies
+// nothing, and still holds once the item arrives through the server.
 func TestHTTPSync_PendingDeletePushed(t *testing.T) {
 	u, _ := startHTTPSyncServer(t, nil)
 	// w inserts an item and deletes it; a gets only the deletion.
@@ -212,21 +222,34 @@ func TestHTTPSync_PendingDeletePushed(t *testing.T) {
 	deletion := encoding.EncodeDiff(w, wt, svDecoded)
 	wt.Close()
 
+	// The server holds something else (so the document stays resident), a is
+	// in sync with it, so its next pull is a 304 that applies nothing; the
+	// deletion arrives from elsewhere in between.
+	other := doc.NewDoc()
+	push(other, "other")
+	mustSync(t, &client.HTTPSync{URL: u}, other)
 	a := doc.NewDoc()
-	if err := encoding.ApplyUpdate(a, deletion); err != nil {
-		t.Fatal(err)
-	}
 	sa := &client.HTTPSync{URL: u}
 	defer sa.Close()
 	mustSync(t, sa, a)
-	// The item reaches the server from someone else; a pulls it.
+	if mustSync(t, sa, a) {
+		t.Fatal("the second sync was not a no-op")
+	}
+	if err := encoding.ApplyUpdate(a, deletion); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, sa, a)
+	// The item reaches the server from someone else. The server holds the
+	// deletion already, so it applies there at once, before a syncs again.
 	mustSync(t, &client.HTTPSync{URL: u}, docWith(t, insert))
-	mustSync(t, sa, a)
-	mustSync(t, sa, a)
 	b := doc.NewDoc()
 	mustSync(t, &client.HTTPSync{URL: u}, b)
-	if got := items(b).ToSlice(); len(got) != 0 {
-		t.Fatalf("the deletion did not reach the server: %v", got)
+	if got := fmt.Sprint(items(b).ToSlice()); got != "[other]" {
+		t.Fatalf("the deletion was not pushed: the server shows %v", got)
+	}
+	mustSync(t, sa, a)
+	if got := fmt.Sprint(items(a).ToSlice()); got != "[other]" {
+		t.Fatalf("a holds %v", got)
 	}
 }
 
@@ -263,5 +286,49 @@ func TestHTTPSync_NewURLStartsAfresh(t *testing.T) {
 	mustSync(t, &client.HTTPSync{URL: ub}, b)
 	if got := fmt.Sprint(items(b).ToSlice()); got != "[kept]" {
 		t.Fatalf("B holds %s", got)
+	}
+}
+
+// TestHTTPSync_PendingDeleteDuringPull: a deletion of an unseen item that
+// reaches the document while its pull is in flight, and that the pull's
+// update integrates, is still pushed.
+func TestHTTPSync_PendingDeleteDuringPull(t *testing.T) {
+	w := doc.NewDocWithOptions(doc.Options{ClientID: 8})
+	push(w, "gone")
+	insert := encoding.EncodeStateAsUpdate(w)
+	arr := items(w)
+	txn := w.WriteTxn()
+	arr.Delete(txn, 0, 1)
+	txn.Commit()
+	wt := w.ReadTxn()
+	deletion := encoding.EncodeDiff(w, wt, map[uint64]uint64{8: 1})
+	wt.Close()
+
+	a := doc.NewDoc()
+	var once sync.Once
+	var armed atomic.Bool
+	u, _ := startHTTPSyncServerHook(t, nil, func(r *http.Request) {
+		if r.Method == http.MethodGet && armed.Load() {
+			once.Do(func() {
+				if err := encoding.ApplyUpdate(a, deletion); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+	})
+	// The server holds the item; a pulls it while the deletion arrives.
+	mustSync(t, &client.HTTPSync{URL: u}, docWith(t, insert))
+	sa := &client.HTTPSync{URL: u}
+	defer sa.Close()
+	armed.Store(true)
+	mustSync(t, sa, a)
+	mustSync(t, sa, a)
+	if got := items(a).ToSlice(); len(got) != 0 {
+		t.Fatalf("a holds %v", got)
+	}
+	b := doc.NewDoc()
+	mustSync(t, &client.HTTPSync{URL: u}, b)
+	if got := items(b).ToSlice(); len(got) != 0 {
+		t.Fatalf("the deletion did not reach the server: %v", got)
 	}
 }

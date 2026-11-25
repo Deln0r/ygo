@@ -41,9 +41,9 @@ listed in the core's entries.
 - POST reaching y-websocket and Hocuspocus clients and another instance's client, stored once, `OnChange` once; push and pull in one request.
 - ETags across an insert, a delete-only change, an update that only waits, a reload, and a parked document polled with 304.
 - Refusals before any load (no hook, `OnHTTPRequest`, `HTTPError` status, `ReadOnly`, `Origin` with and without a scheme), media type, body size, trailing bytes, names, `MaxDocs` and `MaxConns`, a POST past `MaxConns` answered before its body arrives; made-up names not kept resident, also when two reads overlap; a parked document left parked without a flush, and `MaxIdleDocs` applied when a read of one ends; a Store error; a panicking `OnChange` letting the document go; concurrent HTTP and WebSocket writers.
-- `client.HTTPSync`: two documents converge, an idle sync is one 304 and no POST, an empty document's first sync is one GET, a delete is pushed, a deletion waiting for an unseen item is pushed and holds once the item arrives, what was pulled is not pushed back, a new document or URL starts afresh, a refused push (a delete) is retried.
+- `client.HTTPSync`: two documents converge, an idle sync is one 304 and no POST, an empty document's first sync is one GET, a delete is pushed, a deletion waiting for an unseen item is pushed (also when the pull is a 304, and when it arrives while a pull is in flight and the pull integrates it) and holds once the item arrives, what was pulled is not pushed back, a new document or URL starts afresh, a refused push (a delete) is retried.
 - CI: yjs documents synced over HTTP with `fetch` (`testdata/e2e/http-sync.mjs`) next to a y-websocket client: pulls equal yjs's `encodeStateAsUpdate(V2)` byte for byte, live delivery both ways, 304 polling, a delete-only push.
-- 29 mutation controls each fail a test.
+- 30 mutation controls each fail a test.
 
 ## [1.53.0] - 2026-11-24
 

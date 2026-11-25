@@ -118,8 +118,7 @@ func (h *HTTPSync) attach(d *doc.Doc) *HTTPSyncOrigin {
 	}
 	origin := &HTTPSyncOrigin{URL: h.URL}
 	h.doc, h.syncURL, h.etag, h.serverSV, h.pushedPending = d, h.URL, "", nil, nil
-	// What the document already holds is pushed; an empty one has nothing.
-	h.dirty.Store(len(stateVectorOf(d)) > 0)
+	h.dirty.Store(false)
 	h.current.Store(origin)
 	h.unsub = d.OnUpdate(func(_ []byte, o any) {
 		if o == any(origin) {
@@ -128,6 +127,11 @@ func (h *HTTPSync) attach(d *doc.Doc) *HTTPSyncOrigin {
 		}
 		h.dirty.Store(true)
 	})
+	// Sampled after the watch is on, so a change in between is not missed:
+	// what the document already holds is pushed; an empty one has nothing.
+	if len(stateVectorOf(d)) > 0 {
+		h.dirty.Store(true)
+	}
 	return origin
 }
 
@@ -201,13 +205,7 @@ func (h *HTTPSync) push(ctx context.Context, d *doc.Doc, origin *HTTPSyncOrigin)
 // applyResponse applies a response's update, then takes its ETag and state
 // vector, so they advance only once the update is in.
 func (h *HTTPSync) applyResponse(resp *http.Response, d *doc.Doc, body []byte, v2 bool, origin *HTTPSyncOrigin) error {
-	var err error
-	if v2 {
-		err = encoding.ApplyUpdateV2WithOrigin(d, body, origin)
-	} else {
-		err = encoding.ApplyUpdateWithOrigin(d, body, origin)
-	}
-	if err != nil {
+	if err := h.apply(d, body, v2, origin); err != nil {
 		return fmt.Errorf("client: HTTP sync: apply the server's update: %w", err)
 	}
 	if raw, err := base64.StdEncoding.DecodeString(resp.Header.Get("Ygo-State-Vector")); err == nil {
@@ -217,6 +215,31 @@ func (h *HTTPSync) applyResponse(resp *http.Response, d *doc.Doc, body []byte, v
 	}
 	h.etag = resp.Header.Get("ETag")
 	return nil
+}
+
+// apply applies the server's update in a transaction of origin. Under the
+// same lock it checks the pending buffer first: an update from elsewhere
+// waiting there that was not pushed may be integrated by this one, under
+// this origin, which the watch does not count as a local change.
+func (h *HTTPSync) apply(d *doc.Doc, body []byte, v2 bool, origin *HTTPSyncOrigin) error {
+	var upd *encoding.Update
+	var err error
+	if v2 {
+		upd, err = encoding.DecodeUpdateV2(body)
+	} else {
+		upd, _, err = encoding.DecodeUpdate(body)
+	}
+	if err != nil {
+		return err
+	}
+	txn := d.WriteTxn()
+	txn.Origin = origin
+	txn.Local = false
+	defer txn.Commit()
+	if fp := encoding.PendingFingerprint(txn); len(fp) > 0 && !bytes.Equal(fp, h.pushedPending) {
+		h.dirty.Store(true)
+	}
+	return upd.Apply(txn)
 }
 
 func (h *HTTPSync) url(sv store.StateVector, v2 bool) (string, error) {
